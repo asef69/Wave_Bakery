@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { getMathematicalSignal } from "./signals";
-import { getIdealDishSignal } from "./pipeline";
+import { getIdealDishSignal, getOrSaveExpectedSignal } from "./pipeline";
+import { api, type SubmitResult } from "./api";
 
 export * from "./signals";
 export * from "./pipeline";
+export * from "./api";
 
 export type PipelineStep =
   | "GENERATE"
@@ -657,6 +659,14 @@ export interface RecipeRunSession {
   startTime: number;
   endTime?: number;
   isCompleted: boolean;
+  backendSessionId?: string;
+  backendSeed?: number;
+  backendSubmitResult?: SubmitResult;
+  seasonGain?: number;
+  seasonFreq?: number;
+  marinateTime?: number;
+  cookingAppliance?: string;
+  cookingPos?: number;
   filteringAccuracy?: number;
   mixingAccuracy?: number;
   seasoningAccuracy?: number;
@@ -667,6 +677,9 @@ export interface RecipeRunSession {
 
 export function startRecipeRun(recipeId: string, difficulty: RecipeDifficulty) {
   if (typeof window !== "undefined") {
+    // Ensure target expected signal is precomputed and persisted for the recipe
+    getOrSaveExpectedSignal(recipeId);
+
     const config = DIFFICULTY_CONFIGS[difficulty];
     const session: RecipeRunSession = {
       recipeId,
@@ -677,6 +690,66 @@ export function startRecipeRun(recipeId: string, difficulty: RecipeDifficulty) {
     };
     window.localStorage.setItem("wavebakery_recipe_session", JSON.stringify(session));
     window.dispatchEvent(new Event("wavebakery_session_changed"));
+
+    // Connect to backend session asynchronously
+    const chefName = getChefName() || "Chef Fourier";
+    api.ensureAuthenticated(chefName)
+      .then(() => api.createSession(recipeId))
+      .then((backendSession) => {
+        const stored = window.localStorage.getItem("wavebakery_recipe_session");
+        if (stored) {
+          const current: RecipeRunSession = JSON.parse(stored);
+          if (current.recipeId === recipeId && !current.isCompleted) {
+            current.backendSessionId = backendSession.id;
+            current.backendSeed = backendSession.seed;
+            window.localStorage.setItem("wavebakery_recipe_session", JSON.stringify(current));
+            window.dispatchEvent(new Event("wavebakery_session_changed"));
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn("Could not create backend session (using local fallback):", err);
+      });
+  }
+}
+
+export function updateRecipeRunSession(partial: Partial<RecipeRunSession>) {
+  if (typeof window !== "undefined") {
+    try {
+      const stored = window.localStorage.getItem("wavebakery_recipe_session");
+      if (stored) {
+        const current: RecipeRunSession = JSON.parse(stored);
+        const updated = { ...current, ...partial };
+        window.localStorage.setItem("wavebakery_recipe_session", JSON.stringify(updated));
+        window.dispatchEvent(new Event("wavebakery_session_changed"));
+      }
+    } catch {
+      // ignore
+    }
+  }
+}
+
+export async function syncSessionParamsToBackend(recipeId?: string): Promise<void> {
+  const session = getRecipeRunSession();
+  if (!session || !session.backendSessionId) return;
+  const activeRecipe = recipeId ? recipes.find((r) => r.id === recipeId) : getActiveRecipe();
+  if (!activeRecipe) return;
+
+  const appliance = session.cookingAppliance || activeRecipe.cookingMethod.id;
+  const payload = {
+    season_gain: session.seasonGain ?? activeRecipe.seasoningTarget.amplitude,
+    season_freq: session.seasonFreq ?? activeRecipe.seasoningTarget.frequency,
+    marinate_time: session.marinateTime ?? activeRecipe.marinateTarget.timeScale,
+    appliances: [appliance],
+    fry_temp: 180,
+    bake_time: 20,
+    boil_power: 80,
+  };
+
+  try {
+    await api.setParams(session.backendSessionId, payload);
+  } catch (err) {
+    console.warn("Could not sync cooking params to backend session:", err);
   }
 }
 

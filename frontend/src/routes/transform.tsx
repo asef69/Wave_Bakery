@@ -12,6 +12,8 @@ import {
   recipes,
   recordStageAccuracy,
   savePipelineStageSignal,
+  syncSessionParamsToBackend,
+  updateRecipeRunSession,
   useActiveRecipe,
   usePipelineStageSignal,
   useRecipeProgress,
@@ -163,8 +165,14 @@ function SeasoningLab() {
       if (done) unlock(5);
       savePipelineStageSignal(recipe.id, "seasoned", playerSeasoned);
       recordStageAccuracy("seasoning", accuracy);
+      updateRecipeRunSession({
+        seasonGain: amp,
+        seasonFreq: freq,
+        seasoningAccuracy: accuracy,
+      });
+      syncSessionParamsToBackend(recipe.id);
     }
-  }, [done, unlockedStep, playerSeasoned, recipe.id, unlock, accuracy]);
+  }, [done, unlockedStep, playerSeasoned, recipe.id, unlock, accuracy, amp, freq]);
 
   const chefLine = done
     ? "Perfect! The signal has just the right flavor character."

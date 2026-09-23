@@ -12,6 +12,8 @@ import {
   recipes,
   recordStageAccuracy,
   savePipelineStageSignal,
+  syncSessionParamsToBackend,
+  updateRecipeRunSession,
   useActiveRecipe,
   usePipelineStageSignal,
   useRecipeProgress,
@@ -159,8 +161,13 @@ function MarinatingLab() {
       if (done) unlock(6);
       savePipelineStageSignal(recipe.id, "marinated", playerMarinated);
       recordStageAccuracy("marinating", accuracy);
+      updateRecipeRunSession({
+        marinateTime: timeScale,
+        marinatingAccuracy: accuracy,
+      });
+      syncSessionParamsToBackend(recipe.id);
     }
-  }, [done, unlockedStep, playerMarinated, recipe.id, unlock, accuracy]);
+  }, [done, unlockedStep, playerMarinated, recipe.id, unlock, accuracy, timeScale]);
 
   const chefLine = done
     ? "That feels properly marinated! The waveform aligns with the target timing."

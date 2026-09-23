@@ -12,8 +12,11 @@ import { generateCustomerCritique } from "@/lib/critiques";
 import { computeSignalSimilarity } from "@/lib/dsp";
 import { addLeaderboardEntry } from "@/lib/leaderboard";
 import {
+  api,
   completeRecipeRun,
   getIdealDishSignal,
+  type SubmitResult,
+  updateRecipeRunSession,
   useActiveRecipe,
   useChefName,
   useCookedSignal,
@@ -57,6 +60,11 @@ function ScoreScreen() {
   const targetSignal = useMemo(() => getIdealDishSignal(recipe.id), [recipe.id]);
   const [audioPlayer, setAudioPlayer] = useState<SignalAudioPlayer | null>(null);
 
+  const [backendSubmitResult, setBackendSubmitResult] = useState<SubmitResult | null>(
+    () => session?.backendSubmitResult ?? null,
+  );
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   useEffect(() => {
     return () => {
       if (audioPlayer) audioPlayer.destroy();
@@ -77,9 +85,25 @@ function ScoreScreen() {
   useEffect(() => {
     unlock(8);
     completeRecipeRun();
-  }, [unlock]);
 
-  // Compute real signal similarity
+    // Submit to server-authoritative backend
+    if (session?.backendSessionId && !backendSubmitResult) {
+      setIsSubmitting(true);
+      api.submitSession(session.backendSessionId)
+        .then((result) => {
+          setBackendSubmitResult(result);
+          updateRecipeRunSession({ backendSubmitResult: result });
+        })
+        .catch((err) => {
+          console.warn("Backend session submit error (falling back to client scoring):", err);
+        })
+        .finally(() => {
+          setIsSubmitting(false);
+        });
+    }
+  }, [session?.backendSessionId, backendSubmitResult, unlock]);
+
+  // Compute local fallback signal similarity
   const rawSimilarity = useMemo(() => {
     return computeSignalSimilarity(cookedSignal.samples, targetSignal.samples);
   }, [cookedSignal.samples, targetSignal.samples]);
@@ -96,21 +120,43 @@ function ScoreScreen() {
   const deliveryVal = session?.deliveryAccuracy ?? null;
   const deliveryBonus = deliveryVal !== null ? Math.round((deliveryVal / 100) * 150) : 0;
 
+  // Authoritative server values vs fallback
+  const displayScore = backendSubmitResult ? Math.round(backendSubmitResult.score) : null;
+  const displayStars = backendSubmitResult
+    ? "★ ".repeat(backendSubmitResult.stars) + "☆ ".repeat(Math.max(0, 5 - backendSubmitResult.stars))
+    : similarity >= 90
+      ? "★ ★ ★"
+      : similarity >= 75
+        ? "★ ★ ☆"
+        : "★ ☆ ☆";
+  const displaySimilarity = backendSubmitResult?.spectral_similarity != null
+    ? Math.max(0, Math.min(100, Math.round(backendSubmitResult.spectral_similarity * 100)))
+    : similarity;
+
+  const playerSamples = backendSubmitResult?.player_dish?.plot && backendSubmitResult.player_dish.plot.length > 0
+    ? backendSubmitResult.player_dish.plot
+    : cookedSignal.samples;
+
+  const targetSamples = backendSubmitResult?.target?.plot && backendSubmitResult.target.plot.length > 0
+    ? backendSubmitResult.target.plot
+    : targetSignal.samples;
+
   // Generate dynamic customer critique
   const customerCritique = useMemo(() => {
     return generateCustomerCritique({
       recipeId: recipe.id,
-      similarity,
-      filteringAccuracy: filteringVal,
-      mixingAccuracy: mixingVal,
+      similarity: displaySimilarity,
+      filteringAccuracy: backendSubmitResult?.filtering_score ?? filteringVal,
+      mixingAccuracy: backendSubmitResult?.mixing_score ?? mixingVal,
       seasoningAccuracy: seasoningVal,
       marinatingAccuracy: marinatingVal,
-      cookingAccuracy: cookingVal,
+      cookingAccuracy: backendSubmitResult?.cooking_score ?? cookingVal,
       deliveryAccuracy: deliveryVal,
     });
   }, [
     recipe.id,
-    similarity,
+    displaySimilarity,
+    backendSubmitResult,
     filteringVal,
     mixingVal,
     seasoningVal,
@@ -121,16 +167,16 @@ function ScoreScreen() {
 
   const breakdownScores = useMemo(() => {
     const list = [
-      { label: "Filtering", value: filteringVal },
-      { label: "Mixing", value: mixingVal },
-      { label: "Transformation", value: transformVal },
-      { label: "Cooking / Convolution", value: cookingVal },
+      { label: "Filtering", value: backendSubmitResult?.filtering_score ?? filteringVal },
+      { label: "Mixing", value: backendSubmitResult?.mixing_score ?? mixingVal },
+      { label: "Transformation", value: backendSubmitResult?.transform_score ?? transformVal },
+      { label: "Cooking / Convolution", value: backendSubmitResult?.cooking_score ?? cookingVal },
     ];
     if (deliveryVal !== null) {
       list.push({ label: `Beam Delivery Precision (+${deliveryBonus} pts)`, value: deliveryVal });
     }
     return list;
-  }, [filteringVal, mixingVal, transformVal, cookingVal, deliveryVal, deliveryBonus]);
+  }, [backendSubmitResult, filteringVal, mixingVal, transformVal, cookingVal, deliveryVal, deliveryBonus]);
 
   const stageAvg = (filteringVal + mixingVal + seasoningVal + marinatingVal + cookingVal) / 5;
   const diffMultiplier = session ? (DIFFICULTY_MULTIPLIERS[session.difficulty] ?? 1.0) : 1.0;
@@ -146,16 +192,17 @@ function ScoreScreen() {
   }, [session]);
 
   const timeBonus = remainingSec * 2;
-  const totalScore =
-    Math.round((similarity * 0.5 + stageAvg * 0.5) * 10 * diffMultiplier) + timeBonus + deliveryBonus;
-
-  // Star award based on similarity & accuracy
-  const starsDisplay = similarity >= 90 ? "★ ★ ★" : similarity >= 75 ? "★ ★ ☆" : "★ ☆ ☆";
+  const totalScore = displayScore !== null
+    ? displayScore
+    : Math.round((similarity * 0.5 + stageAvg * 0.5) * 10 * diffMultiplier) + timeBonus + deliveryBonus;
 
   // Dynamic feedback from Chef Fourier based on lowest score
   const chefFeedback = useMemo(() => {
-    if (similarity >= 92) {
-      return `${similarity}%! That is a scientifically delicious plate. A true Fourier masterwork!`;
+    if (backendSubmitResult?.notes && backendSubmitResult.notes.length > 0) {
+      return backendSubmitResult.notes.join(" · ");
+    }
+    if (displaySimilarity >= 92) {
+      return `${displaySimilarity}%! That is a scientifically delicious plate. A true Fourier masterwork!`;
     }
     const stages = [
       { name: "filtering", val: filteringVal, tip: "Some high-frequency chatter remained in filtering. Try tuning the cutoff closer to the ideal mark." },
@@ -165,8 +212,8 @@ function ScoreScreen() {
     ];
     stages.sort((a, b) => a.val - b.val);
     const lowest = stages[0];
-    return `${similarity}% similarity. ${lowest?.tip ?? "Keep refining each station to perfect the signal!"}`;
-  }, [similarity, filteringVal, mixingVal, transformVal, cookingVal]);
+    return `${displaySimilarity}% similarity. ${lowest?.tip ?? "Keep refining each station to perfect the signal!"}`;
+  }, [backendSubmitResult, displaySimilarity, filteringVal, mixingVal, transformVal, cookingVal]);
 
   // Persist player run to leaderboard
   useEffect(() => {
@@ -179,11 +226,11 @@ function ScoreScreen() {
       recipeId: recipe.id,
       difficulty: diff,
       score: totalScore,
-      accuracy: similarity,
+      accuracy: displaySimilarity,
       timeRemaining: formattedTime || "0:00",
       date: "Today",
     });
-  }, [session, recipe.id, chefName, totalScore, similarity, formattedTime]);
+  }, [session, recipe.id, chefName, totalScore, displaySimilarity, formattedTime]);
 
   if (unlockedStep < 7) {
     return (
@@ -252,10 +299,10 @@ function ScoreScreen() {
           <div className="lab-panel p-5">
             <div className="flex items-center justify-between">
               <p className="font-mono text-[10px] tracking-[0.24em] text-signal/70 uppercase">
-                Your final signal
+                Your final signal {backendSubmitResult ? "· Server Evaluated" : ""}
               </p>
               <button
-                onClick={() => handlePlaySignal(cookedSignal.samples, cookedSignal.frequency)}
+                onClick={() => handlePlaySignal(playerSamples, cookedSignal.frequency)}
                 className="rounded-lg border border-primary/40 bg-primary/15 px-2.5 py-1 font-mono text-[10px] font-bold text-primary hover:bg-primary/30 transition-colors uppercase cursor-pointer"
               >
                 ▶ Play Your Dish
@@ -264,17 +311,17 @@ function ScoreScreen() {
             <MiniWave
               className="mt-3 border-0 p-0"
               height={140}
-              samples={cookedSignal.samples}
+              samples={playerSamples}
               color="var(--signal-alt)"
             />
           </div>
           <div className="lab-panel p-5">
             <div className="flex items-center justify-between">
               <p className="font-mono text-[10px] tracking-[0.24em] text-signal/70 uppercase">
-                Target signal
+                Target signal {backendSubmitResult ? "· Authoritative Master" : ""}
               </p>
               <button
-                onClick={() => handlePlaySignal(targetSignal.samples, targetSignal.frequency)}
+                onClick={() => handlePlaySignal(targetSamples, targetSignal.frequency)}
                 className="rounded-lg border border-primary/40 bg-primary/15 px-2.5 py-1 font-mono text-[10px] font-bold text-primary hover:bg-primary/30 transition-colors uppercase cursor-pointer"
               >
                 ▶ Play Target Signal
@@ -283,7 +330,7 @@ function ScoreScreen() {
             <MiniWave
               className="mt-3 border-0 p-0"
               height={140}
-              samples={targetSignal.samples}
+              samples={targetSamples}
               color="var(--primary)"
             />
           </div>
@@ -291,17 +338,49 @@ function ScoreScreen() {
 
         <section className="mt-8 grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
           <div className="kitchen-card p-6 text-center">
-            <p className="font-mono text-[10px] tracking-[0.22em] text-muted-foreground uppercase">
-              Signal similarity
-            </p>
-            <p className="mt-2 font-display text-6xl font-extrabold text-gradient-warm">{similarity}%</p>
+            <div className="flex items-center justify-between">
+              <p className="font-mono text-[10px] tracking-[0.22em] text-muted-foreground uppercase">
+                Signal similarity
+              </p>
+              {backendSubmitResult ? (
+                <span className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 font-mono text-[8px] font-bold text-emerald-400 uppercase">
+                  Server Authoritative ✓
+                </span>
+              ) : isSubmitting ? (
+                <span className="rounded-md border border-primary/40 bg-primary/10 px-2 py-0.5 font-mono text-[8px] font-bold text-primary uppercase animate-pulse">
+                  Verifying on server...
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-2 font-display text-6xl font-extrabold text-gradient-warm">{displaySimilarity}%</p>
             <div className="mt-4 h-4 w-full overflow-hidden rounded-full border border-border bg-secondary">
-              <span className="block h-full bg-[image:var(--gradient-warm)]" style={{ width: `${similarity}%` }} />
+              <span className="block h-full bg-[image:var(--gradient-warm)]" style={{ width: `${displaySimilarity}%` }} />
             </div>
             <p className="mt-4 font-display text-2xl font-extrabold text-foreground">
               Overall score: {totalScore}
             </p>
-            <p className="font-display text-xl text-primary">{starsDisplay}</p>
+            <p className="font-display text-xl text-primary">{displayStars}</p>
+
+            {backendSubmitResult && (
+              <div className="mt-4 grid grid-cols-2 gap-2 border-t border-border/60 pt-3 font-mono text-[10px] uppercase text-muted-foreground">
+                <div className="rounded-lg border border-border bg-secondary/60 p-1.5 text-center">
+                  <span>SNR</span>
+                  <p className="font-bold text-foreground">{backendSubmitResult.snr_db.toFixed(1)} dB</p>
+                </div>
+                <div className="rounded-lg border border-border bg-secondary/60 p-1.5 text-center">
+                  <span>MSE</span>
+                  <p className="font-bold text-foreground">{backendSubmitResult.mse.toFixed(4)}</p>
+                </div>
+                <div className="rounded-lg border border-border bg-secondary/60 p-1.5 text-center">
+                  <span>Points</span>
+                  <p className="font-bold text-primary">+{backendSubmitResult.points_awarded} XP</p>
+                </div>
+                <div className="rounded-lg border border-border bg-secondary/60 p-1.5 text-center">
+                  <span>Chef Rank</span>
+                  <p className="font-bold text-foreground">{backendSubmitResult.rank_title}</p>
+                </div>
+              </div>
+            )}
 
             {difficultyConfig && (
               <div className="mt-4 flex flex-wrap justify-center gap-2 border-t border-border/60 pt-3 font-mono text-[10px] uppercase text-muted-foreground">

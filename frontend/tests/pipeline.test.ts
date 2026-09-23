@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   computeMixedSignal,
+  computeCleanMixedSignal,
   computeSeasonedSignal,
   computeMarinatedSignal,
   computeConvolvedSignal,
   getIdealDishSignal,
   getRecipeIngredientSamples,
+  getOrSaveExpectedSignal,
+  initializeAllExpectedSignals,
 } from "@/lib/pipeline";
 import { recipes } from "@/lib/recipes";
 
@@ -67,5 +70,27 @@ describe("T7: Recipe Pipeline Dataflow", () => {
     expect(ideal.stage).toBe("cooked");
     expect(ideal.samples.length).toBe(401);
     expect(ideal.recipeId).toBe(burgerRecipe.id);
+  });
+
+  it("computes clean mixed signal with zero noise", () => {
+    const clean = computeCleanMixedSignal(burgerRecipe.id, burgerRecipe.ingredients, 401);
+    expect(clean.stage).toBe("mixed");
+    expect(clean.samples.length).toBe(401);
+    expect(clean.metadata?.clean).toBe(true);
+  });
+
+  it("initializes and caches expected signals for all recipes", () => {
+    const all = initializeAllExpectedSignals(401);
+    expect(Object.keys(all).length).toBe(recipes.length);
+    for (const r of recipes) {
+      const sig = all[r.id];
+      expect(sig).toBeDefined();
+      expect(sig!.samples.length).toBe(401);
+      expect(sig!.recipeId).toBe(r.id);
+
+      const cached = getOrSaveExpectedSignal(r.id, 401);
+      expect(cached.samples.length).toBe(401);
+      expect(cached.recipeId).toBe(r.id);
+    }
   });
 });

@@ -21,7 +21,7 @@ import { GameButton } from "@/components/game/GameButton";
 import { IngredientGlyph } from "@/components/game/IngredientGlyph";
 import { WaveformDisplay } from "@/components/game/WaveformDisplay";
 import { SignalAudioPlayer } from "@/lib/audio";
-import { getIdealDishSignal } from "@/lib/pipeline";
+import { getIdealDishSignal, getOrSaveExpectedSignal } from "@/lib/pipeline";
 import {
   useActiveRecipe,
   useChefName,
@@ -117,7 +117,7 @@ function RecipeMissionBriefing() {
 
   const targetSignal = useMemo(() => {
     try {
-      return getIdealDishSignal(recipe?.id ?? "burger");
+      return getOrSaveExpectedSignal(recipe?.id ?? "burger");
     } catch {
       return null;
     }

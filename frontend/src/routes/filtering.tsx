@@ -8,7 +8,9 @@ import { IngredientGlyph, type IngredientKind } from "@/components/game/Ingredie
 import { SignalAudioPlayer } from "@/lib/audio";
 import { applyLowPassFilter, computeSignalSimilarity, fft } from "@/lib/dsp";
 import {
+  api,
   getRecipeIngredientSamples,
+  getRecipeRunSession,
   recipes,
   recordStageAccuracy,
   saveFilteredIngredient,
@@ -367,6 +369,34 @@ function FilteringLab() {
     baseFreq: 4,
   };
 
+  const session = getRecipeRunSession();
+  const backendSessionId = session?.backendSessionId;
+  const slotIndex = recipe.ingredients.findIndex(
+    (n) => n.toLowerCase() === current.name.toLowerCase()
+  );
+  const effectiveSlot = slotIndex >= 0 ? slotIndex : index;
+
+  const [backendPrepScore, setBackendPrepScore] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (applied && backendSessionId) {
+      api.filterIngredient(backendSessionId, effectiveSlot, {
+        tools: [{ kind: "lowpass", cutoff }],
+        want_spectrogram: false,
+      })
+        .then((res) => {
+          if (res && res.prep && typeof res.prep.score === "number") {
+            setBackendPrepScore(res.prep.score);
+          }
+        })
+        .catch((err) => {
+          console.warn("Backend filtering error (falling back to client DSP):", err);
+        });
+    } else {
+      setBackendPrepScore(null);
+    }
+  }, [applied, backendSessionId, effectiveSlot, cutoff]);
+
   const rawSamples = useMemo(() => {
     return getRecipeIngredientSamples(recipe.id, current.name, {
       noise: 0.85,
@@ -389,13 +419,16 @@ function FilteringLab() {
   }, [rawSamples, cutoff, applied]);
 
   const cleanliness = useMemo(() => {
+    if (backendPrepScore !== null && applied) {
+      return Math.max(10, Math.min(100, Math.round(backendPrepScore)));
+    }
     if (!applied) {
       const distance = Math.abs(cutoff - current.idealCutoff);
       return Math.max(12, Math.min(97, Math.round(97 - distance / 6)));
     }
     const sim = computeSignalSimilarity(filteredSamples, cleanSamples);
     return Math.max(10, Math.min(100, Math.round(sim)));
-  }, [applied, filteredSamples, cleanSamples, cutoff, current.idealCutoff]);
+  }, [backendPrepScore, applied, filteredSamples, cleanSamples, cutoff, current.idealCutoff]);
 
   const noiseRemoved = Math.max(0, Math.min(98, Math.round(cleanliness * 0.95)));
   const isClean = cleanliness >= THRESHOLD && applied;
@@ -441,6 +474,10 @@ function FilteringLab() {
             : `Adjust the cutoff frequency and apply the filter until your waveform matches the target.`;
 
   const advance = () => {
+    if (backendSessionId) {
+      api.acceptIngredient(backendSessionId, effectiveSlot)
+        .catch((err) => console.warn("Backend accept error:", err));
+    }
     saveFilteredIngredient(recipe.id, current.name, filteredSamples);
     const updated = [...recordedAccuracies, cleanliness];
     setRecordedAccuracies(updated);
@@ -453,6 +490,7 @@ function FilteringLab() {
       setIndex((i) => i + 1);
       setCutoff(MIN_HZ);
       setApplied(false);
+      setBackendPrepScore(null);
     }
     if (nextCount >= total) {
       unlock(3);

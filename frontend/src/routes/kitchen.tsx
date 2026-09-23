@@ -6,7 +6,7 @@ import { GameButton } from "@/components/game/GameButton";
 import type { MachineId } from "@/components/game/KitchenMachines";
 import { KitchenStation, type StationDef } from "@/components/game/KitchenStation";
 import { RecipeTimerBadge, TimeExpiredModal } from "@/components/game/RecipeTimer";
-import { recipes, useActiveRecipe, useRecipeProgress } from "@/lib/recipes";
+import { getRecipeRunSession, recipes, useActiveRecipe, useRecipeProgress } from "@/lib/recipes";
 
 export const Route = createFileRoute("/kitchen")({
   head: () => ({
@@ -126,6 +126,8 @@ function KitchenHub() {
         ? `All cooking stages complete! Head to the Tasting Table to evaluate ${recipe.name}.`
         : `Currently at Step ${unlockedStep}: ${objective}. Let's get to work!`;
 
+  const session = getRecipeRunSession();
+
   return (
     <main className="relative min-h-screen overflow-hidden bg-[oklch(0.94_0.03_75)] dark:bg-background">
       <TimeExpiredModal />
@@ -181,6 +183,11 @@ function KitchenHub() {
               </GameButton>
             </Link>
             <RecipeTimerBadge />
+            {session?.backendSeed && (
+              <span className="hidden sm:inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 font-mono text-[9px] font-bold text-primary uppercase">
+                Session #{session.backendSeed % 10000}
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-4 rounded-full border-2 border-border bg-card/90 px-5 py-2 shadow-[0_4px_0_var(--border)] backdrop-blur-[2px]">
