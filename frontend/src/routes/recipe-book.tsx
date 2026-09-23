@@ -1,5 +1,5 @@
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { ChefFourier } from "@/components/game/ChefFourier";
 import { DifficultyModal } from "@/components/game/DifficultyModal";
@@ -10,6 +10,8 @@ import { RecipeCard } from "@/components/game/RecipeCard";
 import { WaveformDisplay } from "@/components/game/WaveformDisplay";
 import {
   type RecipeDifficulty,
+  getOrSaveExpectedSignal,
+  initializeAllExpectedSignals,
   progressLabel,
   recipes,
   resetRecipeProgress,
@@ -41,6 +43,11 @@ export const Route = createFileRoute("/recipe-book")({
 
 function RecipeBook() {
   const [selectedRecipeId, setSelectedRecipeId] = useState<string | null>(null);
+
+  // Pre-save expected signals for all recipes on cookbook load
+  useEffect(() => {
+    initializeAllExpectedSignals();
+  }, []);
 
   const selectedRecipe = recipes.find((r) => r.id === selectedRecipeId);
 
@@ -105,6 +112,8 @@ function RecipeBook() {
 function RecipeBriefing({ recipe, onBack }: { recipe: Recipe; onBack: () => void }) {
   const [isDifficultyModalOpen, setIsDifficultyModalOpen] = useState(false);
   const navigate = useNavigate();
+
+  const expectedSignal = useMemo(() => getOrSaveExpectedSignal(recipe.id), [recipe.id]);
 
   const handleProceed = (difficulty: RecipeDifficulty) => {
     setActiveRecipe(recipe.id);
@@ -256,11 +265,24 @@ function RecipeBriefing({ recipe, onBack }: { recipe: Recipe; onBack: () => void
 
               {/* Signal Pipeline Waveform Flow */}
               <div className="mt-6">
-                <span className="font-mono text-[10px] tracking-[0.3em] text-primary uppercase">
-                  Signal Processing Flow
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-[10px] tracking-[0.3em] text-primary uppercase">
+                    Signal Processing Flow
+                  </span>
+                  <span className="font-mono text-[9px] font-bold text-muted-foreground uppercase">
+                    Target {expectedSignal.frequency.toFixed(1)} Hz · Reference Spectrum
+                  </span>
+                </div>
                 <div className="mt-3">
-                  <WaveformDisplay label={`${recipe.name} Target Signal Flow`} />
+                  <WaveformDisplay
+                    label={`${recipe.name} TARGET SIGNAL FLOW`}
+                    samples={expectedSignal.samples}
+                    color="var(--signal)"
+                    signalParams={{
+                      frequency: expectedSignal.frequency,
+                      amplitude: 1.0,
+                    }}
+                  />
                 </div>
               </div>
 

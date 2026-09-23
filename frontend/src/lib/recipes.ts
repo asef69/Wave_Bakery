@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { getMathematicalSignal } from "./signals";
-import { getIdealDishSignal } from "./pipeline";
+import { getIdealDishSignal, getOrSaveExpectedSignal } from "./pipeline";
 
 export * from "./signals";
 export * from "./pipeline";
@@ -667,6 +667,9 @@ export interface RecipeRunSession {
 
 export function startRecipeRun(recipeId: string, difficulty: RecipeDifficulty) {
   if (typeof window !== "undefined") {
+    // Ensure target expected signal is precomputed and persisted for the recipe
+    getOrSaveExpectedSignal(recipeId);
+
     const config = DIFFICULTY_CONFIGS[difficulty];
     const session: RecipeRunSession = {
       recipeId,

@@ -400,27 +400,88 @@ export function computeConvolvedSignal(
 }
 
 /**
+ * Computes the pristine, zero-noise mixed signal resulting from canonical ingredient models.
+ * Used exclusively to construct the true expected/reference dish target signal.
+ */
+export function computeCleanMixedSignal(
+  recipeId: string,
+  ingredientNames?: string[],
+  sampleCount = 401,
+): PipelineSignal {
+  const recipe = recipes.find((r) => r.id === recipeId) ?? getActiveRecipe();
+  const effectiveIngredients =
+    ingredientNames && ingredientNames.length > 0 ? ingredientNames : recipe.ingredients;
+
+  const summed = new Array<number>(sampleCount).fill(0);
+  let totalFreq = 0;
+
+  for (let idx = 0; idx < effectiveIngredients.length; idx++) {
+    const name = effectiveIngredients[idx]!;
+    const detail = recipe.ingredientDetails.find(
+      (d) => d.name.toLowerCase() === name.toLowerCase(),
+    );
+    const freq = detail?.freq ?? 3 + (idx % 4) * 1.5;
+    totalFreq += freq;
+
+    // Pure clean mathematical signal without contamination noise
+    const ingSamples = getRecipeIngredientSamples(recipe.id, name, {
+      noise: 0.0,
+      seed: (idx + 1) * 0.85,
+      freq,
+      sampleCount,
+      amplitude: 1.0,
+    });
+
+    for (let i = 0; i < sampleCount; i++) {
+      summed[i] = (summed[i] ?? 0) + (ingSamples[i] ?? 0);
+    }
+  }
+
+  const count = Math.max(1, effectiveIngredients.length);
+  const normFactor = 1 / Math.sqrt(count);
+  for (let i = 0; i < sampleCount; i++) {
+    summed[i] = (summed[i] ?? 0) * normFactor;
+  }
+  const samples = normalizeSamples(summed, 0.95);
+  const nominalFreq = Math.max(2, Math.round(totalFreq / count));
+
+  return {
+    recipeId: recipe.id,
+    stage: "mixed",
+    samples,
+    sampleRate: 44100,
+    duration: 3.0,
+    frequency: nominalFreq,
+    timestamp: Date.now(),
+    metadata: {
+      ingredients: effectiveIngredients,
+      clean: true,
+    },
+  };
+}
+
+/**
  * Computes the ideal reference dish signal for a recipe using its
- * canonical ingredient signals and target parameters through all stages.
+ * canonical ingredient signals (pristine/clean) and target parameters through all stages.
  */
 export function getIdealDishSignal(recipeId: string, sampleCount = 401): PipelineSignal {
   const recipe = recipes.find((r) => r.id === recipeId) ?? getActiveRecipe();
-  // 1. Mixed
-  const mixed = computeMixedSignal(recipe.id, recipe.ingredients, sampleCount);
-  // 2. Seasoned with recipe target
+  // 1. Pristine clean superposition
+  const cleanMixed = computeCleanMixedSignal(recipe.id, recipe.ingredients, sampleCount);
+  // 2. Seasoned with recipe target specs
   const seasoned = computeSeasonedSignal(
-    mixed,
+    cleanMixed,
     recipe.seasoningTarget.amplitude,
     recipe.seasoningTarget.frequency,
     sampleCount,
   );
-  // 3. Marinated with recipe target
+  // 3. Marinated with recipe target timeScale
   const marinated = computeMarinatedSignal(
     seasoned,
     recipe.marinateTarget.timeScale,
     sampleCount,
   );
-  // 4. Convolved with recipe target cooking method at 100%
+  // 4. Convolved with recipe target cooking method at 100% depth
   const cooked = computeConvolvedSignal(
     marinated,
     recipe.cookingMethod.id as "grill" | "fry" | "bake" | "boil",
@@ -428,6 +489,91 @@ export function getIdealDishSignal(recipeId: string, sampleCount = 401): Pipelin
     sampleCount,
   );
   return cooked;
+}
+
+/**
+ * Saves the expected reference signal for a recipe in localStorage.
+ */
+export function saveExpectedSignal(recipeId: string, signal: PipelineSignal) {
+  if (typeof window !== "undefined") {
+    try {
+      const key = `wavebakery_expected_signal_${recipeId}`;
+      window.localStorage.setItem(key, JSON.stringify(signal));
+      window.dispatchEvent(new Event("wavebakery_expected_signal_changed"));
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/**
+ * Retrieves the expected target signal for a recipe from localStorage,
+ * computing and persisting it if not already stored.
+ */
+export function getExpectedSignal(recipeId: string, sampleCount = 401): PipelineSignal {
+  if (typeof window !== "undefined") {
+    try {
+      const key = `wavebakery_expected_signal_${recipeId}`;
+      const stored = window.localStorage.getItem(key);
+      if (stored) {
+        const parsed = JSON.parse(stored) as PipelineSignal;
+        if (parsed && Array.isArray(parsed.samples) && parsed.samples.length > 0) {
+          return parsed;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+  const ideal = getIdealDishSignal(recipeId, sampleCount);
+  saveExpectedSignal(recipeId, ideal);
+  return ideal;
+}
+
+export function getOrSaveExpectedSignal(recipeId: string, sampleCount = 401): PipelineSignal {
+  return getExpectedSignal(recipeId, sampleCount);
+}
+
+/**
+ * Precomputes and stores expected reference signals for all master recipes.
+ * Call this before cooking begins so every recipe's expected signal is saved in advance.
+ */
+export function initializeAllExpectedSignals(sampleCount = 401): Record<string, PipelineSignal> {
+  const all: Record<string, PipelineSignal> = {};
+  for (const r of recipes) {
+    const sig = getExpectedSignal(r.id, sampleCount);
+    all[r.id] = sig;
+  }
+  return all;
+}
+
+/**
+ * React hook to subscribe to the expected signal of a recipe.
+ */
+export function useExpectedSignal(
+  recipeId?: string,
+  sampleCount = 401,
+): PipelineSignal {
+  const activeId = recipeId ?? getActiveRecipe().id;
+  const [signal, setSignalState] = useState<PipelineSignal>(() =>
+    getExpectedSignal(activeId, sampleCount),
+  );
+
+  useEffect(() => {
+    const handler = () => {
+      setSignalState(getExpectedSignal(activeId, sampleCount));
+    };
+    window.addEventListener("wavebakery_expected_signal_changed", handler);
+    window.addEventListener("wavebakery_recipe_changed", handler);
+    window.addEventListener("storage", handler);
+    return () => {
+      window.removeEventListener("wavebakery_expected_signal_changed", handler);
+      window.removeEventListener("wavebakery_recipe_changed", handler);
+      window.removeEventListener("storage", handler);
+    };
+  }, [activeId, sampleCount]);
+
+  return signal;
 }
 
 /**
