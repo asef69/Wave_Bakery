@@ -1,0 +1,29 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.signal/
+*.db
+*.sqlite
+*.sqlite3
+backend/wavebakery.db
+backend/wavekitchen.db
+.pytest_cache/
+
+# node & nitro
+node_modules/
+dist/
+.output/
+.nitro/
+.tanstack/
+.wrangler/
+frontend/dist/
+frontend/.output/
+frontend/.nitro/
+frontend/.wrangler/
+
+# editors / os
+.DS_Store
+.idea/
+.vscode/
+Thumbs.db

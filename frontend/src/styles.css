@@ -1,0 +1,298 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark, .dark *));
+
+/*
+ * Design system definition.
+ *
+ * The @theme inline block maps CSS custom properties to Tailwind utility
+ * classes (e.g. --color-primary -> bg-primary, text-primary).
+ *
+ * The :root and .dark blocks define the actual color values using oklch.
+ * All colors MUST use oklch format.
+ *
+ * To add a new semantic color:
+ * 1. Add the variable to :root (light value) and .dark (dark value)
+ * 2. Register it in @theme inline as --color-<name>: var(--<name>)
+ */
+
+@theme inline {
+  --font-display: var(--font-display);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-mono);
+  --color-primary-glow: var(--primary-glow);
+  --color-signal: var(--signal);
+  --color-signal-alt: var(--signal-alt);
+  --color-lab: var(--lab);
+  --color-lab-foreground: var(--lab-foreground);
+  --color-lab-grid: var(--lab-grid);
+  --animate-wave-drift: wave-drift 6s linear infinite;
+  --animate-float: float 5s ease-in-out infinite;
+  --animate-pulse-glow: pulse-glow 2.4s ease-in-out infinite;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+:root {
+  --radius: 1.25rem;
+
+  /* Warm kitchen base */
+  --background: oklch(0.968 0.021 78);
+  --foreground: oklch(0.28 0.045 45);
+  --card: oklch(0.99 0.012 85);
+  --card-foreground: oklch(0.28 0.045 45);
+  --popover: oklch(0.99 0.012 85);
+  --popover-foreground: oklch(0.28 0.045 45);
+
+  /* Copper / paprika primary */
+  --primary: oklch(0.63 0.17 45);
+  --primary-foreground: oklch(0.99 0.012 85);
+  --primary-glow: oklch(0.76 0.16 62);
+
+  --secondary: oklch(0.93 0.035 80);
+  --secondary-foreground: oklch(0.34 0.05 45);
+  --muted: oklch(0.94 0.022 80);
+  --muted-foreground: oklch(0.52 0.04 60);
+
+  /* Signal-lab accent */
+  --accent: oklch(0.79 0.14 190);
+  --accent-foreground: oklch(0.2 0.05 220);
+  --signal: oklch(0.82 0.16 190);
+  --signal-alt: oklch(0.78 0.15 145);
+
+  /* Oscilloscope trace colours (one per ingredient signal) */
+  --trace-1: oklch(0.78 0.19 28);
+  --trace-2: oklch(0.86 0.17 88);
+  --trace-3: oklch(0.82 0.15 145);
+  --trace-4: oklch(0.8 0.16 195);
+  --trace-5: oklch(0.78 0.16 300);
+  --trace-mixed: oklch(0.9 0.14 75);
+
+  /* Lab panel surfaces */
+  --lab: oklch(0.24 0.035 250);
+  --lab-foreground: oklch(0.93 0.02 200);
+  --lab-grid: oklch(0.42 0.05 235);
+
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.984 0.003 247.858);
+  --border: oklch(0.88 0.03 75);
+  --input: oklch(0.88 0.03 75);
+  --ring: oklch(0.63 0.17 45);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: oklch(0.96 0.02 78);
+  --sidebar-foreground: oklch(0.28 0.045 45);
+  --sidebar-primary: oklch(0.63 0.17 45);
+  --sidebar-primary-foreground: oklch(0.99 0.012 85);
+  --sidebar-accent: oklch(0.93 0.035 80);
+  --sidebar-accent-foreground: oklch(0.28 0.045 45);
+  --sidebar-border: oklch(0.88 0.03 75);
+  --sidebar-ring: oklch(0.63 0.17 45);
+
+  --font-display: "Baloo 2", system-ui, sans-serif;
+  --font-body: "Nunito", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --gradient-warm: linear-gradient(135deg, oklch(0.76 0.16 62), oklch(0.63 0.17 45));
+  --gradient-lab: linear-gradient(160deg, oklch(0.26 0.04 250), oklch(0.18 0.03 255));
+  --shadow-card: 0 18px 40px -22px oklch(0.35 0.08 45 / 45%);
+  --shadow-glow: 0 0 32px oklch(0.82 0.16 190 / 45%);
+  --shadow-warm-glow: 0 0 40px oklch(0.76 0.16 62 / 50%);
+}
+
+.dark {
+  color-scheme: dark;
+
+  /* Dark kitchen slate base */
+  --background: oklch(0.14 0.025 255);
+  --foreground: oklch(0.96 0.015 80);
+  --card: oklch(0.19 0.03 255);
+  --card-foreground: oklch(0.96 0.015 80);
+  --popover: oklch(0.19 0.03 255);
+  --popover-foreground: oklch(0.96 0.015 80);
+
+  /* Luminous warm copper / paprika primary */
+  --primary: oklch(0.68 0.18 45);
+  --primary-foreground: oklch(0.98 0.01 60);
+  --primary-glow: oklch(0.80 0.17 60);
+
+  --secondary: oklch(0.25 0.035 255);
+  --secondary-foreground: oklch(0.92 0.02 80);
+  --muted: oklch(0.22 0.028 255);
+  --muted-foreground: oklch(0.72 0.03 75);
+
+  /* Signal-lab accent */
+  --accent: oklch(0.26 0.04 220);
+  --accent-foreground: oklch(0.92 0.14 190);
+  --signal: oklch(0.85 0.17 190);
+  --signal-alt: oklch(0.82 0.16 145);
+
+  /* Oscilloscope trace colours (one per ingredient signal) */
+  --trace-1: oklch(0.80 0.20 28);
+  --trace-2: oklch(0.88 0.18 88);
+  --trace-3: oklch(0.84 0.16 145);
+  --trace-4: oklch(0.82 0.17 195);
+  --trace-5: oklch(0.80 0.17 300);
+  --trace-mixed: oklch(0.92 0.15 75);
+
+  /* Lab panel surfaces */
+  --lab: oklch(0.16 0.03 255);
+  --lab-foreground: oklch(0.94 0.02 200);
+  --lab-grid: oklch(0.36 0.04 245);
+
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.984 0.003 247.858);
+  --border: oklch(0.32 0.03 255);
+  --input: oklch(0.28 0.03 255);
+  --ring: oklch(0.68 0.18 45);
+  --chart-1: oklch(0.52 0.22 41);
+  --chart-2: oklch(0.72 0.16 185);
+  --chart-3: oklch(0.77 0.18 70);
+  --chart-4: oklch(0.65 0.24 304);
+  --chart-5: oklch(0.66 0.23 16);
+  --sidebar: oklch(0.16 0.03 255);
+  --sidebar-foreground: oklch(0.96 0.015 80);
+  --sidebar-primary: oklch(0.68 0.18 45);
+  --sidebar-primary-foreground: oklch(0.98 0.01 60);
+  --sidebar-accent: oklch(0.25 0.035 255);
+  --sidebar-accent-foreground: oklch(0.96 0.015 80);
+  --sidebar-border: oklch(0.32 0.03 255);
+  --sidebar-ring: oklch(0.68 0.18 45);
+
+  --gradient-warm: linear-gradient(135deg, oklch(0.76 0.18 55), oklch(0.64 0.18 42));
+  --gradient-lab: linear-gradient(160deg, oklch(0.20 0.035 255), oklch(0.14 0.025 255));
+  --shadow-card: 0 18px 40px -20px oklch(0.04 0.02 255 / 80%);
+  --shadow-glow: 0 0 32px oklch(0.85 0.17 190 / 35%);
+  --shadow-warm-glow: 0 0 40px oklch(0.76 0.18 55 / 45%);
+}
+
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-body);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
+}
+
+@keyframes wave-drift {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-14px);
+  }
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@utility lab-panel {
+  background: var(--gradient-lab);
+  color: var(--lab-foreground);
+  border: 1px solid color-mix(in oklab, var(--signal) 22%, transparent);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-card);
+}
+
+@utility lab-grid {
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in oklab, var(--lab-grid) 40%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--lab-grid) 40%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 28px 28px;
+}
+
+@utility kitchen-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-3xl);
+  box-shadow: var(--shadow-card);
+}
+
+@utility text-gradient-warm {
+  background: var(--gradient-warm);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
