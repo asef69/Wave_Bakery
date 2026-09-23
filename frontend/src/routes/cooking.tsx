@@ -13,6 +13,8 @@ import {
   recordStageAccuracy,
   saveCookedSignal,
   savePipelineStageSignal,
+  syncSessionParamsToBackend,
+  updateRecipeRunSession,
   useActiveRecipe,
   usePipelineStageSignal,
   useRecipeProgress,
@@ -123,6 +125,12 @@ function CookingLab() {
         samples: convolvedSignal.samples,
       });
       savePipelineStageSignal(recipe.id, "cooked", convolvedSignal);
+      updateRecipeRunSession({
+        cookingAppliance: currentMethod.id,
+        cookingPos: currentPos,
+        cookingAccuracy: methodScore + depthScore,
+      });
+      syncSessionParamsToBackend(recipe.id);
     }
   }, [isCookingComplete, currentMethod, currentPos, convolvedSignal, recipe.id, unlock, isTargetSelected]);
 

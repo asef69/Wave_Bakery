@@ -265,6 +265,20 @@ class ApiClient {
   }
 
   // Auth & Players
+  async ensureAuthenticated(handle = "Chef Fourier"): Promise<string> {
+    const existing = this.getToken();
+    if (existing) {
+      try {
+        await this.getPlayerMe();
+        return existing;
+      } catch {
+        // Token invalid or expired on server, re-authenticate below
+      }
+    }
+    const res = await this.authOrRegisterPlayer(handle);
+    return res.token;
+  }
+
   async registerPlayer(handle: string) {
     const res = await this.request<{
       token: string;
