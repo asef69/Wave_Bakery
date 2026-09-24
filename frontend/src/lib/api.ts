@@ -222,16 +222,16 @@ class ApiClient {
     this.token = token;
     if (typeof window !== "undefined") {
       if (token) {
-        localStorage.setItem(TOKEN_KEY, token);
+        window.localStorage.setItem(TOKEN_KEY, token);
       } else {
-        localStorage.removeItem(TOKEN_KEY);
+        window.localStorage.removeItem(TOKEN_KEY);
       }
     }
   }
 
   public getToken(): string | null {
     if (!this.token && typeof window !== "undefined") {
-      this.token = localStorage.getItem(TOKEN_KEY);
+      this.token = window.localStorage.getItem(TOKEN_KEY);
     }
     return this.token;
   }

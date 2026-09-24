@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Utensils, Radio, X } from "lucide-react";
+import { Utensils, Flame, X } from "lucide-react";
 import { ChefFourier } from "@/components/game/ChefFourier";
 import { GameButton } from "@/components/game/GameButton";
 
@@ -71,29 +71,28 @@ export function ServeChoiceModal({ isOpen, onClose, recipeName }: ServeChoiceMod
             </div>
           </Link>
 
-          {/* Option 2: Beam Delivery */}
+          {/* Option 2: Precision Oven */}
           <Link to="/beam-delivery" onClick={onClose} className="block group">
             <div className="flex h-full flex-col justify-between rounded-2xl border-2 border-primary/50 bg-primary/10 p-5 shadow-xs transition-all duration-150 hover:border-primary hover:bg-primary/15 hover:scale-[1.02] cursor-pointer">
               <div>
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary bg-primary text-primary-foreground shadow-xs">
-                  <Radio className="h-5 w-5 animate-pulse" />
+                  <Flame className="h-5 w-5 animate-pulse" />
                 </div>
                 <div className="mt-3 flex items-center gap-2">
                   <h4 className="font-display text-lg font-extrabold text-foreground uppercase">
-                    Beam Delivery
+                    Precision Oven
                   </h4>
                   <span className="rounded-md bg-signal/20 px-1.5 py-0.5 font-mono text-[9px] font-extrabold text-signal uppercase">
-                    Special
+                    Finishing Lab
                   </span>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Acoustic phased array delivery. Calibrate speaker phases and beam the dish to the
-                  diner!
+                  Fine-tune sampling rates, eliminate aliasing, sculpt frequency harmonics, and IFFT-reconstruct the dish!
                 </p>
               </div>
 
               <span className="mt-4 inline-block font-mono text-[11px] font-bold text-primary group-hover:underline">
-                Launch Beam Lab ⚡ →
+                Enter Precision Oven 🔥 →
               </span>
             </div>
           </Link>
@@ -104,7 +103,7 @@ export function ServeChoiceModal({ isOpen, onClose, recipeName }: ServeChoiceMod
           <ChefFourier
             size="sm"
             float={false}
-            message="Choose standard plating or test your acoustic beamforming skills on the delivery line!"
+            message="Choose standard plating or fire up the Precision Oven to master sampling, FFT harmonics, and IFFT reconstruction!"
           />
         </div>
 

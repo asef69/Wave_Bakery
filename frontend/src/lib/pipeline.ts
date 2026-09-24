@@ -190,6 +190,60 @@ export function computeMixedSignal(
   const effectiveIngredients =
     ingredientNames.length > 0 ? ingredientNames : recipe.ingredients;
 
+  // When exactly one ingredient is in the bowl, its mixed signal IS that ingredient directly:
+  // preserve identical samples, amplitude, and deterministic detail seed without re-normalization.
+  if (effectiveIngredients.length === 1) {
+    const name = effectiveIngredients[0]!;
+    const detail = recipe.ingredientDetails.find(
+      (d) => d.name.toLowerCase() === name.toLowerCase(),
+    );
+    const detailIndex = recipe.ingredientDetails.findIndex(
+      (d) => d.name.toLowerCase() === name.toLowerCase(),
+    );
+    const freq = detail?.freq ?? 3;
+    const seed = (detailIndex >= 0 ? detailIndex + 1 : 1) * 0.85;
+
+    let singleSamples: number[] | null = null;
+    if (detail?.washable) {
+      const storedFiltered = getFilteredIngredient(recipe.id, name);
+      if (storedFiltered && storedFiltered.length > 0) {
+        if (storedFiltered.length === sampleCount) {
+          singleSamples = [...storedFiltered];
+        } else {
+          singleSamples = [];
+          for (let i = 0; i < sampleCount; i++) {
+            const u = i / (sampleCount - 1);
+            singleSamples.push(sampleAt(storedFiltered, u));
+          }
+        }
+      }
+    }
+
+    if (!singleSamples) {
+      const noise = detail?.washable ? 0.85 : 0.0;
+      singleSamples = getRecipeIngredientSamples(recipe.id, name, {
+        noise,
+        seed,
+        freq,
+        sampleCount,
+        amplitude: 1.0,
+      });
+    }
+
+    return {
+      recipeId: recipe.id,
+      stage: "mixed",
+      samples: singleSamples,
+      sampleRate: 44100,
+      duration: 3.0,
+      frequency: freq,
+      timestamp: Date.now(),
+      metadata: {
+        ingredients: effectiveIngredients,
+      },
+    };
+  }
+
   const summed = new Array<number>(sampleCount).fill(0);
   let totalFreq = 0;
 
@@ -198,7 +252,11 @@ export function computeMixedSignal(
     const detail = recipe.ingredientDetails.find(
       (d) => d.name.toLowerCase() === name.toLowerCase(),
     );
+    const detailIndex = recipe.ingredientDetails.findIndex(
+      (d) => d.name.toLowerCase() === name.toLowerCase(),
+    );
     const freq = detail?.freq ?? 3 + (idx % 4) * 1.5;
+    const seed = (detailIndex >= 0 ? detailIndex + 1 : idx + 1) * 0.85;
     totalFreq += freq;
 
     let ingSamples: number[] | null = null;
@@ -225,7 +283,7 @@ export function computeMixedSignal(
       const noise = detail?.washable ? 0.85 : 0.0;
       ingSamples = getRecipeIngredientSamples(recipe.id, name, {
         noise,
-        seed: (idx + 1) * 0.85,
+        seed,
         freq,
         sampleCount,
         amplitude: 1.0,

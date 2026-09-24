@@ -1,8 +1,6 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { MessageSquare, CheckCircle2, AlertTriangle, XCircle, Sparkles, Trophy } from "lucide-react";
-
-import { ServeChoiceModal } from "@/components/beamforming/ServeChoiceModal";
 import { ChefFourier } from "@/components/game/ChefFourier";
 import { GameButton } from "@/components/game/GameButton";
 import { MiniWave } from "@/components/game/MiniWave";
@@ -15,6 +13,7 @@ import {
   api,
   completeRecipeRun,
   getIdealDishSignal,
+  saveRecipeBestScore,
   type SubmitResult,
   updateRecipeRunSession,
   useActiveRecipe,
@@ -55,7 +54,6 @@ function ScoreScreen() {
   const [unlockedStep, unlock] = useRecipeProgress();
   const { session, formattedTime, difficultyConfig } = useRecipeTimer();
   const [chefName] = useChefName();
-  const [isServeModalOpen, setIsServeModalOpen] = useState(false);
   const [cookedSignal] = useCookedSignal(recipe.id);
   const targetSignal = useMemo(() => getIdealDishSignal(recipe.id), [recipe.id]);
   const [audioPlayer, setAudioPlayer] = useState<SignalAudioPlayer | null>(null);
@@ -173,7 +171,7 @@ function ScoreScreen() {
       { label: "Cooking / Convolution", value: backendSubmitResult?.cooking_score ?? cookingVal },
     ];
     if (deliveryVal !== null) {
-      list.push({ label: `Beam Delivery Precision (+${deliveryBonus} pts)`, value: deliveryVal });
+      list.push({ label: `Precision Oven Finishing (+${deliveryBonus} pts)`, value: deliveryVal });
     }
     return list;
   }, [backendSubmitResult, filteringVal, mixingVal, transformVal, cookingVal, deliveryVal, deliveryBonus]);
@@ -232,6 +230,14 @@ function ScoreScreen() {
     });
   }, [session, recipe.id, chefName, totalScore, displaySimilarity, formattedTime]);
 
+  // Persist best score for this recipe
+  useEffect(() => {
+    if (totalScore > 0) {
+      saveRecipeBestScore(recipe.id, totalScore);
+      updateRecipeRunSession({ finalScore: totalScore });
+    }
+  }, [recipe.id, totalScore]);
+
   if (unlockedStep < 7) {
     return (
       <main className="relative min-h-screen bg-background">
@@ -275,11 +281,6 @@ function ScoreScreen() {
 
   return (
     <main className="relative min-h-screen bg-background">
-      <ServeChoiceModal
-        isOpen={isServeModalOpen}
-        onClose={() => setIsServeModalOpen(false)}
-        recipeName={recipe.name}
-      />
       <TimeExpiredModal />
       <div className="lab-grid pointer-events-none absolute inset-0 opacity-[0.08]" aria-hidden />
       <div className="relative z-10 mx-auto max-w-6xl px-8 py-10">

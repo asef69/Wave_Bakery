@@ -17,6 +17,16 @@ import {
   useRecipeProgress,
   useSelectedIngredients,
 } from "@/lib/recipes";
+import {
+  getFilteredIngredient,
+  getRecipeIngredientSamples,
+} from "@/lib/pipeline";
+import {
+  computeSuperpositionPath,
+  parametricPath,
+  samplesToPath,
+} from "@/lib/signals";
+import { getCachedChickenAudio } from "@/lib/chicken-audio";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/mixing")({
@@ -59,16 +69,23 @@ const TRACE_COLORS = [
   "var(--signal)",
 ];
 
-function buildTrayIngredients(selected: IngredientDetail[]): MixIngredient[] {
+function buildTrayIngredients(
+  selected: IngredientDetail[],
+  allRecipeDetails: IngredientDetail[] = selected,
+): MixIngredient[] {
   return selected.map((s, idx) => {
+    const detailIndex = allRecipeDetails.findIndex(
+      (d) => d.name.toLowerCase() === s.name.toLowerCase(),
+    );
+    const resolvedIdx = detailIndex >= 0 ? detailIndex : idx;
     const math = getMathematicalSignal(s.name);
     return {
       name: s.name,
       kind: (s.kind ?? "generic") as IngredientKind,
-      freq: s.freq ?? 2 + (idx % 4) * 1.5,
-      amp: math?.defaultAmplitude ?? (0.5 + (idx % 3) * 0.25),
-      seed: (idx + 1) * 0.85,
-      trace: TRACE_COLORS[idx % TRACE_COLORS.length]!,
+      freq: s.freq ?? 2 + (resolvedIdx % 4) * 1.5,
+      amp: math?.defaultAmplitude ?? (0.5 + (resolvedIdx % 3) * 0.25),
+      seed: (resolvedIdx + 1) * 0.85,
+      trace: TRACE_COLORS[resolvedIdx % TRACE_COLORS.length]!,
     };
   });
 }
@@ -77,47 +94,6 @@ const W = 1000;
 const H = 320;
 const MID = H / 2;
 
-function getMixIngredientValue(ing: MixIngredient, t: number): number {
-  const mathSignal = getMathematicalSignal(ing.name);
-  if (mathSignal) {
-    return mathSignal.evaluate(t, {
-      frequency: ing.freq,
-      amplitude: ing.amp,
-      phase: ing.seed,
-    });
-  }
-  return Math.sin(t * Math.PI * 2 * ing.freq + ing.seed) * ing.amp;
-}
-
-function singlePath(ing: MixIngredient, scale = 0.3) {
-  const pts: string[] = [];
-  for (let x = 0; x <= W; x += 2) {
-    const t = x / W;
-    const val = getMixIngredientValue(ing, t);
-    const y = MID - val * H * scale;
-    pts.push(`${x === 0 ? "M" : "L"}${x} ${y.toFixed(2)}`);
-  }
-  return pts.join(" ");
-}
-
-/** Visual superposition: sums ingredient signal terms (mathematical or sinusoidal). */
-function sumPath(list: MixIngredient[]) {
-  const norm = Math.max(
-    1,
-    list.reduce((s, i) => s + i.amp, 0),
-  );
-  const pts: string[] = [];
-  for (let x = 0; x <= W; x += 2) {
-    const t = x / W;
-    let v = 0;
-    for (const ing of list) {
-      v += getMixIngredientValue(ing, t);
-    }
-    const y = MID - (v / norm) * H * 0.38;
-    pts.push(`${x === 0 ? "M" : "L"}${x} ${y.toFixed(2)}`);
-  }
-  return pts.join(" ");
-}
 
 /** Oscilloscope frame: grid, axes and tick labels. */
 function Scope({ children }: { children: React.ReactNode }) {
@@ -188,10 +164,31 @@ function MixingLab() {
   const [recipe] = useActiveRecipe();
   const [unlockedStep, unlock] = useRecipeProgress();
   const [selectedIngredients] = useSelectedIngredients();
-  const trayIngredients = useMemo(
-    () => buildTrayIngredients(selectedIngredients),
-    [selectedIngredients],
+  const effectiveIngredients = useMemo(
+    () => (selectedIngredients.length > 0 ? selectedIngredients : recipe.ingredientDetails),
+    [selectedIngredients, recipe.ingredientDetails],
   );
+  const trayIngredients = useMemo(
+    () => buildTrayIngredients(effectiveIngredients, recipe.ingredientDetails),
+    [effectiveIngredients, recipe.ingredientDetails],
+  );
+
+  const ingredientSamplesMap = useMemo(() => {
+    const map: Record<string, number[]> = {};
+    for (const ing of trayIngredients) {
+      const filtered = getFilteredIngredient(recipe.id, ing.name);
+      if (filtered && filtered.length > 0) {
+        map[ing.name] = filtered;
+      } else {
+        map[ing.name] = getRecipeIngredientSamples(recipe.id, ing.name, {
+          freq: ing.freq,
+          seed: ing.seed,
+          sampleCount: 401,
+        });
+      }
+    }
+    return map;
+  }, [recipe.id, trayIngredients]);
 
   const [bowl, setBowl] = useState<string[]>([]);
   const [dragging, setDragging] = useState<string | null>(null);
@@ -203,6 +200,15 @@ function MixingLab() {
   const total = trayIngredients.length;
   const inBowl = trayIngredients.filter((i) => bowl.includes(i.name));
   const allIn = inBowl.length === total;
+
+  const mixedSignal = useMemo(() => {
+    if (inBowl.length === 0) return null;
+    return computeMixedSignal(recipe.id, inBowl.map((i) => i.name));
+  }, [recipe.id, inBowl]);
+
+  const superpositionPath = useMemo(() => {
+    return computeSuperpositionPath(inBowl, ingredientSamplesMap, W, H);
+  }, [inBowl, ingredientSamplesMap]);
 
   const [player, setPlayer] = useState<SignalAudioPlayer | null>(null);
 
@@ -234,13 +240,16 @@ function MixingLab() {
   };
 
   const handlePlayAudio = () => {
-    if (inBowl.length === 0) return;
+    if (!mixedSignal || inBowl.length === 0) return;
     if (player) player.destroy();
-    const sig = computeMixedSignal(recipe.id, inBowl.map((i) => i.name));
+
+    const isOnlyChicken = inBowl.length === 1 && inBowl[0]?.name.toLowerCase() === "chicken";
+    const cachedChicken = getCachedChickenAudio();
     const newPlayer = new SignalAudioPlayer({
-      samples: sig.samples,
-      frequency: sig.frequency,
-      duration: 2.5,
+      samples: mixedSignal.samples,
+      frequency: mixedSignal.frequency,
+      duration: isOnlyChicken && cachedChicken ? cachedChicken.duration : 2.5,
+      audioBuffer: isOnlyChicken ? (cachedChicken?.buffer ?? null) : null,
     });
     newPlayer.play();
     setPlayer(newPlayer);
@@ -248,8 +257,8 @@ function MixingLab() {
   };
 
   const handleMix = () => {
-    const mixedSig = computeMixedSignal(recipe.id, inBowl.map((i) => i.name));
-    savePipelineStageSignal(recipe.id, "mixed", mixedSig);
+    if (!mixedSignal) return;
+    savePipelineStageSignal(recipe.id, "mixed", mixedSignal);
 
     const recipeSet = new Set(recipe.ingredients.map((i) => i.toLowerCase()));
     const bowlSet = new Set(inBowl.map((i) => i.name.toLowerCase()));
@@ -428,21 +437,53 @@ function MixingLab() {
                         <p className="font-mono text-[9px] tracking-[0.18em] text-signal uppercase">
                           {used ? "✓ in bowl" : "✓ clean"}
                         </p>
-                        <svg
-                          viewBox={`0 0 ${W} ${H}`}
-                          preserveAspectRatio="none"
-                          className="mt-1 h-6 w-full"
-                          aria-hidden
-                        >
-                          <path
-                            d={singlePath(ing)}
-                            fill="none"
-                            stroke={ing.trace}
-                            strokeWidth="12"
-                            strokeDasharray="24 16"
-                            strokeLinecap="round"
-                          />
-                        </svg>
+                        {getMathematicalSignal(ing.name)?.parametricCurve ? (
+                          (() => {
+                            const math = getMathematicalSignal(ing.name)!;
+                            const isClosed = !["patty", "lettuce", "noodle"].some((k) =>
+                              ing.name.toLowerCase().includes(k),
+                            );
+                            return (
+                              <svg
+                                viewBox={isClosed ? "0 0 100 100" : `0 0 ${W} ${H}`}
+                                preserveAspectRatio={isClosed ? "xMidYMid meet" : "none"}
+                                className="mt-1 h-7 w-full"
+                                aria-hidden
+                              >
+                                <path
+                                  d={parametricPath(
+                                    isClosed ? 100 : W,
+                                    isClosed ? 100 : H,
+                                    math.parametricCurve!.generatePoints(isClosed ? 201 : 401),
+                                    isClosed ? 8 : 16,
+                                    isClosed,
+                                  )}
+                                  fill="none"
+                                  stroke={ing.trace}
+                                  strokeWidth={isClosed ? 6 : 10}
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                            );
+                          })()
+                        ) : (
+                          <svg
+                            viewBox={`0 0 ${W} ${H}`}
+                            preserveAspectRatio="none"
+                            className="mt-1 h-6 w-full"
+                            aria-hidden
+                          >
+                            <path
+                              d={samplesToPath(ingredientSamplesMap[ing.name] ?? [], W, H, 0.35)}
+                              fill="none"
+                              stroke={ing.trace}
+                              strokeWidth="12"
+                              strokeDasharray="24 16"
+                              strokeLinecap="round"
+                            />
+                          </svg>
+                        )}
                       </div>
                       {!mixed ? (
                         <button
@@ -605,27 +646,105 @@ function MixingLab() {
                       mixed ? "opacity-0" : "opacity-100",
                     )}
                   >
-                    {inBowl.map((ing, idx) => (
-                      <path
-                        key={ing.name}
-                        d={singlePath(ing)}
-                        fill="none"
-                        stroke={ing.trace}
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeDasharray={idx % 2 === 0 ? "8 6" : "2 5"}
-                        opacity="0.95"
-                      />
-                    ))}
+                    {inBowl.map((ing, idx) => {
+                      const math = getMathematicalSignal(ing.name);
+                      if (math?.parametricCurve) {
+                        const isClosed = !["patty", "lettuce", "noodle"].some((k) =>
+                          ing.name.toLowerCase().includes(k),
+                        );
+                        if (!isClosed) {
+                          // Open parametric ribbon/ruffle curve (Noodles, Lettuce, Beef Patty) spanning the oscilloscope
+                          const pts = math.parametricCurve.generatePoints(601);
+                          return (
+                            <path
+                              key={ing.name}
+                              d={parametricPath(W, H, pts, 24, false)}
+                              fill="none"
+                              stroke={ing.trace}
+                              strokeWidth="3.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeDasharray={idx % 2 === 0 ? "10 6" : "4 6"}
+                              opacity="0.95"
+                            />
+                          );
+                        }
+
+                        // Closed parametric contours (Egg, Tomato, Onion, Sauce)
+                        const closedList = inBowl.filter((i) => {
+                          const m = getMathematicalSignal(i.name);
+                          return (
+                            Boolean(m?.parametricCurve) &&
+                            !["patty", "lettuce", "noodle"].some((k) =>
+                              i.name.toLowerCase().includes(k),
+                            )
+                          );
+                        });
+                        const closedIdx = closedList.findIndex((i) => i.name === ing.name);
+                        const totalClosed = closedList.length;
+                        const pts = math.parametricCurve.generatePoints(601);
+
+                        if (totalClosed <= 1) {
+                          return (
+                            <path
+                              key={ing.name}
+                              d={parametricPath(W, H, pts, 24, true)}
+                              fill="none"
+                              stroke={ing.trace}
+                              strokeWidth="3.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeDasharray={idx % 2 === 0 ? "10 6" : "4 6"}
+                              opacity="0.95"
+                            />
+                          );
+                        }
+
+                        const slotWidth = W / totalClosed;
+                        return (
+                          <g
+                            key={ing.name}
+                            transform={`translate(${closedIdx * slotWidth}, 0)`}
+                          >
+                            <path
+                              d={parametricPath(slotWidth, H, pts, 24, true)}
+                              fill="none"
+                              stroke={ing.trace}
+                              strokeWidth="3.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeDasharray={idx % 2 === 0 ? "10 6" : "4 6"}
+                              opacity="0.95"
+                            />
+                          </g>
+                        );
+                      }
+
+                      // 1D wave ingredients
+                      return (
+                        <path
+                          key={ing.name}
+                          d={samplesToPath(ingredientSamplesMap[ing.name] ?? [], W, H, 0.35)}
+                          fill="none"
+                          stroke={ing.trace}
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeDasharray={idx % 2 === 0 ? "8 6" : "2 5"}
+                          opacity="0.95"
+                        />
+                      );
+                    })}
                   </g>
-                  {/* superposition — solid, dominant before and after MIX */}
-                  {inBowl.length > 0 ? (
+
+                  {/* combined/mixed signal — solid, dominant before and after MIX */}
+                  {superpositionPath && inBowl.length > 0 ? (
                     <path
-                      d={sumPath(inBowl)}
+                      d={superpositionPath}
                       fill="none"
                       stroke="var(--trace-mixed)"
                       strokeWidth={mixed ? 5 : 4.5}
                       strokeLinecap="round"
+                      strokeLinejoin="round"
                       className="transition-all duration-700"
                       opacity={1}
                       style={{ filter: "drop-shadow(0 0 8px var(--trace-mixed))" }}

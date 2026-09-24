@@ -9,6 +9,9 @@ import { SignalAudioPlayer } from "@/lib/audio";
 import { getSavedLeaderboardEntries, saveCurrentDishScoreToLeaderboard } from "@/lib/leaderboard";
 import {
   completeRecipeRun,
+  getRecipeBestScore,
+  getRecipeRunSession,
+  saveRecipeBestScore,
   useActiveRecipe,
   useChefName,
   useCookedSignal,
@@ -40,18 +43,27 @@ function CompleteScreen() {
   const [cookedSignal] = useCookedSignal(recipe.id);
   const [player, setPlayer] = useState<SignalAudioPlayer | null>(null);
 
+  const session = getRecipeRunSession();
+  const bestScore = getRecipeBestScore(recipe.id);
+  const latestEntry = getSavedLeaderboardEntries().find((e) => e.recipeId === recipe.id);
+  const finalScore =
+    session?.recipeId === recipe.id && session?.finalScore != null
+      ? session.finalScore
+      : (latestEntry?.score ?? bestScore ?? 0);
+  const accuracy = latestEntry?.accuracy ?? (session?.cookingAccuracy ?? 94);
+  const starsDisplay =
+    finalScore >= 900 ? "★ ★ ★" : finalScore >= 700 ? "★ ★ ☆" : finalScore > 0 ? "★ ☆ ☆" : "— — —";
+
   useEffect(() => {
-    completeRecipeRun();
+    completeRecipeRun(recipe.id, finalScore);
+    if (finalScore > 0) {
+      saveRecipeBestScore(recipe.id, finalScore);
+    }
     saveCurrentDishScoreToLeaderboard({ recipeId: recipe.id });
     return () => {
       if (player) player.destroy();
     };
-  }, [player, recipe.id]);
-
-  const latestEntry = getSavedLeaderboardEntries().find((e) => e.recipeId === recipe.id);
-  const finalScore = latestEntry?.score ?? 940;
-  const accuracy = latestEntry?.accuracy ?? 94;
-  const starsDisplay = accuracy >= 90 ? "★ ★ ★" : accuracy >= 75 ? "★ ★ ☆" : "★ ☆ ☆";
+  }, [player, recipe.id, finalScore]);
 
   const handlePlayAudio = () => {
     if (player) player.destroy();

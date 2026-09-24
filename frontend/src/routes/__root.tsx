@@ -10,6 +10,7 @@ import {
 import { useEffect, type ReactNode } from "react";
 
 import { useTheme } from "@/lib/theme";
+import { loadChickenAudio } from "@/lib/chicken-audio";
 import appCss from "../styles.css?url";
 
 function NotFoundComponent() {
@@ -144,6 +145,10 @@ function RootShell({ children }: { children: ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   useTheme();
+
+  useEffect(() => {
+    loadChickenAudio("/sounds/chicken.wav").catch(() => {});
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>

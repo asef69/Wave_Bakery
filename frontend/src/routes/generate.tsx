@@ -16,6 +16,12 @@ import {
   useRecipeProgress,
   useSelectedIngredients,
 } from "@/lib/recipes";
+import {
+  loadChickenAudio,
+  getCachedChickenAudio,
+  getChickenStaticSamples,
+  type DecodedChickenAudio,
+} from "@/lib/chicken-audio";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/generate")({
@@ -54,6 +60,37 @@ function GenerateScreen() {
   const [playingClip, setPlayingClip] = useState<string | null>(null);
   const [audioPlayer, setAudioPlayer] = useState<SignalAudioPlayer | null>(null);
 
+  // Active ingredient for the waveform generator preview
+  const activeIng: IngredientDetail = useMemo(() => {
+    return (
+      ALL_AVAILABLE_INGREDIENTS.find(
+        (i) => i.name.toLowerCase() === activeIngredientName.toLowerCase(),
+      ) ?? ALL_AVAILABLE_INGREDIENTS[0]!
+    );
+  }, [activeIngredientName]);
+
+  const isChicken =
+    activeIng.name.toLowerCase() === "chicken" || activeIng.kind === "chicken";
+  const [chickenAudio, setChickenAudio] = useState<DecodedChickenAudio | null>(() =>
+    getCachedChickenAudio(),
+  );
+
+  useEffect(() => {
+    let isCancelled = false;
+    loadChickenAudio("/sounds/chicken.wav")
+      .then((data) => {
+        if (!isCancelled) {
+          setChickenAudio(data);
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to decode chicken.wav in Signal Generation:", err);
+      });
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     return () => {
       if (audioPlayer) audioPlayer.destroy();
@@ -63,11 +100,14 @@ function GenerateScreen() {
   const handlePlayAudio = (clipId: string, samples: number[], freq: number) => {
     if (audioPlayer) audioPlayer.destroy();
     setPlayingClip(clipId);
+    const isChickenAudio = isChicken || clipId.toLowerCase().includes("chicken");
+    const dur = isChickenAudio && chickenAudio ? chickenAudio.duration : 2.5;
     const p = new SignalAudioPlayer(
       {
         samples,
         frequency: freq,
-        duration: 2.5,
+        duration: dur,
+        audioBuffer: isChickenAudio ? (chickenAudio?.buffer ?? null) : null,
       },
       (state) => {
         if (state.isEnded) {
@@ -79,20 +119,14 @@ function GenerateScreen() {
     p.play();
   };
 
-  // Active ingredient for the waveform generator preview
-  const activeIng: IngredientDetail = useMemo(() => {
-    return (
-      ALL_AVAILABLE_INGREDIENTS.find(
-        (i) => i.name.toLowerCase() === activeIngredientName.toLowerCase(),
-      ) ?? ALL_AVAILABLE_INGREDIENTS[0]!
-    );
-  }, [activeIngredientName]);
-
   const activeMathSignal = useMemo(() => {
     return getMathematicalSignal(activeIng.name);
   }, [activeIng]);
 
   const idealSamples = useMemo(() => {
+    if (isChicken) {
+      return chickenAudio ? chickenAudio.samples : getChickenStaticSamples();
+    }
     return computeIngredientSamples({
       freq: activeIng.freq,
       washable: false,
@@ -100,17 +134,20 @@ function GenerateScreen() {
       seed: 0,
       noise: 0,
     });
-  }, [activeIng]);
+  }, [activeIng, isChicken, chickenAudio]);
 
   const activeSamples = useMemo(() => {
+    if (isChicken) {
+      return chickenAudio ? chickenAudio.samples : getChickenStaticSamples();
+    }
     return computeIngredientSamples({
       freq: activeIng.freq,
       washable: activeIng.washable,
       name: activeIng.name,
       seed: 0,
-      noise: generated ? (activeIng.washable ? 0.88 : 0.0) : 0.1,
+      noise: activeIng.washable ? (generated ? 0.88 : 0.1) : 0.0,
     });
-  }, [activeIng, generated]);
+  }, [activeIng, generated, isChicken, chickenAudio]);
 
   // Filtered catalogue list
   const visibleCatalogue = useMemo(() => {
@@ -483,57 +520,78 @@ function GenerateScreen() {
               className="mt-3 border-0 p-0"
               frequency={activeIng.freq}
               samples={idealSamples}
+              parametricPoints={
+                activeMathSignal?.parametricCurve
+                  ? activeMathSignal.parametricCurve.generatePoints()
+                  : undefined
+              }
+              square={Boolean(activeMathSignal?.parametricCurve)}
               label={`${activeIng.name} · ${activeMathSignal ? `${activeMathSignal.waveformType} wave` : "pure tone"}`}
             />
           </div>
 
-          <div className="lab-panel p-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-mono text-[10px] tracking-[0.24em] text-signal/70 uppercase">
-                  {generated
-                    ? activeIng.washable
+          {activeIng.washable ? (
+            <div className="lab-panel p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-mono text-[10px] tracking-[0.24em] text-signal/70 uppercase">
+                    {generated
                       ? "Generated Raw Signal (Noisy)"
-                      : "Generated Raw Signal (Clean)"
-                    : "Awaiting Generation"}
-                </p>
-                {generated ? (
-                  <span
-                    className={cn(
-                      "font-mono text-[9px] font-bold uppercase",
-                      activeIng.washable ? "text-primary" : "text-signal",
-                    )}
-                  >
-                    {activeIng.washable ? "Needs Washing" : "Ready to Mix"}
-                  </span>
-                ) : null}
+                      : "Awaiting Generation"}
+                  </p>
+                  {generated ? (
+                    <span className="font-mono text-[9px] font-bold uppercase text-primary">
+                      Needs Washing
+                    </span>
+                  ) : null}
+                </div>
+                <GameButton
+                  size="sm"
+                  variant="lab"
+                  className="uppercase text-xs"
+                  onClick={() => handlePlayAudio(`raw-${activeIng.name}`, activeSamples, activeIng.freq)}
+                >
+                  {playingClip === `raw-${activeIng.name}` ? "🔊 Playing..." : "▶ Play Raw Signal"}
+                </GameButton>
               </div>
-              <GameButton
-                size="sm"
-                variant="lab"
-                className="uppercase text-xs"
-                onClick={() => handlePlayAudio(`raw-${activeIng.name}`, activeSamples, activeIng.freq)}
-              >
-                {playingClip === `raw-${activeIng.name}` ? "🔊 Playing..." : "▶ Play Raw Signal"}
-              </GameButton>
+              <MiniWave
+                className="mt-3 border-0 p-0"
+                frequency={activeIng.freq}
+                samples={activeSamples}
+                parametricPoints={
+                  activeMathSignal?.parametricCurve
+                    ? activeMathSignal.parametricCurve.generatePoints()
+                    : undefined
+                }
+                square={Boolean(activeMathSignal?.parametricCurve)}
+                noise={generated ? 0.88 : 0.1}
+                color="var(--signal-alt)"
+                label={`${activeIng.name} · raw delivery`}
+              />
+              <p className="mt-2 font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase">
+                Noise level: {generated ? "68% · Noisy (Washable)" : "—"}
+              </p>
             </div>
-            <MiniWave
-              className="mt-3 border-0 p-0"
-              frequency={activeIng.freq}
-              samples={activeSamples}
-              noise={generated ? (activeIng.washable ? 0.88 : 0.0) : 0.1}
-              color={generated && !activeIng.washable ? "var(--signal)" : "var(--signal-alt)"}
-              label={`${activeIng.name} · raw delivery`}
-            />
-            <p className="mt-2 font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase">
-              Noise level:{" "}
-              {generated
-                ? activeIng.washable
-                  ? "68% · Noisy (Washable)"
-                  : "0% · Clean (Directly Usable)"
-                : "—"}
-            </p>
-          </div>
+          ) : (
+            <div className="lab-panel border border-signal/30 bg-card/60 p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-mono text-[10px] tracking-[0.24em] text-signal-alt uppercase">
+                    Signal Delivery Status
+                  </p>
+                  <span className="font-mono text-[9px] font-extrabold text-signal-alt uppercase">
+                    Direct Clean Signal · Zero Contamination
+                  </span>
+                </div>
+                <span className="rounded-md border border-signal/40 bg-signal/15 px-2.5 py-1 font-mono text-[10px] font-bold text-signal-alt uppercase">
+                  Ready to Mix ✓
+                </span>
+              </div>
+              <p className="mt-3 text-xs text-muted-foreground leading-relaxed">
+                {activeIng.name} is a pantry-ready ingredient with zero field contamination. It generates clean with 0% noise and bypasses the Filtering Lab directly to Mixing.
+              </p>
+            </div>
+          )}
 
           <div className="flex flex-wrap gap-3">
             <GameButton

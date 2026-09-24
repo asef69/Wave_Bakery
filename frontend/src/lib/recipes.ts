@@ -117,9 +117,9 @@ export const recipes: Recipe[] = [
     ],
     difficulty: "Easy",
     pipeline: ["GENERATE", "FILTER", "MIX", "AMPLITUDE", "TIME SCALE", "CONVOLUTION", "COMPARE"],
-    progress: "complete",
-    bestScore: 940,
-    stars: 3,
+    progress: "new",
+    bestScore: null,
+    stars: 0,
     seasoningTarget: { amplitude: 1.5, frequency: 0.8 },
     marinateTarget: { timeScale: 1.25 },
     cookingMethod: { id: "grill", name: "GRILL", icon: "🔥", ir: "GRILL (sharp spiky taps)" },
@@ -203,9 +203,9 @@ export const recipes: Recipe[] = [
     ],
     difficulty: "Easy",
     pipeline: ["GENERATE", "FILTER", "MIX", "AMPLITUDE", "TIME SCALE", "CONVOLUTION", "COMPARE"],
-    progress: "in-progress",
-    bestScore: 610,
-    stars: 2,
+    progress: "new",
+    bestScore: null,
+    stars: 0,
     seasoningTarget: { amplitude: 1.2, frequency: 1.1 },
     marinateTarget: { timeScale: 0.85 },
     cookingMethod: {
@@ -494,21 +494,105 @@ export const progressLabel: Record<Recipe["progress"], string> = {
   complete: "Perfected",
 };
 
-let currentActiveRecipeId = "burger";
+export const BEST_SCORES_KEY = "wavebakery_recipe_best_scores";
 
-export function getActiveRecipe(): Recipe {
+export function getRecipeBestScores(): Record<string, number> {
   if (typeof window !== "undefined") {
     try {
-      const stored = window.localStorage.getItem("wavebakery_active_recipe");
+      const stored = window.localStorage.getItem(BEST_SCORES_KEY);
       if (stored) {
-        const found = recipes.find((r) => r.id === stored);
-        if (found) return found;
+        const parsed = JSON.parse(stored);
+        if (typeof parsed === "object" && parsed !== null) {
+          return parsed as Record<string, number>;
+        }
       }
     } catch {
       // ignore
     }
   }
-  return recipes.find((r) => r.id === currentActiveRecipeId) ?? recipes[0]!;
+  return {};
+}
+
+export function getRecipeBestScore(recipeId: string): number | null {
+  const scores = getRecipeBestScores();
+  const val = scores[recipeId];
+  return typeof val === "number" && !isNaN(val) ? val : null;
+}
+
+export function saveRecipeBestScore(recipeId: string, score: number): number {
+  if (typeof window !== "undefined") {
+    try {
+      const scores = getRecipeBestScores();
+      const current = scores[recipeId];
+      const rounded = Math.round(score);
+      if (current === undefined || rounded > current) {
+        scores[recipeId] = rounded;
+        window.localStorage.setItem(BEST_SCORES_KEY, JSON.stringify(scores));
+        window.dispatchEvent(new Event("wavebakery_best_scores_changed"));
+        window.dispatchEvent(new Event("wavebakery_recipe_changed"));
+        return rounded;
+      }
+      return current;
+    } catch {
+      // ignore
+    }
+  }
+  return Math.round(score);
+}
+
+export function useRecipeBestScores(): Record<string, number> {
+  const [scores, setScores] = useState<Record<string, number>>(() => getRecipeBestScores());
+
+  useEffect(() => {
+    const handler = () => {
+      setScores(getRecipeBestScores());
+    };
+    window.addEventListener("wavebakery_best_scores_changed", handler);
+    window.addEventListener("storage", handler);
+    return () => {
+      window.removeEventListener("wavebakery_best_scores_changed", handler);
+      window.removeEventListener("storage", handler);
+    };
+  }, []);
+
+  return scores;
+}
+
+export function enrichRecipeWithBestScore(
+  recipe: Recipe,
+  scores?: Record<string, number>,
+): Recipe {
+  const bestScores = scores ?? getRecipeBestScores();
+  const bestScore = bestScores[recipe.id] ?? null;
+  const stars = bestScore !== null ? (bestScore >= 900 ? 3 : bestScore >= 700 ? 2 : 1) : 0;
+  const progress: Recipe["progress"] =
+    bestScore !== null ? (bestScore >= 900 ? "complete" : "in-progress") : "new";
+  return {
+    ...recipe,
+    bestScore,
+    stars,
+    progress,
+  };
+}
+
+let currentActiveRecipeId = "burger";
+
+export function getActiveRecipe(): Recipe {
+  let baseRecipe = recipes[0]!;
+  if (typeof window !== "undefined") {
+    try {
+      const stored = window.localStorage.getItem("wavebakery_active_recipe");
+      if (stored) {
+        const found = recipes.find((r) => r.id === stored);
+        if (found) baseRecipe = found;
+      }
+    } catch {
+      // ignore
+    }
+  } else {
+    baseRecipe = recipes.find((r) => r.id === currentActiveRecipeId) ?? recipes[0]!;
+  }
+  return enrichRecipeWithBestScore(baseRecipe);
 }
 
 export function setActiveRecipe(id: string) {
@@ -531,9 +615,11 @@ export function useActiveRecipe(): [Recipe, (id: string) => void] {
       setRecipeState(getActiveRecipe());
     };
     window.addEventListener("wavebakery_recipe_changed", handler);
+    window.addEventListener("wavebakery_best_scores_changed", handler);
     window.addEventListener("storage", handler);
     return () => {
       window.removeEventListener("wavebakery_recipe_changed", handler);
+      window.removeEventListener("wavebakery_best_scores_changed", handler);
       window.removeEventListener("storage", handler);
     };
   }, []);
@@ -659,6 +745,7 @@ export interface RecipeRunSession {
   startTime: number;
   endTime?: number;
   isCompleted: boolean;
+  finalScore?: number;
   backendSessionId?: string;
   backendSeed?: number;
   backendSubmitResult?: SubmitResult;
@@ -677,6 +764,9 @@ export interface RecipeRunSession {
 
 export function startRecipeRun(recipeId: string, difficulty: RecipeDifficulty) {
   if (typeof window !== "undefined") {
+    // Reset progress and transient pipeline signals for this recipe to ensure clean isolation
+    resetRecipeProgress(recipeId);
+
     // Ensure target expected signal is precomputed and persisted for the recipe
     getOrSaveExpectedSignal(recipeId);
 
@@ -779,7 +869,7 @@ export function recordStageAccuracy(
   }
 }
 
-export function completeRecipeRun() {
+export function completeRecipeRun(recipeId?: string, score?: number) {
   if (typeof window !== "undefined") {
     try {
       const stored = window.localStorage.getItem("wavebakery_recipe_session");
@@ -788,9 +878,20 @@ export function completeRecipeRun() {
         if (!session.isCompleted) {
           session.isCompleted = true;
           session.endTime = Date.now();
+          if (score != null && !isNaN(score)) {
+            session.finalScore = Math.round(score);
+          }
+          window.localStorage.setItem("wavebakery_recipe_session", JSON.stringify(session));
+          window.dispatchEvent(new Event("wavebakery_session_changed"));
+        } else if (score != null && !isNaN(score) && session.finalScore === undefined) {
+          session.finalScore = Math.round(score);
           window.localStorage.setItem("wavebakery_recipe_session", JSON.stringify(session));
           window.dispatchEvent(new Event("wavebakery_session_changed"));
         }
+      }
+      const targetRecipeId = recipeId ?? getRecipeRunSession()?.recipeId;
+      if (targetRecipeId && score != null && !isNaN(score) && score > 0) {
+        saveRecipeBestScore(targetRecipeId, score);
       }
     } catch {
       // ignore

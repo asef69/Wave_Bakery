@@ -10,6 +10,7 @@ import { RecipeCard } from "@/components/game/RecipeCard";
 import { WaveformDisplay } from "@/components/game/WaveformDisplay";
 import {
   type RecipeDifficulty,
+  enrichRecipeWithBestScore,
   getOrSaveExpectedSignal,
   initializeAllExpectedSignals,
   progressLabel,
@@ -17,6 +18,7 @@ import {
   resetRecipeProgress,
   setActiveRecipe,
   startRecipeRun,
+  useRecipeBestScores,
   type Recipe,
 } from "@/lib/recipes";
 
@@ -112,6 +114,8 @@ function RecipeBook() {
 function RecipeBriefing({ recipe, onBack }: { recipe: Recipe; onBack: () => void }) {
   const [isDifficultyModalOpen, setIsDifficultyModalOpen] = useState(false);
   const navigate = useNavigate();
+  const bestScores = useRecipeBestScores();
+  const effectiveRecipe = enrichRecipeWithBestScore(recipe, bestScores);
 
   const expectedSignal = useMemo(() => getOrSaveExpectedSignal(recipe.id), [recipe.id]);
 
@@ -201,7 +205,7 @@ function RecipeBriefing({ recipe, onBack }: { recipe: Recipe; onBack: () => void
                 <div className="rounded-xl border border-border bg-secondary/50 p-2.5 text-center">
                   <span className="block text-muted-foreground">Status</span>
                   <span className="mt-0.5 font-display text-xs font-extrabold text-primary">
-                    {progressLabel[recipe.progress]}
+                    {progressLabel[effectiveRecipe.progress]}
                   </span>
                 </div>
               </div>
