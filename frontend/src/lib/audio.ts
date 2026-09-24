@@ -117,7 +117,6 @@ export class SignalAudioPlayer {
     }
   }
 
-
   private tick = () => {
     if (!this.isPlaying || !this.ctx) return;
     const elapsed = this.ctx.currentTime - this.startTime;

@@ -1,6 +1,6 @@
 import { DishGlyph } from "@/components/game/DishGlyph";
 import { GameButton } from "@/components/game/GameButton";
-import { progressLabel, type Recipe } from "@/lib/recipes";
+import { progressLabel, useBestScore, type Recipe } from "@/lib/recipes";
 import { cn } from "@/lib/utils";
 
 const difficultyTone: Record<Recipe["difficulty"], string> = {
@@ -30,6 +30,9 @@ function Stars({ count }: { count: number }) {
 }
 
 export function RecipeCard({ recipe, onCook }: { recipe: Recipe; onCook: () => void }) {
+  const { bestScore: liveBestScore, stars: liveStars } = useBestScore(recipe.id, recipe.bestScore);
+  const displayStars = liveStars ?? recipe.stars;
+
   return (
     <article className="group kitchen-card relative flex flex-col gap-4 p-5 transition-transform duration-200 hover:-translate-y-1">
       {/* stitched cookbook edge */}
@@ -78,10 +81,10 @@ export function RecipeCard({ recipe, onCook }: { recipe: Recipe; onCook: () => v
             {progressLabel[recipe.progress]}
           </p>
           <p className="font-display text-sm font-bold text-foreground">
-            Best {recipe.bestScore !== null ? `${recipe.bestScore} pts` : "— — —"}
+            Best {liveBestScore !== null ? `${liveBestScore} pts` : "— — —"}
           </p>
         </div>
-        <Stars count={recipe.stars} />
+        <Stars count={displayStars} />
       </div>
 
       <div className="pl-3">

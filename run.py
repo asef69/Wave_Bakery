@@ -18,7 +18,7 @@ import urllib.error
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_DIR = os.path.join(ROOT_DIR, "backend")
-FRONTEND_DIR = os.path.join(ROOT_DIR, "frontend", "wavekitchen-sim")
+FRONTEND_DIR = os.path.join(ROOT_DIR, "frontend")
 
 def find_python():
     """Locate the project virtualenv Python or fallback to sys.executable."""
@@ -65,6 +65,10 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
 def main():
     py_exec = find_python()
     npm_cmd = find_npm()
+
+    for directory in (BACKEND_DIR, FRONTEND_DIR):
+        if not os.path.isdir(directory):
+            raise FileNotFoundError(f"Project directory not found: {directory}")
 
     print("=" * 65)
     print("  WAVEKITCHEN / WAVEBAKERY SIMULATION RUNNER")

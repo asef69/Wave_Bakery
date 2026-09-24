@@ -1,6 +1,7 @@
 import { Sliders, RotateCcw, Compass, Waves } from "lucide-react";
 import type { SpeakerState, WindowType } from "@/lib/beamforming";
-import { getPresetPhasesForAngle, WINDOW_OPTIONS } from "@/lib/beamforming";
+import { getPresetPhasesForAngle } from "@/lib/beamforming";
+import { WindowSelector } from "@/components/game/WindowSelector";
 import { GameButton } from "@/components/game/GameButton";
 import { cn } from "@/lib/utils";
 
@@ -69,45 +70,13 @@ export function PhaseControls({
 
       {/* Sidelobe Tapering Window Selector */}
       {onSelectWindow && (
-        <div className="mt-4 rounded-xl border border-border/80 bg-secondary/40 p-3.5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 font-mono text-[11px] font-bold text-foreground uppercase">
-              <Waves className="h-3.5 w-3.5 text-signal" />
-              <span>Acoustic Windowing / Sidelobe Suppression</span>
-            </div>
-            <span className="font-mono text-[10px] text-muted-foreground uppercase">
-              Prevents Table Spillover
-            </span>
-          </div>
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            Applies amplitude tapering across the array to eliminate sidelobe leakage into other diners.
-          </p>
-
-          <div className="mt-2.5 grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {WINDOW_OPTIONS.map((opt) => (
-              <button
-                key={opt.id}
-                type="button"
-                onClick={() => onSelectWindow(opt.id)}
-                className={cn(
-                  "flex flex-col items-start rounded-lg border p-2 text-left transition-all cursor-pointer",
-                  selectedWindow === opt.id
-                    ? "border-signal bg-signal/15 text-foreground shadow-xs"
-                    : "border-border/80 bg-card/60 text-muted-foreground hover:border-primary/40",
-                )}
-              >
-                <div className="flex w-full items-center justify-between">
-                  <span className="font-display text-xs font-bold">{opt.name.split(" ")[0]}</span>
-                  <span className="rounded bg-black/30 px-1 py-0.2 font-mono text-[8px] font-extrabold text-signal">
-                    {opt.sidelobeLevelDb}
-                  </span>
-                </div>
-                <span className="mt-1 font-mono text-[9px] text-muted-foreground leading-tight">
-                  {opt.beamwidthNote}
-                </span>
-              </button>
-            ))}
-          </div>
+        <div className="mt-4">
+          <WindowSelector
+            selectedWindow={selectedWindow}
+            onSelectWindow={onSelectWindow}
+            title="Spatial Array Windowing / Sidelobe Suppression"
+            subtitle="Applies amplitude tapering across the array to eliminate sidelobe leakage into other diners."
+          />
         </div>
       )}
 

@@ -158,13 +158,7 @@ function LabWave({
           strokeWidth="1"
           opacity="0.18"
         />
-        <path
-          d={pathD}
-          fill="none"
-          stroke={stroke}
-          strokeWidth="2.5"
-          strokeLinecap="round"
-        />
+        <path d={pathD} fill="none" stroke={stroke} strokeWidth="2.5" strokeLinecap="round" />
       </svg>
     </div>
   );
@@ -238,7 +232,8 @@ function Spectrum({
         <div className="relative flex h-64 flex-1 items-end gap-[3px] border-b border-l border-signal/30 pl-1">
           {bars.map((b, i) => {
             const cut = b.hz > cutoff;
-            const height = applied && cut ? 2 : b.h;
+            // Squash height immediately when cut (visually dampening)
+            const height = cut ? 2 : b.h;
             return (
               <span
                 key={i}
@@ -372,7 +367,7 @@ function FilteringLab() {
   const session = getRecipeRunSession();
   const backendSessionId = session?.backendSessionId;
   const slotIndex = recipe.ingredients.findIndex(
-    (n) => n.toLowerCase() === current.name.toLowerCase()
+    (n) => n.toLowerCase() === current.name.toLowerCase(),
   );
   const effectiveSlot = slotIndex >= 0 ? slotIndex : index;
 
@@ -380,10 +375,11 @@ function FilteringLab() {
 
   useEffect(() => {
     if (applied && backendSessionId) {
-      api.filterIngredient(backendSessionId, effectiveSlot, {
-        tools: [{ kind: "lowpass", cutoff }],
-        want_spectrogram: false,
-      })
+      api
+        .filterIngredient(backendSessionId, effectiveSlot, {
+          tools: [{ kind: "lowpass", cutoff }],
+          want_spectrogram: false,
+        })
         .then((res) => {
           if (res && res.prep && typeof res.prep.score === "number") {
             setBackendPrepScore(res.prep.score);
@@ -414,9 +410,28 @@ function FilteringLab() {
   }, [recipe.id, current.name, current.seed, current.baseFreq]);
 
   const filteredSamples = useMemo(() => {
-    if (!applied) return rawSamples;
-    return applyLowPassFilter(rawSamples, cutoff, 44100);
-  }, [rawSamples, cutoff, applied]);
+    return rawSamples.map((raw, i) => {
+      const clean = cleanSamples[i] ?? 0;
+      const noise = raw - clean;
+
+      let signalGain = 1.0;
+      let noiseGain = 1.0;
+
+      if (cutoff < current.idealCutoff) {
+        // Cutoff is below signal fundamental: attenuates the main signal
+        signalGain = Math.max(0, 1 - (current.idealCutoff - cutoff) / 200);
+        noiseGain = 0;
+      } else {
+        // Cutoff is above signal: signal is safe, noise gets reduced as cutoff approaches ideal
+        const noiseRange = 900 - current.idealCutoff;
+        noiseGain = noiseRange > 0 ? (cutoff - current.idealCutoff) / noiseRange : 0;
+        // Non-linear decay for smoother visual
+        noiseGain = Math.pow(Math.max(0, Math.min(1, noiseGain)), 1.5);
+      }
+
+      return clean * signalGain + noise * noiseGain;
+    });
+  }, [rawSamples, cleanSamples, cutoff, current.idealCutoff]);
 
   const cleanliness = useMemo(() => {
     if (backendPrepScore !== null && applied) {
@@ -437,6 +452,7 @@ function FilteringLab() {
   const [recordedAccuracies, setRecordedAccuracies] = useState<number[]>([]);
 
   const [player, setPlayer] = useState<SignalAudioPlayer | null>(null);
+  const [activePlayerId, setActivePlayerId] = useState<string | null>(null);
 
   useEffect(() => {
     return () => {
@@ -444,18 +460,24 @@ function FilteringLab() {
     };
   }, [player]);
 
-  const handlePlaySignal = () => {
+  const handlePlaySignal = (type: string, samplesToPlay: number[]) => {
     if (player) {
       player.destroy();
+      setPlayer(null);
+      if (activePlayerId === type) {
+        setActivePlayerId(null);
+        return;
+      }
     }
-    const samplesToPlay = isClean || cleanedThis ? cleanSamples : applied ? filteredSamples : rawSamples;
-    const newPlayer = new SignalAudioPlayer({
-      samples: samplesToPlay,
-      frequency: current.baseFreq,
-      duration: 2.0,
-    });
+    const newPlayer = new SignalAudioPlayer(
+      { samples: samplesToPlay, frequency: current.baseFreq, duration: 2.0 },
+      (s) => {
+        if (s.isEnded) setActivePlayerId(null);
+      },
+    );
     newPlayer.play();
     setPlayer(newPlayer);
+    setActivePlayerId(type);
   };
 
   const chefLine =
@@ -475,7 +497,8 @@ function FilteringLab() {
 
   const advance = () => {
     if (backendSessionId) {
-      api.acceptIngredient(backendSessionId, effectiveSlot)
+      api
+        .acceptIngredient(backendSessionId, effectiveSlot)
         .catch((err) => console.warn("Backend accept error:", err));
     }
     saveFilteredIngredient(recipe.id, current.name, filteredSamples);
@@ -753,8 +776,21 @@ function FilteringLab() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
-                  <GameButton variant="lab" size="sm" onClick={handlePlaySignal}>
-                    ▶ Play Signal
+                  <GameButton
+                    variant="lab"
+                    size="sm"
+                    onClick={() =>
+                      handlePlaySignal(
+                        "main",
+                        isClean || cleanedThis
+                          ? cleanSamples
+                          : applied
+                            ? filteredSamples
+                            : rawSamples,
+                      )
+                    }
+                  >
+                    {activePlayerId === "main" ? "⏸ Pause Signal" : "▶ Play Signal"}
                   </GameButton>
                   <GameButton
                     variant="secondary"
@@ -777,8 +813,8 @@ function FilteringLab() {
                     sublabel="noisy ingredient signal"
                     samples={rawSamples}
                     tall
-                    onPlay={handlePlaySignal}
-                    playLabel="▶ Play"
+                    onPlay={() => handlePlaySignal("raw-main", rawSamples)}
+                    playLabel={activePlayerId === "raw-main" ? "⏸ Pause" : "▶ Play"}
                   />
                   <p className="font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase">
                     each ingredient carries its own waveform and sound
@@ -866,41 +902,23 @@ function FilteringLab() {
                   label="Raw Input"
                   sublabel="noisy ingredient signal"
                   samples={rawSamples}
-                  onPlay={() => handlePlaySignal()}
-                  playLabel="▶ Play Raw"
+                  onPlay={() => handlePlaySignal("raw", rawSamples)}
+                  playLabel={activePlayerId === "raw" ? "⏸ Pause" : "▶ Play Raw"}
                 />
                 <LabWave
                   label="Filtered Output"
                   sublabel={applied ? "player filtered result" : "filter not applied"}
                   samples={filteredSamples}
                   tone="warm"
-                  onPlay={() => {
-                    if (player) player.destroy();
-                    const newPlayer = new SignalAudioPlayer({
-                      samples: filteredSamples,
-                      frequency: current.baseFreq,
-                      duration: 2.0,
-                    });
-                    newPlayer.play();
-                    setPlayer(newPlayer);
-                  }}
-                  playLabel="▶ Play Output"
+                  onPlay={() => handlePlaySignal("filtered", filteredSamples)}
+                  playLabel={activePlayerId === "filtered" ? "⏸ Pause" : "▶ Play Output"}
                 />
                 <LabWave
                   label="Target Clean Signal"
                   sublabel="desired pure waveform"
                   samples={cleanSamples}
-                  onPlay={() => {
-                    if (player) player.destroy();
-                    const newPlayer = new SignalAudioPlayer({
-                      samples: cleanSamples,
-                      frequency: current.baseFreq,
-                      duration: 2.0,
-                    });
-                    newPlayer.play();
-                    setPlayer(newPlayer);
-                  }}
-                  playLabel="▶ Play Target"
+                  onPlay={() => handlePlaySignal("clean", cleanSamples)}
+                  playLabel={activePlayerId === "clean" ? "⏸ Pause" : "▶ Play Target"}
                 />
               </div>
             </div>

@@ -70,6 +70,7 @@ export type Recipe = {
   ingredients: string[];
   ingredientDetails: IngredientDetail[];
   difficulty: "Easy" | "Medium" | "Hard";
+  tier?: number;
   pipeline: PipelineStep[];
   progress: "locked" | "new" | "in-progress" | "complete";
   bestScore: number | null;
@@ -82,6 +83,10 @@ export type Recipe = {
   cookingMethod: CookingMethod;
   washableIngredients: string[];
   steps: RecipeStep[];
+  requiresChop?: boolean;
+  requiresCaramelize?: boolean;
+  chopTarget?: number;
+  caramelizeTarget?: { carrier: number; depth: number };
 };
 
 export const recipes: Recipe[] = [
@@ -95,8 +100,20 @@ export const recipes: Recipe[] = [
     ingredients: ["Bun", "Beef Patty", "Cheese", "Lettuce", "Tomato", "Salt"],
     ingredientDetails: [
       { name: "Bun", instrument: "Mathematical Signal", freq: 3, washable: false, kind: "bun" },
-      { name: "Beef Patty", instrument: "Parametric Signal", freq: 2, washable: false, kind: "patty" },
-      { name: "Cheese", instrument: "Mathematical Signal", freq: 6, washable: false, kind: "cheese" },
+      {
+        name: "Beef Patty",
+        instrument: "Parametric Signal",
+        freq: 2,
+        washable: false,
+        kind: "patty",
+      },
+      {
+        name: "Cheese",
+        instrument: "Mathematical Signal",
+        freq: 6,
+        washable: false,
+        kind: "cheese",
+      },
       {
         name: "Lettuce",
         instrument: "Parametric Signal",
@@ -118,8 +135,8 @@ export const recipes: Recipe[] = [
     difficulty: "Easy",
     pipeline: ["GENERATE", "FILTER", "MIX", "AMPLITUDE", "TIME SCALE", "CONVOLUTION", "COMPARE"],
     progress: "complete",
-    bestScore: 940,
-    stars: 3,
+    bestScore: null,
+    stars: 0,
     seasoningTarget: { amplitude: 1.5, frequency: 0.8 },
     marinateTarget: { timeScale: 1.25 },
     cookingMethod: { id: "grill", name: "GRILL", icon: "🔥", ir: "GRILL (sharp spiky taps)" },
@@ -180,8 +197,20 @@ export const recipes: Recipe[] = [
     ingredients: ["Bread", "Chicken", "Cheese", "Lettuce", "Tomato", "Salt", "Sauce"],
     ingredientDetails: [
       { name: "Bread", instrument: "Mathematical Signal", freq: 3, washable: false, kind: "bread" },
-      { name: "Chicken", instrument: "Recorded Signal", freq: 2.5, washable: false, kind: "chicken" },
-      { name: "Cheese", instrument: "Mathematical Signal", freq: 6, washable: false, kind: "cheese" },
+      {
+        name: "Chicken",
+        instrument: "Recorded Signal",
+        freq: 2.5,
+        washable: false,
+        kind: "chicken",
+      },
+      {
+        name: "Cheese",
+        instrument: "Mathematical Signal",
+        freq: 6,
+        washable: false,
+        kind: "cheese",
+      },
       {
         name: "Lettuce",
         instrument: "Parametric Signal",
@@ -204,8 +233,8 @@ export const recipes: Recipe[] = [
     difficulty: "Easy",
     pipeline: ["GENERATE", "FILTER", "MIX", "AMPLITUDE", "TIME SCALE", "CONVOLUTION", "COMPARE"],
     progress: "in-progress",
-    bestScore: 610,
-    stars: 2,
+    bestScore: null,
+    stars: 0,
     seasoningTarget: { amplitude: 1.2, frequency: 1.1 },
     marinateTarget: { timeScale: 0.85 },
     cookingMethod: {
@@ -279,7 +308,13 @@ export const recipes: Recipe[] = [
         idealCutoff: 460,
         kind: "egg",
       },
-      { name: "Butter", instrument: "Mathematical Signal", freq: 3, washable: false, kind: "butter" },
+      {
+        name: "Butter",
+        instrument: "Mathematical Signal",
+        freq: 3,
+        washable: false,
+        kind: "butter",
+      },
       { name: "Sugar", instrument: "Mathematical Signal", freq: 5, washable: false, kind: "sugar" },
       { name: "Milk", instrument: "Mathematical Signal", freq: 5, washable: false, kind: "milk" },
     ],
@@ -340,7 +375,13 @@ export const recipes: Recipe[] = [
     servings: "1 steaming bowl",
     ingredients: ["Noodles", "Egg", "Chicken", "Onion", "Salt"],
     ingredientDetails: [
-      { name: "Noodles", instrument: "Parametric Signal", freq: 3, washable: false, kind: "noodles" },
+      {
+        name: "Noodles",
+        instrument: "Parametric Signal",
+        freq: 3,
+        washable: false,
+        kind: "noodles",
+      },
       {
         name: "Egg",
         instrument: "Parametric Signal",
@@ -349,7 +390,13 @@ export const recipes: Recipe[] = [
         idealCutoff: 460,
         kind: "egg",
       },
-      { name: "Chicken", instrument: "Recorded Signal", freq: 2.5, washable: false, kind: "chicken" },
+      {
+        name: "Chicken",
+        instrument: "Recorded Signal",
+        freq: 2.5,
+        washable: false,
+        kind: "chicken",
+      },
       {
         name: "Onion",
         instrument: "Parametric Signal",
@@ -424,7 +471,13 @@ export const recipes: Recipe[] = [
     servings: "1 basket",
     ingredients: ["Chicken", "Flour", "Egg", "Salt", "Butter"],
     ingredientDetails: [
-      { name: "Chicken", instrument: "Recorded Signal", freq: 2.5, washable: false, kind: "chicken" },
+      {
+        name: "Chicken",
+        instrument: "Recorded Signal",
+        freq: 2.5,
+        washable: false,
+        kind: "chicken",
+      },
       { name: "Flour", instrument: "Mathematical Signal", freq: 2, washable: false, kind: "flour" },
       {
         name: "Egg",
@@ -435,7 +488,13 @@ export const recipes: Recipe[] = [
         kind: "egg",
       },
       { name: "Salt", instrument: "Mathematical Signal", freq: 12, washable: false, kind: "salt" },
-      { name: "Butter", instrument: "Mathematical Signal", freq: 3, washable: false, kind: "butter" },
+      {
+        name: "Butter",
+        instrument: "Mathematical Signal",
+        freq: 3,
+        washable: false,
+        kind: "butter",
+      },
     ],
     difficulty: "Hard",
     pipeline: ["GENERATE", "MIX", "AMPLITUDE", "TIME SCALE", "CONVOLUTION", "COMPARE"],
@@ -482,6 +541,336 @@ export const recipes: Recipe[] = [
           { label: "Method", value: "FRY" },
           { label: "Impulse", value: "Dense noisy burst" },
         ],
+      },
+    ],
+  },
+  {
+    id: "toast",
+    name: "GOLDEN TOAST",
+    tagline: "Your first shift. One ingredient, one oven.",
+    pageNumber: 6,
+    prepTime: "2 mins",
+    servings: "1 slice",
+    tier: 1,
+    difficulty: "Easy",
+    ingredients: ["Cheese"],
+    ingredientDetails: [
+      {
+        name: "Cheese",
+        instrument: "Mathematical Signal",
+        freq: 4,
+        washable: false,
+        kind: "cheese",
+      },
+    ],
+    pipeline: ["GENERATE", "FILTER", "MIX", "AMPLITUDE", "TIME SCALE", "CONVOLUTION", "COMPARE"],
+    progress: "new",
+    bestScore: null,
+    stars: 0,
+    seasoningTarget: { amplitude: 1.0, frequency: 1.0 },
+    marinateTarget: { timeScale: 1.0 },
+    cookingMethod: { id: "bake", name: "BAKE", icon: "🍞", ir: "BAKE (gentle warm decay)" },
+    washableIngredients: [],
+    steps: [
+      {
+        stepNumber: "01",
+        icon: "🥣",
+        action: "MIX",
+        instruction: "Place golden cheese slices onto toast",
+        technicalLabel: "SUPERPOSITION",
+      },
+      {
+        stepNumber: "02",
+        icon: "🍞",
+        action: "COOK",
+        instruction: "Bake gently in the oven",
+        technicalLabel: "CONVOLUTION · BAKE",
+      },
+    ],
+  },
+  {
+    id: "soup",
+    name: "VELVET SOUP",
+    tagline: "Blend it smooth, then let it ring in the pot.",
+    pageNumber: 7,
+    prepTime: "6 mins",
+    servings: "1 bowl",
+    tier: 2,
+    difficulty: "Medium",
+    ingredients: ["Onion", "Salt", "Butter"],
+    ingredientDetails: [
+      {
+        name: "Onion",
+        instrument: "Parametric Signal",
+        freq: 6,
+        washable: true,
+        idealCutoff: 640,
+        kind: "onion",
+      },
+      { name: "Salt", instrument: "Mathematical Signal", freq: 12, washable: false, kind: "salt" },
+      {
+        name: "Butter",
+        instrument: "Mathematical Signal",
+        freq: 3,
+        washable: false,
+        kind: "butter",
+      },
+    ],
+    pipeline: ["GENERATE", "FILTER", "MIX", "AMPLITUDE", "TIME SCALE", "CONVOLUTION", "COMPARE"],
+    progress: "new",
+    bestScore: null,
+    stars: 0,
+    seasoningTarget: { amplitude: 0.65, frequency: 0.7 },
+    marinateTarget: { timeScale: 1.05 },
+    cookingMethod: { id: "boil", name: "BOIL", icon: "🍲", ir: "BOIL (resonant broth)" },
+    washableIngredients: ["Onion"],
+    steps: [
+      {
+        stepNumber: "01",
+        icon: "🧼",
+        action: "WASH / FILTER",
+        instruction: "Clean aromatic onions",
+        technicalLabel: "SPECTRAL FILTERING",
+      },
+      {
+        stepNumber: "02",
+        icon: "🥣",
+        action: "MIX",
+        instruction: "Combine in the simmering pot",
+        technicalLabel: "SUPERPOSITION",
+      },
+      {
+        stepNumber: "03",
+        icon: "♨️",
+        action: "COOK",
+        instruction: "Simmer and boil to resonance",
+        technicalLabel: "CONVOLUTION · BOIL",
+      },
+    ],
+  },
+  {
+    id: "salad",
+    name: "CRISP SALAD",
+    tagline: "No heat, all texture. Chop carefully.",
+    pageNumber: 8,
+    prepTime: "4 mins",
+    servings: "1 bowl",
+    tier: 2,
+    difficulty: "Medium",
+    requiresChop: true,
+    chopTarget: 3,
+    ingredients: ["Lettuce", "Tomato", "Cucumber"],
+    ingredientDetails: [
+      {
+        name: "Lettuce",
+        instrument: "Parametric Signal",
+        freq: 3,
+        washable: true,
+        idealCutoff: 380,
+        kind: "lettuce",
+      },
+      {
+        name: "Tomato",
+        instrument: "Parametric Signal",
+        freq: 5,
+        washable: true,
+        idealCutoff: 520,
+        kind: "tomato",
+      },
+      {
+        name: "Cucumber",
+        instrument: "Mathematical Signal",
+        freq: 7,
+        washable: true,
+        idealCutoff: 450,
+        kind: "cucumber",
+      },
+    ],
+    pipeline: ["GENERATE", "FILTER", "MIX", "AMPLITUDE", "TIME SCALE", "CONVOLUTION", "COMPARE"],
+    progress: "new",
+    bestScore: null,
+    stars: 0,
+    seasoningTarget: { amplitude: 0.9, frequency: 1.0 },
+    marinateTarget: { timeScale: 1.02 },
+    cookingMethod: { id: "grill", name: "SEAR", icon: "🥗", ir: "SEAR (light flash)" },
+    washableIngredients: ["Lettuce", "Tomato", "Cucumber"],
+    steps: [
+      {
+        stepNumber: "01",
+        icon: "🧼",
+        action: "WASH / FILTER",
+        instruction: "Wash fresh greens and tomatoes thoroughly",
+        technicalLabel: "FREQUENCY FILTERING",
+      },
+      {
+        stepNumber: "02",
+        icon: "🥣",
+        action: "MIX",
+        instruction: "Toss greens into the bowl",
+        technicalLabel: "SUPERPOSITION",
+      },
+      {
+        stepNumber: "03",
+        icon: "✂️",
+        action: "CHOP / DECIMATE",
+        instruction: "Chop with decimation factor M=3 and anti-aliasing",
+        technicalLabel: "NYQUIST DECIMATION",
+      },
+    ],
+  },
+  {
+    id: "creme",
+    name: "CRÈME BRÛLÉE",
+    tagline: "Steam the custard, then caramelise with AM.",
+    pageNumber: 10,
+    prepTime: "15 mins",
+    servings: "1 ramekin",
+    tier: 3,
+    difficulty: "Hard",
+    requiresCaramelize: true,
+    caramelizeTarget: { carrier: 180, depth: 0.55 },
+    ingredients: ["Egg", "Sugar", "Milk", "Butter"],
+    ingredientDetails: [
+      {
+        name: "Egg",
+        instrument: "Parametric Signal",
+        freq: 4,
+        washable: true,
+        idealCutoff: 460,
+        kind: "egg",
+      },
+      { name: "Sugar", instrument: "Mathematical Signal", freq: 5, washable: false, kind: "sugar" },
+      { name: "Milk", instrument: "Mathematical Signal", freq: 5, washable: false, kind: "milk" },
+      {
+        name: "Butter",
+        instrument: "Mathematical Signal",
+        freq: 3,
+        washable: false,
+        kind: "butter",
+      },
+    ],
+    pipeline: ["GENERATE", "FILTER", "MIX", "AMPLITUDE", "TIME SCALE", "CONVOLUTION", "COMPARE"],
+    progress: "new",
+    bestScore: null,
+    stars: 0,
+    seasoningTarget: { amplitude: 0.75, frequency: 0.85 },
+    marinateTarget: { timeScale: 1.16 },
+    cookingMethod: { id: "bake", name: "STEAM / BAKE", icon: "🍮", ir: "BAKE (dual resonance)" },
+    washableIngredients: ["Egg"],
+    steps: [
+      {
+        stepNumber: "01",
+        icon: "🥣",
+        action: "MIX",
+        instruction: "Whisk custard base in harmonic balance",
+        technicalLabel: "SUPERPOSITION",
+      },
+      {
+        stepNumber: "02",
+        icon: "🔥",
+        action: "CARAMELIZE",
+        instruction: "Apply torch amplitude modulation at 180 Hz",
+        technicalLabel: "AMPLITUDE MODULATION",
+      },
+      {
+        stepNumber: "03",
+        icon: "🧁",
+        action: "COOK",
+        instruction: "Steam bake to velvety perfection",
+        technicalLabel: "CONVOLUTION · BAKE",
+      },
+    ],
+  },
+  {
+    id: "feast",
+    name: "CHEF'S GRAND FEAST",
+    tagline: "Everything you know, at once.",
+    pageNumber: 11,
+    prepTime: "20 mins",
+    servings: "1 grand banquet",
+    tier: 4,
+    difficulty: "Hard",
+    requiresChop: true,
+    requiresCaramelize: true,
+    chopTarget: 2,
+    caramelizeTarget: { carrier: 240, depth: 0.4 },
+    ingredients: ["Beef Patty", "Cheese", "Tomato", "Lettuce", "Bun"],
+    ingredientDetails: [
+      {
+        name: "Beef Patty",
+        instrument: "Parametric Signal",
+        freq: 2,
+        washable: false,
+        kind: "patty",
+      },
+      {
+        name: "Cheese",
+        instrument: "Mathematical Signal",
+        freq: 6,
+        washable: false,
+        kind: "cheese",
+      },
+      {
+        name: "Tomato",
+        instrument: "Parametric Signal",
+        freq: 5,
+        washable: true,
+        idealCutoff: 520,
+        kind: "tomato",
+      },
+      {
+        name: "Lettuce",
+        instrument: "Parametric Signal",
+        freq: 3,
+        washable: true,
+        idealCutoff: 380,
+        kind: "lettuce",
+      },
+      { name: "Bun", instrument: "Mathematical Signal", freq: 3, washable: false, kind: "bun" },
+    ],
+    pipeline: ["GENERATE", "FILTER", "MIX", "AMPLITUDE", "TIME SCALE", "CONVOLUTION", "COMPARE"],
+    progress: "new",
+    bestScore: null,
+    stars: 0,
+    seasoningTarget: { amplitude: 0.95, frequency: 1.25 },
+    marinateTarget: { timeScale: 1.2 },
+    cookingMethod: { id: "grill", name: "GRILL", icon: "👑", ir: "GRILL (multi-cavity resonance)" },
+    washableIngredients: ["Lettuce", "Tomato"],
+    steps: [
+      {
+        stepNumber: "01",
+        icon: "🧼",
+        action: "WASH / FILTER",
+        instruction: "Clean fresh produce",
+        technicalLabel: "SPECTRAL FILTERING",
+      },
+      {
+        stepNumber: "02",
+        icon: "🥣",
+        action: "MIX",
+        instruction: "Combine feast layers",
+        technicalLabel: "SUPERPOSITION",
+      },
+      {
+        stepNumber: "03",
+        icon: "🔥",
+        action: "CARAMELIZE",
+        instruction: "Torch at 240 Hz AM carrier",
+        technicalLabel: "AMPLITUDE MODULATION",
+      },
+      {
+        stepNumber: "04",
+        icon: "✂️",
+        action: "CHOP",
+        instruction: "Decimate by factor M=2",
+        technicalLabel: "NYQUIST DECIMATION",
+      },
+      {
+        stepNumber: "05",
+        icon: "🔥",
+        action: "COOK",
+        instruction: "Convolve on the master grill",
+        technicalLabel: "CONVOLUTION · GRILL",
       },
     ],
   },
@@ -552,11 +941,63 @@ export const STAGE_ORDER = [
   { id: "mix", label: "Mixing Lab", path: "/mixing", step: 3 },
   { id: "season", label: "Seasoning Lab", path: "/transform", step: 4 },
   { id: "marinate", label: "Marinating Lab", path: "/marinate", step: 5 },
-  { id: "cook", label: "Cooking Lab", path: "/cooking", step: 6 },
-  { id: "check-dish", label: "Check Dish", path: "/check-dish", step: 7 },
-  { id: "score", label: "Final Comparison", path: "/score", step: 8 },
-  { id: "complete", label: "Complete", path: "/complete", step: 9 },
+  { id: "caramelize", label: "Caramelize Lab", path: "/caramelize", step: 6 },
+  { id: "chop", label: "Chop Lab", path: "/chop", step: 7 },
+  { id: "cook", label: "Cooking Lab", path: "/cooking", step: 8 },
+  { id: "beam", label: "Beam Delivery", path: "/beam-delivery", step: 9 },
+  { id: "score", label: "Final Comparison", path: "/score", step: 10 },
+  { id: "complete", label: "Complete", path: "/complete", step: 11 },
 ] as const;
+
+export function getRecipeStationFlow(
+  recipe?: Recipe,
+): { id: string; label: string; path: string }[] {
+  const r = recipe ?? getActiveRecipe();
+  const steps: { id: string; label: string; path: string }[] = [
+    { id: "generate", label: "Generate Signal", path: "/generate" },
+    { id: "filter", label: "Filter Lab", path: "/filtering" },
+    { id: "mix", label: "Mixing Lab", path: "/mixing" },
+    { id: "season", label: "Seasoning Lab", path: "/transform" },
+    { id: "marinate", label: "Marinating Lab", path: "/marinate" },
+  ];
+
+  if (r.requiresCaramelize) {
+    steps.push({ id: "caramelize", label: "Caramelize Lab", path: "/caramelize" });
+  }
+
+  if (r.requiresChop) {
+    steps.push({ id: "chop", label: "Chop Lab", path: "/chop" });
+  }
+
+  steps.push(
+    { id: "cook", label: "Cooking Lab", path: "/cooking" },
+    { id: "system", label: "System Delivery", path: "/system-delivery" },
+    { id: "score", label: "Final Comparison", path: "/score" },
+    { id: "complete", label: "Complete", path: "/complete" },
+  );
+
+  return steps;
+}
+
+export function getNextStationPath(currentPath: string, recipe?: Recipe): string {
+  const r = recipe ?? getActiveRecipe();
+  const flow = getRecipeStationFlow(r);
+  const idx = flow.findIndex((s) => s.path === currentPath);
+  if (idx >= 0 && idx + 1 < flow.length) {
+    return flow[idx + 1]!.path;
+  }
+  return "/score";
+}
+
+export function getPrevStationPath(currentPath: string, recipe?: Recipe): string {
+  const r = recipe ?? getActiveRecipe();
+  const flow = getRecipeStationFlow(r);
+  const idx = flow.findIndex((s) => s.path === currentPath);
+  if (idx > 0) {
+    return flow[idx - 1]!.path;
+  }
+  return "/kitchen";
+}
 
 export function getUnlockedStage(recipeId?: string): number {
   if (typeof window !== "undefined") {
@@ -693,7 +1134,8 @@ export function startRecipeRun(recipeId: string, difficulty: RecipeDifficulty) {
 
     // Connect to backend session asynchronously
     const chefName = getChefName() || "Chef Fourier";
-    api.ensureAuthenticated(chefName)
+    api
+      .ensureAuthenticated(chefName)
       .then(() => api.createSession(recipeId))
       .then((backendSession) => {
         const stored = window.localStorage.getItem("wavebakery_recipe_session");
@@ -796,6 +1238,82 @@ export function completeRecipeRun() {
       // ignore
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Best Score Persistence
+// Stores the per-recipe all-time best score and star rating in localStorage
+// so RecipeCard and recipe-book.tsx always show real values after each run.
+// ---------------------------------------------------------------------------
+const BEST_SCORES_KEY = "wavebakery_best_scores";
+const BEST_SCORES_CHANGED = "wavebakery_best_scores_changed";
+
+export interface RecipeBestScore {
+  score: number;
+  stars: number;
+}
+
+/** Read all stored best scores from localStorage */
+function getAllBestScores(): Record<string, RecipeBestScore> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(BEST_SCORES_KEY);
+    if (raw) return JSON.parse(raw) as Record<string, RecipeBestScore>;
+  } catch {
+    /* ignore */
+  }
+  return {};
+}
+
+/**
+ * Persist a new score for a recipe.
+ * Compares ONLY against previously saved real scores in localStorage —
+ * the static hardcoded bestScore in the recipes array is NOT used as a
+ * comparison baseline, so a real play always records the first real score.
+ * Broadcasts `wavebakery_best_scores_changed` so any live hook re-renders.
+ */
+export function saveBestScore(recipeId: string, score: number, stars: number) {
+  if (typeof window === "undefined") return;
+  try {
+    const all = getAllBestScores();
+    const prev = all[recipeId]; // only scores previously saved by saveBestScore
+    if (!prev || score > prev.score) {
+      all[recipeId] = { score: Math.round(score), stars };
+      window.localStorage.setItem(BEST_SCORES_KEY, JSON.stringify(all));
+      window.dispatchEvent(new Event(BEST_SCORES_CHANGED));
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * React hook — returns the live best score for a recipe.
+ * Falls back to the static `bestScore` field if nothing is stored yet.
+ */
+export function useBestScore(recipeId: string, staticBest: number | null = null) {
+  const [entry, setEntry] = useState<RecipeBestScore | null>(() => {
+    const all = getAllBestScores();
+    return all[recipeId] ?? null;
+  });
+
+  useEffect(() => {
+    const refresh = () => {
+      const all = getAllBestScores();
+      setEntry(all[recipeId] ?? null);
+    };
+    window.addEventListener(BEST_SCORES_CHANGED, refresh);
+    window.addEventListener("storage", refresh);
+    return () => {
+      window.removeEventListener(BEST_SCORES_CHANGED, refresh);
+      window.removeEventListener("storage", refresh);
+    };
+  }, [recipeId]);
+
+  return {
+    bestScore: entry?.score ?? staticBest,
+    stars: entry?.stars ?? null,
+  };
 }
 
 export function getRecipeRunSession(): RecipeRunSession | null {
@@ -1100,7 +1618,6 @@ export const ALL_AVAILABLE_INGREDIENTS: IngredientDetail[] = [
     category: "Pantry",
     emoji: "🥫",
   },
-
 ];
 
 export function getSelectedIngredients(recipeId?: string): IngredientDetail[] {
@@ -1310,13 +1827,13 @@ export function computeIngredientSamples(ing: {
         freq,
         amplitude: amp,
         phase: ing.seed !== undefined ? ing.seed : 0,
-        noise: ing.noise !== undefined ? ing.noise : (washable ? 0.75 : 0.0),
+        noise: ing.noise !== undefined ? ing.noise : washable ? 0.75 : 0.0,
         sampleCount: width + 1,
       });
     }
   }
 
-  const noise = ing.noise !== undefined ? ing.noise : (washable ? 0.75 : 0.05);
+  const noise = ing.noise !== undefined ? ing.noise : washable ? 0.75 : 0.05;
   const samples: number[] = [];
   for (let x = 0; x <= width; x += 1) {
     const t = (x / width) * Math.PI * 2 * freq;
@@ -1329,10 +1846,14 @@ export function computeIngredientSamples(ing: {
 
 export function getDefaultCookedSignal(recipeId?: string): CookedSignalData {
   const activeRecipe = recipeId
-    ? recipes.find((r) => r.id === recipeId) ?? getActiveRecipe()
+    ? (recipes.find((r) => r.id === recipeId) ?? getActiveRecipe())
     : getActiveRecipe();
   const methodId = activeRecipe.cookingMethod.id;
-  const cfg = COOKING_METHOD_CONFIGS[methodId] ?? { name: activeRecipe.cookingMethod.name, freq: 6, amp: 0.7 };
+  const cfg = COOKING_METHOD_CONFIGS[methodId] ?? {
+    name: activeRecipe.cookingMethod.name,
+    freq: 6,
+    amp: 0.7,
+  };
   const ideal = getIdealDishSignal(activeRecipe.id);
   const frequency = ideal.frequency;
   const amplitude = 1.0;
@@ -1387,7 +1908,9 @@ export function getCookedSignal(recipeId?: string): CookedSignalData {
   return getDefaultCookedSignal(recipeId);
 }
 
-export function useCookedSignal(recipeId?: string): [CookedSignalData, (signal: CookedSignalData) => void] {
+export function useCookedSignal(
+  recipeId?: string,
+): [CookedSignalData, (signal: CookedSignalData) => void] {
   const [signal, setSignalState] = useState<CookedSignalData>(() => getCookedSignal(recipeId));
 
   useEffect(() => {

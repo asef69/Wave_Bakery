@@ -118,6 +118,7 @@ function SeasoningLab() {
         progress: 0,
       }));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [amp, freq]);
 
   const handleTogglePlay = () => {
@@ -356,9 +357,7 @@ function SeasoningLab() {
               <div className="flex items-center gap-2">
                 <span
                   className={`inline-block h-2.5 w-2.5 rounded-full ${
-                    playbackState.isPlaying
-                      ? "bg-signal animate-ping"
-                      : "bg-muted-foreground/40"
+                    playbackState.isPlaying ? "bg-signal animate-ping" : "bg-muted-foreground/40"
                   }`}
                 />
                 <span className="font-mono text-xs font-bold tracking-wider text-foreground uppercase">
@@ -376,7 +375,10 @@ function SeasoningLab() {
                 <span className="font-bold text-signal">
                   {playbackState.currentTime.toFixed(1)}s
                 </span>
-                <span className="text-muted-foreground"> / {playbackState.duration.toFixed(1)}s</span>
+                <span className="text-muted-foreground">
+                  {" "}
+                  / {playbackState.duration.toFixed(1)}s
+                </span>
               </div>
             </div>
 

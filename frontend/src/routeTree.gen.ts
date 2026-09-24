@@ -12,7 +12,9 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as BeamDeliveryRouteImport } from './routes/beam-delivery'
 import { Route as BriefingRouteImport } from './routes/briefing'
+import { Route as CaramelizeRouteImport } from './routes/caramelize'
 import { Route as CheckDishRouteImport } from './routes/check-dish'
+import { Route as ChopRouteImport } from './routes/chop'
 import { Route as CompleteRouteImport } from './routes/complete'
 import { Route as CookingRouteImport } from './routes/cooking'
 import { Route as FilteringRouteImport } from './routes/filtering'
@@ -29,6 +31,7 @@ import { Route as PantryRouteImport } from './routes/pantry'
 import { Route as RecipeBookRouteImport } from './routes/recipe-book'
 import { Route as ScoreRouteImport } from './routes/score'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as SystemDeliveryRouteImport } from './routes/system-delivery'
 import { Route as TransformRouteImport } from './routes/transform'
 
 const IndexRoute = IndexRouteImport.update({
@@ -46,9 +49,19 @@ const BriefingRoute = BriefingRouteImport.update({
   path: '/briefing',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CaramelizeRoute = CaramelizeRouteImport.update({
+  id: '/caramelize',
+  path: '/caramelize',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CheckDishRoute = CheckDishRouteImport.update({
   id: '/check-dish',
   path: '/check-dish',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChopRoute = ChopRouteImport.update({
+  id: '/chop',
+  path: '/chop',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CompleteRoute = CompleteRouteImport.update({
@@ -131,6 +144,11 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SystemDeliveryRoute = SystemDeliveryRouteImport.update({
+  id: '/system-delivery',
+  path: '/system-delivery',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TransformRoute = TransformRouteImport.update({
   id: '/transform',
   path: '/transform',
@@ -141,7 +159,9 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/beam-delivery': typeof BeamDeliveryRoute
   '/briefing': typeof BriefingRoute
+  '/caramelize': typeof CaramelizeRoute
   '/check-dish': typeof CheckDishRoute
+  '/chop': typeof ChopRoute
   '/complete': typeof CompleteRoute
   '/cooking': typeof CookingRoute
   '/filtering': typeof FilteringRoute
@@ -158,13 +178,16 @@ export interface FileRoutesByFullPath {
   '/recipe-book': typeof RecipeBookRoute
   '/score': typeof ScoreRoute
   '/settings': typeof SettingsRoute
+  '/system-delivery': typeof SystemDeliveryRoute
   '/transform': typeof TransformRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/beam-delivery': typeof BeamDeliveryRoute
   '/briefing': typeof BriefingRoute
+  '/caramelize': typeof CaramelizeRoute
   '/check-dish': typeof CheckDishRoute
+  '/chop': typeof ChopRoute
   '/complete': typeof CompleteRoute
   '/cooking': typeof CookingRoute
   '/filtering': typeof FilteringRoute
@@ -181,6 +204,7 @@ export interface FileRoutesByTo {
   '/recipe-book': typeof RecipeBookRoute
   '/score': typeof ScoreRoute
   '/settings': typeof SettingsRoute
+  '/system-delivery': typeof SystemDeliveryRoute
   '/transform': typeof TransformRoute
 }
 export interface FileRoutesById {
@@ -188,7 +212,9 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/beam-delivery': typeof BeamDeliveryRoute
   '/briefing': typeof BriefingRoute
+  '/caramelize': typeof CaramelizeRoute
   '/check-dish': typeof CheckDishRoute
+  '/chop': typeof ChopRoute
   '/complete': typeof CompleteRoute
   '/cooking': typeof CookingRoute
   '/filtering': typeof FilteringRoute
@@ -205,6 +231,7 @@ export interface FileRoutesById {
   '/recipe-book': typeof RecipeBookRoute
   '/score': typeof ScoreRoute
   '/settings': typeof SettingsRoute
+  '/system-delivery': typeof SystemDeliveryRoute
   '/transform': typeof TransformRoute
 }
 export interface FileRouteTypes {
@@ -213,7 +240,9 @@ export interface FileRouteTypes {
     | '/'
     | '/beam-delivery'
     | '/briefing'
+    | '/caramelize'
     | '/check-dish'
+    | '/chop'
     | '/complete'
     | '/cooking'
     | '/filtering'
@@ -230,13 +259,16 @@ export interface FileRouteTypes {
     | '/recipe-book'
     | '/score'
     | '/settings'
+    | '/system-delivery'
     | '/transform'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/beam-delivery'
     | '/briefing'
+    | '/caramelize'
     | '/check-dish'
+    | '/chop'
     | '/complete'
     | '/cooking'
     | '/filtering'
@@ -253,13 +285,16 @@ export interface FileRouteTypes {
     | '/recipe-book'
     | '/score'
     | '/settings'
+    | '/system-delivery'
     | '/transform'
   id:
     | '__root__'
     | '/'
     | '/beam-delivery'
     | '/briefing'
+    | '/caramelize'
     | '/check-dish'
+    | '/chop'
     | '/complete'
     | '/cooking'
     | '/filtering'
@@ -276,6 +311,7 @@ export interface FileRouteTypes {
     | '/recipe-book'
     | '/score'
     | '/settings'
+    | '/system-delivery'
     | '/transform'
   fileRoutesById: FileRoutesById
 }
@@ -283,7 +319,9 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   BeamDeliveryRoute: typeof BeamDeliveryRoute
   BriefingRoute: typeof BriefingRoute
+  CaramelizeRoute: typeof CaramelizeRoute
   CheckDishRoute: typeof CheckDishRoute
+  ChopRoute: typeof ChopRoute
   CompleteRoute: typeof CompleteRoute
   CookingRoute: typeof CookingRoute
   FilteringRoute: typeof FilteringRoute
@@ -300,6 +338,7 @@ export interface RootRouteChildren {
   RecipeBookRoute: typeof RecipeBookRoute
   ScoreRoute: typeof ScoreRoute
   SettingsRoute: typeof SettingsRoute
+  SystemDeliveryRoute: typeof SystemDeliveryRoute
   TransformRoute: typeof TransformRoute
 }
 
@@ -326,11 +365,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BriefingRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/caramelize': {
+      id: '/caramelize'
+      path: '/caramelize'
+      fullPath: '/caramelize'
+      preLoaderRoute: typeof CaramelizeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/check-dish': {
       id: '/check-dish'
       path: '/check-dish'
       fullPath: '/check-dish'
       preLoaderRoute: typeof CheckDishRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/chop': {
+      id: '/chop'
+      path: '/chop'
+      fullPath: '/chop'
+      preLoaderRoute: typeof ChopRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/complete': {
@@ -445,6 +498,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/system-delivery': {
+      id: '/system-delivery'
+      path: '/system-delivery'
+      fullPath: '/system-delivery'
+      preLoaderRoute: typeof SystemDeliveryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/transform': {
       id: '/transform'
       path: '/transform'
@@ -459,7 +519,9 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   BeamDeliveryRoute: BeamDeliveryRoute,
   BriefingRoute: BriefingRoute,
+  CaramelizeRoute: CaramelizeRoute,
   CheckDishRoute: CheckDishRoute,
+  ChopRoute: ChopRoute,
   CompleteRoute: CompleteRoute,
   CookingRoute: CookingRoute,
   FilteringRoute: FilteringRoute,
@@ -476,6 +538,7 @@ const rootRouteChildren: RootRouteChildren = {
   RecipeBookRoute: RecipeBookRoute,
   ScoreRoute: ScoreRoute,
   SettingsRoute: SettingsRoute,
+  SystemDeliveryRoute: SystemDeliveryRoute,
   TransformRoute: TransformRoute,
 }
 export const routeTree = rootRouteImport

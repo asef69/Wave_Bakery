@@ -6,7 +6,8 @@ import type { ReactElement } from "react";
  * final Figma assets later. No DSP — waveforms are decorative.
  */
 
-export type MachineId = "generate" | "filter" | "mix" | "season" | "marinate" | "cook";
+export type MachineId =
+  "generate" | "filter" | "mix" | "season" | "marinate" | "chop" | "caramelize" | "cook";
 
 const wood = "oklch(0.52 0.07 45)";
 const woodDark = "oklch(0.4 0.06 42)";
@@ -244,17 +245,87 @@ function CookArt() {
   );
 }
 
+/** Chop station: cutting board with decimation chopper knife. */
+function ChopArt() {
+  return (
+    <g>
+      <rect x={16} y={60} width={128} height={72} rx={12} fill={wood} />
+      <rect x={24} y={68} width={112} height={20} rx={6} fill={panel} />
+      <Screen x={30} y={72} w={60} h={12} wave="M34 78 L42 74 L50 82 L58 74 L66 82 L74 76 L82 80" />
+      {/* Knife blade & handle */}
+      <path d="M40 38 L110 50 L110 56 L38 56 Z" fill={metal} stroke={metalDark} strokeWidth={1.5} />
+      <rect x={110} y={48} width={28} height={10} rx={4} fill={woodDark} />
+      {/* Sampling pulse lines */}
+      <line
+        x1="45"
+        y1="96"
+        x2="45"
+        y2="120"
+        stroke="var(--signal)"
+        strokeWidth={2}
+        strokeDasharray="3 3"
+      />
+      <line
+        x1="65"
+        y1="96"
+        x2="65"
+        y2="120"
+        stroke="var(--signal)"
+        strokeWidth={2}
+        strokeDasharray="3 3"
+      />
+      <line
+        x1="85"
+        y1="96"
+        x2="85"
+        y2="120"
+        stroke="var(--signal)"
+        strokeWidth={2}
+        strokeDasharray="3 3"
+      />
+      <line
+        x1="105"
+        y1="96"
+        x2="105"
+        y2="120"
+        stroke="var(--signal)"
+        strokeWidth={2}
+        strokeDasharray="3 3"
+      />
+    </g>
+  );
+}
+
+/** Caramelize station: torch / heat chamber with AM modulation wave. */
+function CaramelizeArt() {
+  return (
+    <g>
+      <rect x={18} y={54} width={124} height={78} rx={14} fill={panel} />
+      <rect x={18} y={54} width={124} height={10} rx={5} fill="oklch(0.72 0.16 55)" opacity={0.4} />
+      <Screen x={28} y={70} w={68} h={48} wave="M32 94 Q40 76 48 94 T64 94 T80 94 T92 94" />
+      {/* Flame torch nozzle */}
+      <path d="M112 40 L132 58 L124 64 L104 46 Z" fill={metal} stroke={metalDark} />
+      <circle cx={116} cy={82} r={8} fill={metal} stroke={metalDark} />
+      <circle cx={116} cy={82} r={2.5} fill="oklch(0.78 0.16 60)" />
+      <circle cx={116} cy={106} r={8} fill={metal} stroke={metalDark} />
+      <circle cx={116} cy={106} r={2.5} fill="var(--signal)" />
+    </g>
+  );
+}
+
 const art: Record<MachineId, () => ReactElement> = {
   generate: GenerateArt,
   filter: FilterArt,
   mix: MixArt,
   season: SeasonArt,
   marinate: MarinateArt,
+  chop: ChopArt,
+  caramelize: CaramelizeArt,
   cook: CookArt,
 };
 
 export function MachineArt({ id }: { id: MachineId }) {
-  const Art = art[id];
+  const Art = art[id] || CookArt;
   return (
     <svg viewBox="0 0 160 150" className="h-full w-full overflow-visible" aria-hidden>
       <ellipse cx={80} cy={140} rx={58} ry={8} fill="oklch(0.4 0.06 42)" opacity={0.22} />

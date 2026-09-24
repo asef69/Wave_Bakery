@@ -21,12 +21,16 @@ import { GameButton } from "@/components/game/GameButton";
 import { IngredientGlyph } from "@/components/game/IngredientGlyph";
 import { WaveformDisplay } from "@/components/game/WaveformDisplay";
 import { SignalAudioPlayer } from "@/lib/audio";
+import { DifficultyModal } from "@/components/game/DifficultyModal";
 import { getIdealDishSignal, getOrSaveExpectedSignal } from "@/lib/pipeline";
 import {
   useActiveRecipe,
   useChefName,
   type Recipe,
   recipes,
+  startRecipeRun,
+  resetRecipeProgress,
+  type RecipeDifficulty,
 } from "@/lib/recipes";
 import { cn } from "@/lib/utils";
 
@@ -42,8 +46,7 @@ export const Route = createFileRoute("/briefing")({
       { property: "og:title", content: "Recipe Mission Briefing — WaveBakery" },
       {
         property: "og:description",
-        content:
-          "Study the signal mathematics behind your recipe before entering the kitchen.",
+        content: "Study the signal mathematics behind your recipe before entering the kitchen.",
       },
     ],
   }),
@@ -58,7 +61,8 @@ const CULINARY_DSP_BRIDGES = [
     dsp: "Basis Function Synthesis (Sine/Square/Noise)",
     color: "text-primary",
     bgColor: "bg-primary/10 border-primary/30",
-    description: "Every ingredient possesses a signature frequency and physical waveform structure.",
+    description:
+      "Every ingredient possesses a signature frequency and physical waveform structure.",
   },
   {
     step: "2. Washing",
@@ -67,7 +71,8 @@ const CULINARY_DSP_BRIDGES = [
     dsp: "Low-Pass Anti-Aliasing Filtering",
     color: "text-signal",
     bgColor: "bg-signal/10 border-signal/30",
-    description: "Dirt and grit are high-frequency spectral noise. We filter them out before mixing.",
+    description:
+      "Dirt and grit are high-frequency spectral noise. We filter them out before mixing.",
   },
   {
     step: "3. Mixing",
@@ -76,7 +81,8 @@ const CULINARY_DSP_BRIDGES = [
     dsp: "Linear Superposition x₁(t) + x₂(t)",
     color: "text-emerald-400",
     bgColor: "bg-emerald-500/10 border-emerald-500/30",
-    description: "Harmonic signals superimpose linearly to construct a multi-tone complex flavor spectrum.",
+    description:
+      "Harmonic signals superimpose linearly to construct a multi-tone complex flavor spectrum.",
   },
   {
     step: "4. Seasoning",
@@ -103,7 +109,8 @@ const CULINARY_DSP_BRIDGES = [
     dsp: "Phased Array Beamforming AF(θ)",
     color: "text-sky-400",
     bgColor: "bg-sky-500/10 border-sky-500/30",
-    description: "Acoustic waveguides levitate and steer the delicate dish directly to the diner's table.",
+    description:
+      "Acoustic waveguides levitate and steer the delicate dish directly to the diner's table.",
   },
 ];
 
@@ -113,7 +120,15 @@ function RecipeMissionBriefing() {
   const [chefName] = useChefName();
   const [player, setPlayer] = useState<SignalAudioPlayer | null>(null);
   const [activeTab, setActiveTab] = useState<"overview" | "dsp_bridge">("overview");
+  const [isDifficultyModalOpen, setIsDifficultyModalOpen] = useState(false);
   const navigate = useNavigate();
+
+  const handleProceed = (difficulty: RecipeDifficulty) => {
+    resetRecipeProgress(recipe.id);
+    startRecipeRun(recipe.id, difficulty);
+    setIsDifficultyModalOpen(false);
+    navigate({ to: "/kitchen" });
+  };
 
   const targetSignal = useMemo(() => {
     try {
@@ -143,6 +158,12 @@ function RecipeMissionBriefing() {
 
   return (
     <main className="relative min-h-screen bg-background pb-16">
+      <DifficultyModal
+        recipe={recipe}
+        isOpen={isDifficultyModalOpen}
+        onClose={() => setIsDifficultyModalOpen(false)}
+        onProceed={handleProceed}
+      />
       <div className="lab-grid pointer-events-none absolute inset-0 opacity-[0.08]" aria-hidden />
 
       <div className="relative z-10 mx-auto max-w-7xl px-6 pt-8 sm:px-10">
@@ -362,12 +383,19 @@ function RecipeMissionBriefing() {
 
                 <div className="mt-6 flex flex-wrap items-center gap-3">
                   <Link to="/kitchen" className="flex-1">
-                    <GameButton size="lg" className="w-full uppercase font-extrabold tracking-wider">
+                    <GameButton
+                      size="lg"
+                      className="w-full uppercase font-extrabold tracking-wider"
+                    >
                       Enter Kitchen Hub →
                     </GameButton>
                   </Link>
                   <Link to="/generate">
-                    <GameButton size="lg" variant="lab" className="uppercase font-bold tracking-wider">
+                    <GameButton
+                      size="lg"
+                      variant="lab"
+                      className="uppercase font-bold tracking-wider"
+                    >
                       Station 1: Generator ⚡
                     </GameButton>
                   </Link>
@@ -399,7 +427,10 @@ function RecipeMissionBriefing() {
                   return (
                     <div
                       key={item.step}
-                      className={cn("rounded-2xl border p-4.5 shadow-sm transition-all", item.bgColor)}
+                      className={cn(
+                        "rounded-2xl border p-4.5 shadow-sm transition-all",
+                        item.bgColor,
+                      )}
                     >
                       <div className="flex items-center justify-between">
                         <span className="font-mono text-[10px] font-extrabold uppercase text-muted-foreground">
@@ -439,11 +470,13 @@ function RecipeMissionBriefing() {
               >
                 ← Back to Blueprint
               </button>
-              <Link to="/kitchen">
-                <GameButton size="lg" className="uppercase font-extrabold tracking-wider">
-                  Proceed to Kitchen →
-                </GameButton>
-              </Link>
+              <GameButton
+                size="lg"
+                className="uppercase font-extrabold tracking-wider"
+                onClick={() => setIsDifficultyModalOpen(true)}
+              >
+                Proceed to Kitchen →
+              </GameButton>
             </div>
           </div>
         )}

@@ -1,13 +1,13 @@
 /**
  * Uniform Linear Array (ULA) Acoustic Phased-Array Beamforming Engine (CSE220)
- * 
+ *
  * Physics parameters:
  * - Speed of sound in air: c = 343 m/s
  * - Carrier frequency: f = 1000 Hz
  * - Wavelength: λ = c / f = 0.343 m
  * - Element spacing: d = λ / 2 = 0.1715 m (half-wavelength prevents grating lobes)
  * - Wave number: k = 2π / λ ≈ 18.318 rad/m
- * 
+ *
  * Equations:
  * - Array manifold: a_m(θ) = exp(j * (2πd / λ) * m * sin(θ))
  * - Phase delay: Δϕ_m = -(2πd / λ) * m * sin(θ_target)
@@ -39,10 +39,7 @@ export const WAVE_NUMBER = (2 * Math.PI) / WAVELENGTH; // rad/m
  * @param angleDegrees Observation angle θ in degrees [-90°, +90°]
  * @returns Normalized array factor magnitude in [0, 1]
  */
-export function computeArrayFactor(
-  speakers: SpeakerState[],
-  angleDegrees: number,
-): number {
+export function computeArrayFactor(speakers: SpeakerState[], angleDegrees: number): number {
   const activeSpeakers = speakers.filter((s) => s.isActive);
   const numActive = activeSpeakers.length;
   if (numActive === 0) return 0;
@@ -179,10 +176,7 @@ export function checkBeamAlignment(
  * Analytically generates exact progressive phase steering angles for each speaker:
  * Δϕ_m = -(2πd / λ) * (m - (M-1)/2) * sin(θ_target)
  */
-export function getPresetPhasesForAngle(
-  targetAngle: number,
-  numSpeakers: number,
-): number[] {
+export function getPresetPhasesForAngle(targetAngle: number, numSpeakers: number): number[] {
   const thetaRad = (targetAngle * Math.PI) / 180;
   const sinTheta = Math.sin(thetaRad);
   const centerIndex = (numSpeakers - 1) / 2;
@@ -225,7 +219,8 @@ export const WINDOW_OPTIONS: WindowOption[] = [
     id: "hamming",
     name: "Hamming Taper",
     sidelobeLevelDb: "-42.8 dB",
-    description: "Strong sidelobe suppression. Protects neighboring diners from acoustic spillover.",
+    description:
+      "Strong sidelobe suppression. Protects neighboring diners from acoustic spillover.",
     beamwidthNote: "Balanced (1.3x width)",
   },
   {
@@ -259,10 +254,7 @@ export function calculateWindowWeights(numElements: number, windowType: WindowTy
     } else if (windowType === "hann") {
       w = 0.5 * (1 - Math.cos((2 * Math.PI * n) / N));
     } else if (windowType === "blackman") {
-      w =
-        0.42 -
-        0.5 * Math.cos((2 * Math.PI * n) / N) +
-        0.08 * Math.cos((4 * Math.PI * n) / N);
+      w = 0.42 - 0.5 * Math.cos((2 * Math.PI * n) / N) + 0.08 * Math.cos((4 * Math.PI * n) / N);
     }
     // ensure within [0.05, 1.0]
     weights.push(Math.max(0.05, Math.round(w * 1000) / 1000));
@@ -366,3 +358,152 @@ export function evaluateTableSpillover(
   return spillovers;
 }
 
+/**
+ * Standard discrete Room Impulse Response (RIR) modeling multipath reflections:
+ * h_room[n] = δ[n] + α1·δ[n - d1] + α2·δ[n - d2]
+ */
+export const ROOM_IMPULSE_RESPONSE = [
+  1.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.22, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.1, 0,
+  0, 0,
+];
+
+/**
+ * Convolves a 1D discrete signal with the room impulse response h_room[n] (LTI system cascade).
+ */
+export function convolveWithRoomAcoustics(samples: number[]): number[] {
+  const kernel = ROOM_IMPULSE_RESPONSE;
+  const out = new Array<number>(samples.length).fill(0);
+  const kLen = kernel.length;
+
+  for (let n = 0; n < samples.length; n++) {
+    let acc = 0;
+    for (let k = 0; k < kLen; k++) {
+      if (n - k >= 0) {
+        acc += (samples[n - k] ?? 0) * (kernel[k] ?? 0);
+      }
+    }
+    out[n] = acc;
+  }
+
+  // Peak normalize with 0.95 headroom
+  let maxVal = 0;
+  for (let i = 0; i < out.length; i++) {
+    const abs = Math.abs(out[i] ?? 0);
+    if (abs > maxVal) maxVal = abs;
+  }
+  if (maxVal > 0) {
+    const scale = 0.95 / Math.max(1.0, maxVal);
+    for (let i = 0; i < out.length; i++) {
+      out[i] = (out[i] ?? 0) * scale;
+    }
+  }
+  return out;
+}
+
+/**
+ * Calculates the exact received signals at the target table and neighboring spillover table.
+ */
+export function computeReceivedTableSignals(
+  cookedSamples: number[],
+  speakers: SpeakerState[],
+  targetAngle: number,
+  neighborAngle?: number,
+): {
+  targetSamples: number[];
+  neighborSamples: number[];
+  targetGain: number;
+  neighborGain: number;
+  sirDb: number;
+} {
+  const targetGain = computeArrayFactor(speakers, targetAngle);
+  // Default neighbor angle: nearest non-target table angle
+  const neighbor =
+    neighborAngle !== undefined
+      ? neighborAngle
+      : targetAngle > 0
+        ? targetAngle - 25
+        : targetAngle + 25;
+  const neighborGain = computeArrayFactor(speakers, neighbor);
+
+  const roomCooked = convolveWithRoomAcoustics(cookedSamples);
+
+  const targetSamples = roomCooked.map((s) => s * targetGain);
+  const neighborSamples = roomCooked.map((s) => s * neighborGain);
+
+  const sirRatio = (targetGain * targetGain) / (neighborGain * neighborGain + 1e-4);
+  const sirDb = Math.round(10 * Math.log10(Math.max(0.1, sirRatio)) * 10) / 10;
+
+  return {
+    targetSamples,
+    neighborSamples,
+    targetGain: Math.round(targetGain * 100) / 100,
+    neighborGain: Math.round(neighborGain * 100) / 100,
+    sirDb,
+  };
+}
+
+/**
+ * Analytical metrics for the Faculty Math Inspector ("Show Your Work" mode).
+ */
+export interface FacultyInspectorMetrics {
+  steeredAngle: number;
+  targetAngle: number;
+  peakSidelobeLevelDb: number;
+  halfPowerBeamwidthDeg: number;
+  directivityIndexDb: number;
+  carrierFrequencyHz: number;
+  wavelengthMeters: number;
+  elementSpacingMeters: number;
+  waveNumberRadM: number;
+  phaseGradientDeg: number;
+  spatialNyquistMet: boolean;
+  activeElements: number;
+}
+
+export function computeFacultyInspectorMetrics(
+  speakers: SpeakerState[],
+  targetAngle: number,
+): FacultyInspectorMetrics {
+  const steered = calculateSteeredBeamAngle(speakers);
+  const activeCount = speakers.filter((s) => s.isActive).length;
+
+  const thetaSteerRad = (steered * Math.PI) / 180;
+  const cosSteer = Math.max(0.1, Math.cos(thetaSteerRad));
+  // Analytical half-power beamwidth approx: HPBW ≈ 0.886 * λ / (N * d * cos(θ0)) in radians
+  const hpbwRad = (0.886 * WAVELENGTH) / (activeCount * ELEMENT_SPACING * cosSteer);
+  const hpbwDeg = Math.round(((hpbwRad * 180) / Math.PI) * 10) / 10;
+
+  // Peak Sidelobe Level (PSLL)
+  const pattern = generateArrayFactorPattern(speakers, 181);
+  let maxSidelobe = 0;
+  for (const pt of pattern) {
+    if (Math.abs(pt.angle - steered) > 12) {
+      if (pt.intensity > maxSidelobe) maxSidelobe = pt.intensity;
+    }
+  }
+  const psllDb = maxSidelobe > 0 ? Math.round(20 * Math.log10(maxSidelobe) * 10) / 10 : -45.0;
+
+  // Directivity Index approximation D ≈ 2 * N * (d / λ)
+  const directivity = 2 * activeCount * (ELEMENT_SPACING / WAVELENGTH) * cosSteer;
+  const directivityDb = Math.round(10 * Math.log10(Math.max(1.0, directivity)) * 10) / 10;
+
+  // Progressive phase gradient: Δϕ = -k * d * sin(θ_target)
+  const thetaTargetRad = (targetAngle * Math.PI) / 180;
+  const phaseGradRad = -WAVE_NUMBER * ELEMENT_SPACING * Math.sin(thetaTargetRad);
+  const phaseGradDeg = Math.round((phaseGradRad * 180) / Math.PI);
+
+  return {
+    steeredAngle: steered,
+    targetAngle,
+    peakSidelobeLevelDb: psllDb,
+    halfPowerBeamwidthDeg: hpbwDeg,
+    directivityIndexDb: directivityDb,
+    carrierFrequencyHz: CARRIER_FREQUENCY,
+    wavelengthMeters: Math.round(WAVELENGTH * 1000) / 1000,
+    elementSpacingMeters: Math.round(ELEMENT_SPACING * 1000) / 1000,
+    waveNumberRadM: Math.round(WAVE_NUMBER * 100) / 100,
+    phaseGradientDeg: phaseGradDeg,
+    spatialNyquistMet: ELEMENT_SPACING <= WAVELENGTH / 2 + 1e-4,
+    activeElements: activeCount,
+  };
+}

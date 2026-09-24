@@ -26,8 +26,14 @@ export function formatChefDisplayName(name: string): string {
 
 export function isChefMatch(a?: string | null, b?: string | null): boolean {
   if (!a || !b) return false;
-  const cleanA = a.trim().toLowerCase().replace(/^chef\s+/, "");
-  const cleanB = b.trim().toLowerCase().replace(/^chef\s+/, "");
+  const cleanA = a
+    .trim()
+    .toLowerCase()
+    .replace(/^chef\s+/, "");
+  const cleanB = b
+    .trim()
+    .toLowerCase()
+    .replace(/^chef\s+/, "");
   return cleanA === cleanB;
 }
 
@@ -376,8 +382,7 @@ export function addLeaderboardEntry(entry: Omit<LeaderboardEntry, "rank">) {
           e.recipeId === entry.recipeId &&
           e.difficulty === entry.difficulty,
       );
-      const bestEntry =
-        previousRun && previousRun.score > entry.score ? previousRun : entry;
+      const bestEntry = previousRun && previousRun.score > entry.score ? previousRun : entry;
 
       const updated = [bestEntry, ...otherRuns];
       window.localStorage.setItem(LEADERBOARD_STORAGE_KEY, JSON.stringify(updated));
@@ -433,13 +438,7 @@ export function saveCurrentDishScoreToLeaderboard(opts?: {
   const similarity = opts?.accuracy ?? stageAvg;
 
   const diffMultiplier =
-    diff === "masterchef"
-      ? 2.0
-      : diff === "hard"
-        ? 1.5
-        : diff === "medium"
-          ? 1.2
-          : 1.0;
+    diff === "masterchef" ? 2.0 : diff === "hard" ? 1.5 : diff === "medium" ? 1.2 : 1.0;
 
   const deliveryBonus =
     opts?.deliveryBonus ??
@@ -484,9 +483,7 @@ export function getLeaderboard(
   const savedEntries = getSavedLeaderboardEntries();
   const allEntries = [...savedEntries, ...MOCK_LEADERBOARD_ENTRIES];
 
-  const filtered = allEntries.filter(
-    (e) => e.recipeId === recipeId && e.difficulty === difficulty,
-  );
+  const filtered = allEntries.filter((e) => e.recipeId === recipeId && e.difficulty === difficulty);
 
   return filtered
     .sort((a, b) => b.score - a.score)

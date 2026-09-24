@@ -238,9 +238,7 @@ function CheckDishScreen() {
               <div className="flex items-center gap-2">
                 <span
                   className={`inline-block h-2.5 w-2.5 rounded-full ${
-                    playbackState.isPlaying
-                      ? "bg-primary animate-ping"
-                      : "bg-muted-foreground/50"
+                    playbackState.isPlaying ? "bg-primary animate-ping" : "bg-muted-foreground/50"
                   }`}
                 />
                 <span className="text-foreground uppercase tracking-wider font-bold">
@@ -255,7 +253,10 @@ function CheckDishScreen() {
                 <span className="font-bold text-primary text-sm">
                   {playbackState.currentTime.toFixed(1)}s
                 </span>
-                <span className="text-muted-foreground"> / {playbackState.duration.toFixed(1)}s</span>
+                <span className="text-muted-foreground">
+                  {" "}
+                  / {playbackState.duration.toFixed(1)}s
+                </span>
               </div>
             </div>
 
@@ -323,13 +324,17 @@ function CheckDishScreen() {
                   <span className="font-bold text-foreground">{fundamentalHz} Hz</span>
                 </div>
                 <div className="rounded-lg border border-border bg-card/80 px-3 py-1.5">
-                  <span className="text-muted-foreground uppercase text-[10px] block">Amplitude</span>
+                  <span className="text-muted-foreground uppercase text-[10px] block">
+                    Amplitude
+                  </span>
                   <span className="font-bold text-foreground">
                     {(cookedSignal.amplitude * 100).toFixed(0)}%
                   </span>
                 </div>
                 <div className="rounded-lg border border-border bg-card/80 px-3 py-1.5">
-                  <span className="text-muted-foreground uppercase text-[10px] block">Harmonics</span>
+                  <span className="text-muted-foreground uppercase text-[10px] block">
+                    Harmonics
+                  </span>
                   <span className="font-bold text-foreground">
                     {cookedSignal.noise > 0 ? "Crackle + Rich" : "Clean Sines"}
                   </span>

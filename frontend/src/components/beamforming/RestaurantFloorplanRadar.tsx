@@ -68,8 +68,7 @@ export function RestaurantFloorplanRadar({
         const rad = ((ang - 90) * Math.PI) / 180;
         const x = originX + Math.cos(rad) * maxRadius;
         const y = originY + Math.sin(rad) * maxRadius;
-        ctx.strokeStyle =
-          ang === 0 ? "rgba(80, 220, 240, 0.2)" : "rgba(80, 220, 240, 0.06)";
+        ctx.strokeStyle = ang === 0 ? "rgba(80, 220, 240, 0.2)" : "rgba(80, 220, 240, 0.06)";
         ctx.beginPath();
         ctx.moveTo(originX, originY);
         ctx.lineTo(x, y);
@@ -96,13 +95,9 @@ export function RestaurantFloorplanRadar({
         ctx.lineTo(px, py);
       }
       ctx.closePath();
-      ctx.fillStyle = isAligned
-        ? "rgba(72, 187, 120, 0.12)"
-        : "rgba(255, 152, 0, 0.09)";
+      ctx.fillStyle = isAligned ? "rgba(72, 187, 120, 0.12)" : "rgba(255, 152, 0, 0.09)";
       ctx.fill();
-      ctx.strokeStyle = isAligned
-        ? "rgba(72, 187, 120, 0.6)"
-        : "rgba(255, 152, 0, 0.45)";
+      ctx.strokeStyle = isAligned ? "rgba(72, 187, 120, 0.6)" : "rgba(255, 152, 0, 0.45)";
       ctx.lineWidth = 1.5;
       ctx.stroke();
 
@@ -113,9 +108,7 @@ export function RestaurantFloorplanRadar({
 
       // Glow cone
       const coneHalfAngle = Math.PI / 16;
-      ctx.fillStyle = isAligned
-        ? "rgba(72, 187, 120, 0.15)"
-        : "rgba(255, 152, 0, 0.1)";
+      ctx.fillStyle = isAligned ? "rgba(72, 187, 120, 0.15)" : "rgba(255, 152, 0, 0.1)";
       ctx.beginPath();
       ctx.moveTo(originX, originY);
       ctx.arc(originX, originY, maxRadius, beamRad - coneHalfAngle, beamRad + coneHalfAngle);
@@ -201,11 +194,7 @@ export function RestaurantFloorplanRadar({
         ctx.font = "14px sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText(
-          isTarget && isDelivered ? "😋" : table.dishEmoji,
-          tx,
-          ty - 1,
-        );
+        ctx.fillText(isTarget && isDelivered ? "😋" : table.dishEmoji, tx, ty - 1);
 
         // Table Name text
         ctx.font = "bold 9px monospace";
@@ -227,11 +216,7 @@ export function RestaurantFloorplanRadar({
           : isSpillover
             ? "#fca5a5"
             : "rgba(140, 160, 180, 0.5)";
-        ctx.fillText(
-          `${Math.round(receivedGain * 100)}% pwr`,
-          tx,
-          ty + 36,
-        );
+        ctx.fillText(`${Math.round(receivedGain * 100)}% pwr`, tx, ty + 36);
       });
 
       // --- 5. Levitating Delivery Dish Animation ---
@@ -243,7 +228,7 @@ export function RestaurantFloorplanRadar({
         const targetX = originX + Math.cos(targetRad) * (maxRadius * targetDistRatio);
         const targetY = originY + Math.sin(targetRad) * (maxRadius * targetDistRatio);
 
-        const deliveryProgress = ((time * 1.5) % 1.2);
+        const deliveryProgress = (time * 1.5) % 1.2;
         const clampedProg = Math.min(1.0, deliveryProgress);
         const dishX = originX + (targetX - originX) * clampedProg;
         const dishY = originY + (targetY - originY) * clampedProg;
@@ -268,13 +253,7 @@ export function RestaurantFloorplanRadar({
       ctx.strokeStyle = "oklch(0.5 0.1 250)";
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.roundRect(
-        arrayStartX - 10,
-        originY - 6,
-        (activeCount - 1) * spkSpacing + 20,
-        14,
-        6,
-      );
+      ctx.roundRect(arrayStartX - 10, originY - 6, (activeCount - 1) * spkSpacing + 20, 14, 6);
       ctx.fill();
       ctx.stroke();
 

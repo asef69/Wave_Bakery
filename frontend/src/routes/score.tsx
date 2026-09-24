@@ -1,11 +1,19 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { MessageSquare, CheckCircle2, AlertTriangle, XCircle, Sparkles, Trophy } from "lucide-react";
+import {
+  MessageSquare,
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  Sparkles,
+  Trophy,
+} from "lucide-react";
 
 import { ServeChoiceModal } from "@/components/beamforming/ServeChoiceModal";
 import { ChefFourier } from "@/components/game/ChefFourier";
 import { GameButton } from "@/components/game/GameButton";
 import { MiniWave } from "@/components/game/MiniWave";
+import { SignalChainDiagram } from "@/components/game/SignalChainDiagram";
 import { RecipeTimerBadge, TimeExpiredModal } from "@/components/game/RecipeTimer";
 import { SignalAudioPlayer } from "@/lib/audio";
 import { generateCustomerCritique } from "@/lib/critiques";
@@ -15,6 +23,7 @@ import {
   api,
   completeRecipeRun,
   getIdealDishSignal,
+  saveBestScore,
   type SubmitResult,
   updateRecipeRunSession,
   useActiveRecipe,
@@ -89,10 +98,13 @@ function ScoreScreen() {
     // Submit to server-authoritative backend
     if (session?.backendSessionId && !backendSubmitResult) {
       setIsSubmitting(true);
-      api.submitSession(session.backendSessionId)
+      api
+        .submitSession(session.backendSessionId)
         .then((result) => {
           setBackendSubmitResult(result);
           updateRecipeRunSession({ backendSubmitResult: result });
+          // Persist authoritative best score (only updates if new score is higher)
+          saveBestScore(recipe.id, result.score, result.stars);
         })
         .catch((err) => {
           console.warn("Backend session submit error (falling back to client scoring):", err);
@@ -101,6 +113,7 @@ function ScoreScreen() {
           setIsSubmitting(false);
         });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.backendSessionId, backendSubmitResult, unlock]);
 
   // Compute local fallback signal similarity
@@ -111,7 +124,8 @@ function ScoreScreen() {
   const similarity = Math.max(0, Math.min(100, Math.round(rawSimilarity)));
 
   // Dynamic stage accuracies recorded from session
-  const filteringVal = session?.filteringAccuracy ?? (recipe.washableIngredients.length === 0 ? 100 : similarity);
+  const filteringVal =
+    session?.filteringAccuracy ?? (recipe.washableIngredients.length === 0 ? 100 : similarity);
   const mixingVal = session?.mixingAccuracy ?? 95;
   const seasoningVal = session?.seasoningAccuracy ?? 92;
   const marinatingVal = session?.marinatingAccuracy ?? 90;
@@ -123,23 +137,27 @@ function ScoreScreen() {
   // Authoritative server values vs fallback
   const displayScore = backendSubmitResult ? Math.round(backendSubmitResult.score) : null;
   const displayStars = backendSubmitResult
-    ? "★ ".repeat(backendSubmitResult.stars) + "☆ ".repeat(Math.max(0, 5 - backendSubmitResult.stars))
+    ? "★ ".repeat(backendSubmitResult.stars) +
+      "☆ ".repeat(Math.max(0, 5 - backendSubmitResult.stars))
     : similarity >= 90
       ? "★ ★ ★"
       : similarity >= 75
         ? "★ ★ ☆"
         : "★ ☆ ☆";
-  const displaySimilarity = backendSubmitResult?.spectral_similarity != null
-    ? Math.max(0, Math.min(100, Math.round(backendSubmitResult.spectral_similarity * 100)))
-    : similarity;
+  const displaySimilarity =
+    backendSubmitResult?.spectral_similarity != null
+      ? Math.max(0, Math.min(100, Math.round(backendSubmitResult.spectral_similarity * 100)))
+      : similarity;
 
-  const playerSamples = backendSubmitResult?.player_dish?.plot && backendSubmitResult.player_dish.plot.length > 0
-    ? backendSubmitResult.player_dish.plot
-    : cookedSignal.samples;
+  const playerSamples =
+    backendSubmitResult?.player_dish?.plot && backendSubmitResult.player_dish.plot.length > 0
+      ? backendSubmitResult.player_dish.plot
+      : cookedSignal.samples;
 
-  const targetSamples = backendSubmitResult?.target?.plot && backendSubmitResult.target.plot.length > 0
-    ? backendSubmitResult.target.plot
-    : targetSignal.samples;
+  const targetSamples =
+    backendSubmitResult?.target?.plot && backendSubmitResult.target.plot.length > 0
+      ? backendSubmitResult.target.plot
+      : targetSignal.samples;
 
   // Generate dynamic customer critique
   const customerCritique = useMemo(() => {
@@ -176,7 +194,15 @@ function ScoreScreen() {
       list.push({ label: `Beam Delivery Precision (+${deliveryBonus} pts)`, value: deliveryVal });
     }
     return list;
-  }, [backendSubmitResult, filteringVal, mixingVal, transformVal, cookingVal, deliveryVal, deliveryBonus]);
+  }, [
+    backendSubmitResult,
+    filteringVal,
+    mixingVal,
+    transformVal,
+    cookingVal,
+    deliveryVal,
+    deliveryBonus,
+  ]);
 
   const stageAvg = (filteringVal + mixingVal + seasoningVal + marinatingVal + cookingVal) / 5;
   const diffMultiplier = session ? (DIFFICULTY_MULTIPLIERS[session.difficulty] ?? 1.0) : 1.0;
@@ -192,9 +218,12 @@ function ScoreScreen() {
   }, [session]);
 
   const timeBonus = remainingSec * 2;
-  const totalScore = displayScore !== null
-    ? displayScore
-    : Math.round((similarity * 0.5 + stageAvg * 0.5) * 10 * diffMultiplier) + timeBonus + deliveryBonus;
+  const totalScore =
+    displayScore !== null
+      ? displayScore
+      : Math.round((similarity * 0.5 + stageAvg * 0.5) * 10 * diffMultiplier) +
+        timeBonus +
+        deliveryBonus;
 
   // Dynamic feedback from Chef Fourier based on lowest score
   const chefFeedback = useMemo(() => {
@@ -205,17 +234,33 @@ function ScoreScreen() {
       return `${displaySimilarity}%! That is a scientifically delicious plate. A true Fourier masterwork!`;
     }
     const stages = [
-      { name: "filtering", val: filteringVal, tip: "Some high-frequency chatter remained in filtering. Try tuning the cutoff closer to the ideal mark." },
-      { name: "mixing", val: mixingVal, tip: "Check your bowl ingredients to ensure all required components are properly superimposed." },
-      { name: "seasoning", val: transformVal, tip: "Fine-tune the amplitude and time-scaling sliders to match the target envelope." },
-      { name: "cooking", val: cookingVal, tip: "Ensure you choose the correct cooking impulse response and slide to full convolution depth." },
+      {
+        name: "filtering",
+        val: filteringVal,
+        tip: "Some high-frequency chatter remained in filtering. Try tuning the cutoff closer to the ideal mark.",
+      },
+      {
+        name: "mixing",
+        val: mixingVal,
+        tip: "Check your bowl ingredients to ensure all required components are properly superimposed.",
+      },
+      {
+        name: "seasoning",
+        val: transformVal,
+        tip: "Fine-tune the amplitude and time-scaling sliders to match the target envelope.",
+      },
+      {
+        name: "cooking",
+        val: cookingVal,
+        tip: "Ensure you choose the correct cooking impulse response and slide to full convolution depth.",
+      },
     ];
     stages.sort((a, b) => a.val - b.val);
     const lowest = stages[0];
     return `${displaySimilarity}% similarity. ${lowest?.tip ?? "Keep refining each station to perfect the signal!"}`;
   }, [backendSubmitResult, displaySimilarity, filteringVal, mixingVal, transformVal, cookingVal]);
 
-  // Persist player run to leaderboard
+  // Persist player run to leaderboard + best score
   useEffect(() => {
     const diff = session?.difficulty ?? "easy";
     const startTime = session?.startTime ?? Date.now();
@@ -230,7 +275,25 @@ function ScoreScreen() {
       timeRemaining: formattedTime || "0:00",
       date: "Today",
     });
-  }, [session, recipe.id, chefName, totalScore, displaySimilarity, formattedTime]);
+    // Always persist best score — covers: cached backendSubmitResult, fresh result, local fallback
+    const scoreToSave = backendSubmitResult ? Math.round(backendSubmitResult.score) : totalScore;
+    const starsToSave = backendSubmitResult
+      ? backendSubmitResult.stars
+      : displaySimilarity >= 90
+        ? 3
+        : displaySimilarity >= 75
+          ? 2
+          : 1;
+    saveBestScore(recipe.id, scoreToSave, starsToSave);
+  }, [
+    session,
+    recipe.id,
+    chefName,
+    totalScore,
+    displaySimilarity,
+    formattedTime,
+    backendSubmitResult,
+  ]);
 
   if (unlockedStep < 7) {
     return (
@@ -352,9 +415,14 @@ function ScoreScreen() {
                 </span>
               ) : null}
             </div>
-            <p className="mt-2 font-display text-6xl font-extrabold text-gradient-warm">{displaySimilarity}%</p>
+            <p className="mt-2 font-display text-6xl font-extrabold text-gradient-warm">
+              {displaySimilarity}%
+            </p>
             <div className="mt-4 h-4 w-full overflow-hidden rounded-full border border-border bg-secondary">
-              <span className="block h-full bg-[image:var(--gradient-warm)]" style={{ width: `${displaySimilarity}%` }} />
+              <span
+                className="block h-full bg-[image:var(--gradient-warm)]"
+                style={{ width: `${displaySimilarity}%` }}
+              />
             </div>
             <p className="mt-4 font-display text-2xl font-extrabold text-foreground">
               Overall score: {totalScore}
@@ -365,7 +433,9 @@ function ScoreScreen() {
               <div className="mt-4 grid grid-cols-2 gap-2 border-t border-border/60 pt-3 font-mono text-[10px] uppercase text-muted-foreground">
                 <div className="rounded-lg border border-border bg-secondary/60 p-1.5 text-center">
                   <span>SNR</span>
-                  <p className="font-bold text-foreground">{backendSubmitResult.snr_db.toFixed(1)} dB</p>
+                  <p className="font-bold text-foreground">
+                    {backendSubmitResult.snr_db.toFixed(1)} dB
+                  </p>
                 </div>
                 <div className="rounded-lg border border-border bg-secondary/60 p-1.5 text-center">
                   <span>MSE</span>
@@ -426,7 +496,9 @@ function ScoreScreen() {
         <section className="mt-8 kitchen-card p-6 border-2 border-primary/30">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-3">
             <div className="flex items-center gap-3">
-              <span className="text-3xl" aria-hidden>{customerCritique.avatarEmoji}</span>
+              <span className="text-3xl" aria-hidden>
+                {customerCritique.avatarEmoji}
+              </span>
               <div>
                 <p className="font-mono text-[10px] font-extrabold tracking-[0.2em] text-primary uppercase">
                   Diner Taste Verdict · {customerCritique.eaterTitle}
@@ -437,12 +509,16 @@ function ScoreScreen() {
               </div>
             </div>
 
-            <span className={cn(
-              "rounded-full px-3 py-1 font-mono text-xs font-bold uppercase",
-              customerCritique.reaction === "ecstatic" ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40" :
-              customerCritique.reaction === "satisfied" ? "bg-primary/20 text-primary border border-primary/40" :
-              "bg-amber-500/20 text-amber-400 border border-amber-500/40"
-            )}>
+            <span
+              className={cn(
+                "rounded-full px-3 py-1 font-mono text-xs font-bold uppercase",
+                customerCritique.reaction === "ecstatic"
+                  ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
+                  : customerCritique.reaction === "satisfied"
+                    ? "bg-primary/20 text-primary border border-primary/40"
+                    : "bg-amber-500/20 text-amber-400 border border-amber-500/40",
+              )}
+            >
               {customerCritique.headline}
             </span>
           </div>
@@ -457,9 +533,14 @@ function ScoreScreen() {
             </p>
             <div className="mt-2.5 grid gap-3 sm:grid-cols-2">
               {customerCritique.diagnostics.map((d) => (
-                <div key={d.station} className="rounded-xl border border-border bg-card p-3 shadow-2xs text-xs">
+                <div
+                  key={d.station}
+                  className="rounded-xl border border-border bg-card p-3 shadow-2xs text-xs"
+                >
                   <div className="flex items-center justify-between">
-                    <span className="font-display font-extrabold uppercase text-foreground">{d.station}</span>
+                    <span className="font-display font-extrabold uppercase text-foreground">
+                      {d.station}
+                    </span>
                     {d.status === "pass" ? (
                       <span className="inline-flex items-center gap-1 font-mono text-[9px] font-bold text-emerald-400 uppercase">
                         <CheckCircle2 className="h-3.5 w-3.5" /> Optimal
@@ -475,19 +556,22 @@ function ScoreScreen() {
                     )}
                   </div>
                   <p className="mt-1.5 font-semibold text-foreground">{d.culinaryNote}</p>
-                  <p className="mt-1 font-mono text-[10px] text-muted-foreground">{d.dspDiagnosis}</p>
+                  <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+                    {d.dspDiagnosis}
+                  </p>
                 </div>
               ))}
             </div>
           </div>
         </section>
 
+        {/* ITEM 5: End-to-End Cascaded LTI System Architecture Diagram */}
+        <section className="mt-8">
+          <SignalChainDiagram activeBlockId="cooking" />
+        </section>
+
         <div className="mt-10 flex flex-wrap items-end justify-between gap-6">
-          <ChefFourier
-            size="sm"
-            float={false}
-            message={chefFeedback}
-          />
+          <ChefFourier size="sm" float={false} message={chefFeedback} />
           <div className="flex flex-wrap gap-3">
             <Link to="/complete">
               <GameButton

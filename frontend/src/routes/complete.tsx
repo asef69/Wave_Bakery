@@ -74,7 +74,7 @@ function CompleteScreen() {
         </h1>
 
         <div className="mt-8 grid items-center gap-8 md:grid-cols-[0.9fr_1.1fr]">
-          <DishGlyph dish={recipe.id as any} />
+          <DishGlyph dish={recipe.id} />
           <div className="text-left">
             <p className="font-mono text-[10px] tracking-[0.22em] text-muted-foreground uppercase">
               Dish served
@@ -112,8 +112,7 @@ function CompleteScreen() {
                 onClick={handlePlayAudio}
                 className="uppercase font-bold tracking-wider"
               >
-                <Volume2 className="mr-2 h-4 w-4" />
-                ▶ Play Served Dish Output
+                <Volume2 className="mr-2 h-4 w-4" />▶ Play Served Dish Output
               </GameButton>
             </div>
 

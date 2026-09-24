@@ -66,7 +66,7 @@ function buildTrayIngredients(selected: IngredientDetail[]): MixIngredient[] {
       name: s.name,
       kind: (s.kind ?? "generic") as IngredientKind,
       freq: s.freq ?? 2 + (idx % 4) * 1.5,
-      amp: math?.defaultAmplitude ?? (0.5 + (idx % 3) * 0.25),
+      amp: math?.defaultAmplitude ?? 0.5 + (idx % 3) * 0.25,
       seed: (idx + 1) * 0.85,
       trace: TRACE_COLORS[idx % TRACE_COLORS.length]!,
     };
@@ -236,7 +236,10 @@ function MixingLab() {
   const handlePlayAudio = () => {
     if (inBowl.length === 0) return;
     if (player) player.destroy();
-    const sig = computeMixedSignal(recipe.id, inBowl.map((i) => i.name));
+    const sig = computeMixedSignal(
+      recipe.id,
+      inBowl.map((i) => i.name),
+    );
     const newPlayer = new SignalAudioPlayer({
       samples: sig.samples,
       frequency: sig.frequency,
@@ -248,7 +251,10 @@ function MixingLab() {
   };
 
   const handleMix = () => {
-    const mixedSig = computeMixedSignal(recipe.id, inBowl.map((i) => i.name));
+    const mixedSig = computeMixedSignal(
+      recipe.id,
+      inBowl.map((i) => i.name),
+    );
     savePipelineStageSignal(recipe.id, "mixed", mixedSig);
 
     const recipeSet = new Set(recipe.ingredients.map((i) => i.toLowerCase()));

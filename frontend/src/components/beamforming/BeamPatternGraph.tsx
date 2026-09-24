@@ -1,6 +1,7 @@
-﻿import { Activity, Target } from "lucide-react";
+import { Activity, Target, SlidersHorizontal, Info } from "lucide-react";
 import type { BeamPatternPoint } from "@/lib/beamforming";
 import { cn } from "@/lib/utils";
+import { useState } from "react";
 
 interface BeamPatternGraphProps {
   data: BeamPatternPoint[];
@@ -17,10 +18,12 @@ export function BeamPatternGraph({
   className,
   isAligned = false,
 }: BeamPatternGraphProps) {
+  const [showFilterAnalogy, setShowFilterAnalogy] = useState(true);
+
   // SVG coordinate dimensions
   const width = 500;
-  const height = 180;
-  const padding = { top: 20, right: 25, bottom: 30, left: 35 };
+  const height = 195;
+  const padding = { top: 24, right: 25, bottom: 32, left: 38 };
 
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
@@ -49,6 +52,14 @@ export function BeamPatternGraph({
   const targetX = targetAngle !== undefined ? scaleX(targetAngle) : null;
   const steeredX = scaleX(steeredAngle);
 
+  // -3dB cutoff height (0.707 of peak 1.0)
+  const yMinus3dB = scaleY(0.707);
+
+  // Approximate half-power beamwidth bounds around steered angle
+  const hpbwDeg = 16;
+  const xPassbandLeft = scaleX(Math.max(-90, steeredAngle - hpbwDeg / 2));
+  const xPassbandRight = scaleX(Math.min(90, steeredAngle + hpbwDeg / 2));
+
   return (
     <div
       className={cn(
@@ -64,39 +75,50 @@ export function BeamPatternGraph({
           </span>
           <div>
             <p className="font-mono text-[10px] font-extrabold tracking-[0.24em] text-primary uppercase">
-              Spatial Directivity Spectrum
+              Spatial Filter Analogy · Array Factor
             </p>
             <h4 className="font-display text-base font-extrabold text-foreground uppercase">
-              Array Factor &amp; Beam Pattern
+              Spatial Frequency Response |AF(θ)|
             </h4>
           </div>
         </div>
 
-        <div className="flex items-center gap-3 font-mono text-[10px] text-muted-foreground uppercase">
-          <span className="flex items-center gap-1">
-            <span className="h-2 w-2 rounded-full bg-primary" />
-            <span>Main Lobe: {steeredAngle > 0 ? `+${steeredAngle}°` : `${steeredAngle}°`}</span>
-          </span>
-          {targetAngle !== undefined && (
-            <span
-              className={cn(
-                "flex items-center gap-1 font-bold",
-                isAligned ? "text-signal-alt" : "text-signal",
-              )}
-            >
-              <Target className="h-3 w-3" />
-              <span>Target: {targetAngle > 0 ? `+${targetAngle}°` : `${targetAngle}°`}</span>
-            </span>
-          )}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowFilterAnalogy((prev) => !prev)}
+            className="flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-2 py-0.5 font-mono text-[9px] font-bold text-primary hover:bg-primary/20 cursor-pointer"
+          >
+            <SlidersHorizontal className="h-2.5 w-2.5" />
+            <span>{showFilterAnalogy ? "Hide Filter Analogy" : "Show Filter Analogy"}</span>
+          </button>
         </div>
       </div>
 
+      {/* Spatial Frequency Response Educational Legend */}
+      {showFilterAnalogy && (
+        <div className="mt-3 grid grid-cols-3 gap-2 font-mono text-[9px] uppercase">
+          <div className="flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-emerald-400 font-bold">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+            <span>Passband (Main Lobe)</span>
+          </div>
+          <div className="flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-amber-400 font-bold">
+            <span className="h-2 w-2 rounded-full bg-amber-500" />
+            <span>-3dB Bandwidth</span>
+          </div>
+          <div className="flex items-center gap-1.5 rounded-lg border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-rose-400 font-bold">
+            <span className="h-2 w-2 rounded-full bg-rose-500" />
+            <span>Stopband (Sidelobes)</span>
+          </div>
+        </div>
+      )}
+
       {/* SVG Graph */}
-      <div className="relative mt-4 w-full overflow-hidden rounded-xl border border-signal/20 bg-[oklch(0.18_0.03_250)]/90 p-2 shadow-inner">
+      <div className="relative mt-3 w-full overflow-hidden rounded-xl border border-signal/20 bg-[oklch(0.18_0.03_250)]/90 p-2 shadow-inner">
         <svg
           viewBox={`0 0 ${width} ${height}`}
           className="w-full h-auto overflow-visible"
-          aria-label="Beam Directivity Pattern Graph"
+          aria-label="Spatial Filter Frequency Response Graph"
         >
           <defs>
             <linearGradient id="beamGradient" x1="0%" y1="0%" x2="0%" y2="100%">
@@ -110,6 +132,19 @@ export function BeamPatternGraph({
               <stop offset="100%" stopColor="var(--primary)" />
             </linearGradient>
           </defs>
+
+          {/* Passband Spatial Window Shading */}
+          {showFilterAnalogy && (
+            <rect
+              x={xPassbandLeft}
+              y={padding.top}
+              width={Math.max(4, xPassbandRight - xPassbandLeft)}
+              height={plotHeight}
+              fill="rgba(16, 185, 129, 0.12)"
+              stroke="rgba(16, 185, 129, 0.35)"
+              strokeDasharray="3,3"
+            />
+          )}
 
           {/* Grid lines */}
           {[-60, -30, 0, 30, 60].map((angle) => {
@@ -140,8 +175,9 @@ export function BeamPatternGraph({
           })}
 
           {/* Horizontal intensity gridlines */}
-          {[0.25, 0.5, 0.75, 1.0].map((val) => {
+          {[0.25, 0.5, 0.707, 1.0].map((val) => {
             const y = scaleY(val);
+            const isCutoff = val === 0.707;
             return (
               <g key={val}>
                 <line
@@ -149,19 +185,19 @@ export function BeamPatternGraph({
                   y1={y}
                   x2={width - padding.right}
                   y2={y}
-                  stroke="oklch(0.35 0.03 250)"
-                  strokeDasharray="2,2"
-                  strokeWidth="0.8"
+                  stroke={isCutoff ? "rgba(245, 158, 11, 0.6)" : "oklch(0.35 0.03 250)"}
+                  strokeDasharray={isCutoff ? "4,2" : "2,2"}
+                  strokeWidth={isCutoff ? "1.2" : "0.8"}
                 />
                 <text
                   x={padding.left - 6}
                   y={y + 3}
-                  fill="oklch(0.65 0.04 250)"
+                  fill={isCutoff ? "rgba(245, 158, 11, 0.9)" : "oklch(0.65 0.04 250)"}
                   fontSize="8"
                   fontFamily="monospace"
                   textAnchor="end"
                 >
-                  {val.toFixed(2)}
+                  {isCutoff ? "-3dB (0.71)" : val.toFixed(2)}
                 </text>
               </g>
             );
@@ -195,7 +231,7 @@ export function BeamPatternGraph({
                 fontFamily="monospace"
                 textAnchor="middle"
               >
-                TARGET ({targetAngle > 0 ? `+${targetAngle}°` : `${targetAngle}°`})
+                PASSBAND TARGET ({targetAngle > 0 ? `+${targetAngle}°` : `${targetAngle}°`})
               </text>
             </g>
           )}
@@ -227,12 +263,24 @@ export function BeamPatternGraph({
         </svg>
 
         {/* Legend footer */}
-        <div className="mt-2 flex justify-between border-t border-signal/15 pt-1.5 font-mono text-[9px] text-signal/70 uppercase">
-          <span>-90° (Left Sidelobes)</span>
-          <span>Relative Intensity (Normalized |E(θ)|)</span>
-          <span>+90° (Right Sidelobes)</span>
+        <div className="mt-2 flex flex-wrap justify-between border-t border-signal/15 pt-1.5 font-mono text-[9px] text-signal/80 uppercase">
+          <span>-90° (Stopband Ripple)</span>
+          <span>Spatial Filter Transfer Function |AF(θ)|</span>
+          <span>+90° (Stopband Ripple)</span>
         </div>
       </div>
+
+      {showFilterAnalogy && (
+        <div className="mt-2.5 flex items-start gap-2 rounded-xl border border-primary/20 bg-primary/5 p-2.5 font-mono text-[10px] text-muted-foreground">
+          <Info className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+          <p>
+            <strong className="text-foreground">Filter Analogy:</strong> Steering element phases
+            shifts the spatial passband center angle {"θ₀"}. Sidelobes are stopband ripples;
+            choosing <strong>Hamming</strong> or <strong>Blackman</strong> windowing deepens
+            stopband rejection down to -58 dB.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

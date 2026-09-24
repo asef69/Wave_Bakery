@@ -132,7 +132,15 @@ function CookingLab() {
       });
       syncSessionParamsToBackend(recipe.id);
     }
-  }, [isCookingComplete, currentMethod, currentPos, convolvedSignal, recipe.id, unlock, isTargetSelected]);
+  }, [
+    isCookingComplete,
+    currentMethod,
+    currentPos,
+    convolvedSignal,
+    recipe.id,
+    unlock,
+    isTargetSelected,
+  ]);
 
   const chefLine = !method
     ? recipe.id === "burger"

@@ -8,19 +8,19 @@ from .models import Appliance, Ingredient, Recipe
 
 INGREDIENTS = [
     # Produce / Washables
-    dict(id='lettuce', name='Lettuce', emoji='🥬', voice='shaker', f0=440.0, color='#5eb35e',
+    dict(id='lettuce', name='Lettuce', emoji='🥬', voice='lettuce', f0=440.0, color='#5eb35e',
          signature='Band-limited noise with sustained series', washable=True, ideal_cutoff=380.0,
          kind='lettuce', category='Produce'),
-    dict(id='tomato', name='Tomato', emoji='🍅', voice='kalimba', f0=262.0, color='#e0483a',
+    dict(id='tomato', name='Tomato', emoji='🍅', voice='tomato', f0=262.0, color='#e0483a',
          signature='A tall stack of harmonics that decay at different rates', washable=True, ideal_cutoff=520.0,
          kind='tomato', category='Produce'),
-    dict(id='onion', name='Onion', emoji='🧅', voice='oboe', f0=587.0, color='#c79ad6',
+    dict(id='onion', name='Onion', emoji='🧅', voice='onion', f0=587.0, color='#c79ad6',
          signature='A near-pure tone plus band-limited breath noise', washable=True, ideal_cutoff=640.0,
          kind='onion', category='Produce'),
-    dict(id='cucumber', name='Cucumber', emoji='🥒', voice='piccolo', f0=450.0, color='#48c774',
+    dict(id='cucumber', name='Cucumber', emoji='🥒', voice='cucumber', f0=450.0, color='#48c774',
          signature='High-register agile woodwind tone with crisp flutter', washable=True, ideal_cutoff=450.0,
          kind='cucumber', category='Produce'),
-    dict(id='carrot', name='Carrot', emoji='🥕', voice='clarinet', f0=500.0, color='#ff8c00',
+    dict(id='carrot', name='Carrot', emoji='🥕', voice='carrot', f0=500.0, color='#ff8c00',
          signature='Hollow woodwind spectrum dominated by odd harmonics', washable=True, ideal_cutoff=500.0,
          kind='carrot', category='Produce'),
 
@@ -45,7 +45,7 @@ INGREDIENTS = [
     dict(id='meat', name='Meat', emoji='🥩', voice='drum', f0=90.0, color='#c0553f',
          signature='One fat low-frequency lobe with a broadband click at attack', washable=False, ideal_cutoff=None,
          kind='patty', category='Protein'),
-    dict(id='chicken', name='Chicken', emoji='🍗', voice='drum', f0=110.0, color='#e3a857',
+    dict(id='chicken', name='Chicken', emoji='🍗', voice='chicken', f0=110.0, color='#e3a857',
          signature='Punchy low-mid drum transient', washable=False, ideal_cutoff=None,
          kind='chicken', category='Protein'),
     dict(id='cheese', name='Cheese', emoji='🧀', voice='flute', f0=330.0, color='#e8b73a',
@@ -218,17 +218,14 @@ def seed(db: Session, force: bool = False) -> dict:
     counts = {'ingredients': 0, 'appliances': 0, 'recipes': 0}
 
     for row in INGREDIENTS:
-        if force or db.get(Ingredient, row['id']) is None:
-            db.merge(Ingredient(**row))
-            counts['ingredients'] += 1
+        db.merge(Ingredient(**row))
+        counts['ingredients'] += 1
     for row in APPLIANCES:
-        if force or db.get(Appliance, row['id']) is None:
-            db.merge(Appliance(**row))
-            counts['appliances'] += 1
+        db.merge(Appliance(**row))
+        counts['appliances'] += 1
     for row in RECIPES:
-        if force or db.get(Recipe, row['id']) is None:
-            db.merge(Recipe(**row))
-            counts['recipes'] += 1
+        db.merge(Recipe(**row))
+        counts['recipes'] += 1
 
     db.commit()
     return counts

@@ -44,6 +44,7 @@ export function KitchenStation({
 
   return (
     <Link
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       to={locked ? undefined : (station.to as any)}
       onClick={handleClick}
       aria-label={`${station.label} — ${locked ? "Locked: Complete previous steps first" : station.purpose}`}

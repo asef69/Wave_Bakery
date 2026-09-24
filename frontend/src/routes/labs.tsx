@@ -1047,7 +1047,9 @@ function FilterSandbox({
             size="sm"
             variant="lab"
             className="uppercase text-xs"
-            onClick={() => onPlayAudio(`filter-result-${activeSignal.id}`, filteredSamples, baseFreq)}
+            onClick={() =>
+              onPlayAudio(`filter-result-${activeSignal.id}`, filteredSamples, baseFreq)
+            }
           >
             {playingClip === `filter-result-${activeSignal.id}`
               ? "🔊 Playing Filtered..."
@@ -1153,7 +1155,7 @@ function MixerSandbox({
       out.push(val / totalGain);
     }
     return out;
-  }, [track1, track2, track3, track4]);
+  }, [track1, track2, track3, track4, tracks]);
 
   const getTrackSamples = (t: { name: string; freq: number; gain: number }) => {
     return generatePlaygroundSamples({
@@ -1183,7 +1185,7 @@ function MixerSandbox({
       pts.push(`${x === 0 ? "M" : "L"}${x} ${y.toFixed(2)}`);
     }
     return pts.join(" ");
-  }, [track1, track2, track3, track4]);
+  }, [track1, track2, track3, track4, tracks]);
 
   return (
     <div className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">
@@ -1234,7 +1236,9 @@ function MixerSandbox({
                     size="sm"
                     variant="ghost"
                     className="font-mono text-[9px] uppercase px-2 py-0.5 h-6"
-                    onClick={() => onPlayAudio(`track-${idx}-${t.name}`, getTrackSamples(t), t.freq)}
+                    onClick={() =>
+                      onPlayAudio(`track-${idx}-${t.name}`, getTrackSamples(t), t.freq)
+                    }
                   >
                     {playingClip === `track-${idx}-${t.name}` ? "🔊 Playing" : "▶ Play Track"}
                   </GameButton>
@@ -1326,7 +1330,11 @@ function SeasoningSandbox({
   const origSamples = useMemo(() => {
     return activeSignal.category === "ingredient"
       ? computeIngredientSamples({ name: activeSignal.name, freq: activeSignal.freq, noise: 0 })
-      : generatePlaygroundSamples({ freq: activeSignal.freq, noise: 0, waveShape: activeSignal.waveShape ?? "sine" });
+      : generatePlaygroundSamples({
+          freq: activeSignal.freq,
+          noise: 0,
+          waveShape: activeSignal.waveShape ?? "sine",
+        });
   }, [activeSignal]);
 
   const scaledSamples = useMemo(() => {
@@ -1415,7 +1423,9 @@ function SeasoningSandbox({
             size="sm"
             variant="secondary"
             className="uppercase text-xs"
-            onClick={() => onPlayAudio(`season-orig-${activeSignal.id}`, origSamples, activeSignal.freq)}
+            onClick={() =>
+              onPlayAudio(`season-orig-${activeSignal.id}`, origSamples, activeSignal.freq)
+            }
           >
             {playingClip === `season-orig-${activeSignal.id}`
               ? "🔊 Playing Original..."
@@ -1425,7 +1435,13 @@ function SeasoningSandbox({
             size="sm"
             variant="lab"
             className="uppercase text-xs"
-            onClick={() => onPlayAudio(`season-result-${activeSignal.id}`, scaledSamples, activeSignal.freq * freq)}
+            onClick={() =>
+              onPlayAudio(
+                `season-result-${activeSignal.id}`,
+                scaledSamples,
+                activeSignal.freq * freq,
+              )
+            }
           >
             {playingClip === `season-result-${activeSignal.id}`
               ? "🔊 Playing Scaled Result..."
@@ -1493,7 +1509,11 @@ function MarinatingSandbox({
   const origSamples = useMemo(() => {
     return activeSignal.category === "ingredient"
       ? computeIngredientSamples({ name: activeSignal.name, freq: activeSignal.freq, noise: 0 })
-      : generatePlaygroundSamples({ freq: activeSignal.freq, noise: 0, waveShape: activeSignal.waveShape ?? "sine" });
+      : generatePlaygroundSamples({
+          freq: activeSignal.freq,
+          noise: 0,
+          waveShape: activeSignal.waveShape ?? "sine",
+        });
   }, [activeSignal]);
 
   const timeScaledSamples = useMemo(() => {
@@ -1555,7 +1575,9 @@ function MarinatingSandbox({
             size="sm"
             variant="secondary"
             className="uppercase text-xs"
-            onClick={() => onPlayAudio(`mar-orig-${activeSignal.id}`, origSamples, activeSignal.freq)}
+            onClick={() =>
+              onPlayAudio(`mar-orig-${activeSignal.id}`, origSamples, activeSignal.freq)
+            }
           >
             {playingClip === `mar-orig-${activeSignal.id}`
               ? "🔊 Playing Original..."
@@ -1565,7 +1587,13 @@ function MarinatingSandbox({
             size="sm"
             variant="lab"
             className="uppercase text-xs"
-            onClick={() => onPlayAudio(`mar-result-${activeSignal.id}`, timeScaledSamples, activeSignal.freq / timeScale)}
+            onClick={() =>
+              onPlayAudio(
+                `mar-result-${activeSignal.id}`,
+                timeScaledSamples,
+                activeSignal.freq / timeScale,
+              )
+            }
           >
             {playingClip === `mar-result-${activeSignal.id}`
               ? "🔊 Playing Time-Scaled..."
@@ -1667,7 +1695,11 @@ function ConvolutionSandbox({
   const inputSamples = useMemo(() => {
     return activeSignal.category === "ingredient"
       ? computeIngredientSamples({ name: activeSignal.name, freq: activeSignal.freq, noise: 0.05 })
-      : generatePlaygroundSamples({ freq: activeSignal.freq, noise: 0.05, waveShape: activeSignal.waveShape ?? "sine" });
+      : generatePlaygroundSamples({
+          freq: activeSignal.freq,
+          noise: 0.05,
+          waveShape: activeSignal.waveShape ?? "sine",
+        });
   }, [activeSignal]);
 
   const kernelSamples = useMemo(() => {
@@ -1748,7 +1780,9 @@ function ConvolutionSandbox({
             size="sm"
             variant="secondary"
             className="uppercase text-xs"
-            onClick={() => onPlayAudio(`conv-orig-${activeSignal.id}`, inputSamples, activeSignal.freq)}
+            onClick={() =>
+              onPlayAudio(`conv-orig-${activeSignal.id}`, inputSamples, activeSignal.freq)
+            }
           >
             {playingClip === `conv-orig-${activeSignal.id}`
               ? "🔊 Playing Input..."
@@ -1768,7 +1802,13 @@ function ConvolutionSandbox({
             size="sm"
             variant="lab"
             className="uppercase text-xs"
-            onClick={() => onPlayAudio(`conv-result-${activeSignal.id}-${method}`, convolvedSamples, activeSignal.freq)}
+            onClick={() =>
+              onPlayAudio(
+                `conv-result-${activeSignal.id}-${method}`,
+                convolvedSamples,
+                activeSignal.freq,
+              )
+            }
           >
             {playingClip === `conv-result-${activeSignal.id}-${method}`
               ? "🔊 Playing Convolved..."

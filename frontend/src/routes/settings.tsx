@@ -67,7 +67,6 @@ function SettingsScreen() {
     setTimeout(() => setShowResetNotice(false), 3000);
   };
 
-
   return (
     <main className="relative min-h-screen bg-background pb-16">
       <ChefNameModal
@@ -81,10 +80,7 @@ function SettingsScreen() {
         allowCancel={true}
       />
 
-      <LogoutModal
-        isOpen={isLogoutModalOpen}
-        onClose={() => setIsLogoutModalOpen(false)}
-      />
+      <LogoutModal isOpen={isLogoutModalOpen} onClose={() => setIsLogoutModalOpen(false)} />
 
       <div className="lab-grid pointer-events-none absolute inset-0 opacity-[0.06]" aria-hidden />
 
@@ -360,7 +356,8 @@ function SettingsScreen() {
 
             <div className="mt-6 space-y-4">
               <p className="text-xs sm:text-sm font-semibold text-muted-foreground">
-                Choose your kitchen atmosphere. Light theme is the classic sunlit bakery, and Dark theme provides an electric midnight signal lab with high contrast.
+                Choose your kitchen atmosphere. Light theme is the classic sunlit bakery, and Dark
+                theme provides an electric midnight signal lab with high contrast.
               </p>
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

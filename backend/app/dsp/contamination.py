@@ -26,7 +26,7 @@ class Contaminant:
         return asdict(self)
 
 
-KINDS = ('white', 'hum', 'hiss', 'burst', 'tone', 'pink')
+KINDS = ('white', 'hiss', 'burst')
 
 
 def corrupt(clean: np.ndarray, difficulty: float, seed: int,

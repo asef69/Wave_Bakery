@@ -1,23 +1,9 @@
 import { useEffect, useState } from "react";
-import {
-  type CookedSignalData,
-  getActiveRecipe,
-  recipes,
-} from "./recipes";
-import {
-  CHICKEN_SIGNAL_DEFINITION,
-  getMathematicalSignal,
-  MATHEMATICAL_SIGNALS,
-} from "./signals";
+import { type CookedSignalData, getActiveRecipe, recipes } from "./recipes";
+import { CHICKEN_SIGNAL_DEFINITION, getMathematicalSignal, MATHEMATICAL_SIGNALS } from "./signals";
 import { getStaticCookingKernel, type CookingMethodType } from "./cooking-audio";
 
-export type PipelineStage =
-  | "raw"
-  | "filtered"
-  | "mixed"
-  | "seasoned"
-  | "marinated"
-  | "cooked";
+export type PipelineStage = "raw" | "filtered" | "mixed" | "seasoned" | "marinated" | "cooked";
 
 export interface PipelineSignal {
   recipeId: string;
@@ -80,10 +66,7 @@ export function getFilteredIngredients(recipeId: string): Record<string, number[
   return {};
 }
 
-export function getFilteredIngredient(
-  recipeId: string,
-  ingredientName: string,
-): number[] | null {
+export function getFilteredIngredient(recipeId: string, ingredientName: string): number[] | null {
   const store = getFilteredIngredients(recipeId);
   const key = ingredientName.toLowerCase();
   return store[key] ?? null;
@@ -156,7 +139,8 @@ export function getRecipeIngredientSamples(
   // 3. Check mathematical signals catalog
   const mathSignal = getMathematicalSignal(ingredientName);
   if (mathSignal) {
-    const amp = options.amplitude !== undefined ? options.amplitude : (mathSignal.defaultAmplitude ?? 1.0);
+    const amp =
+      options.amplitude !== undefined ? options.amplitude : (mathSignal.defaultAmplitude ?? 1.0);
     return mathSignal.generateSamples({
       freq: baseFreq,
       amplitude: amp,
@@ -187,8 +171,7 @@ export function computeMixedSignal(
   sampleCount = 401,
 ): PipelineSignal {
   const recipe = recipes.find((r) => r.id === recipeId) ?? getActiveRecipe();
-  const effectiveIngredients =
-    ingredientNames.length > 0 ? ingredientNames : recipe.ingredients;
+  const effectiveIngredients = ingredientNames.length > 0 ? ingredientNames : recipe.ingredients;
 
   const summed = new Array<number>(sampleCount).fill(0);
   let totalFreq = 0;
@@ -271,9 +254,10 @@ export function computeSeasonedSignal(
   sampleCount = 401,
 ): PipelineSignal {
   const samples: number[] = [];
-  const inSamples = mixedSignal.samples.length > 0
-    ? mixedSignal.samples
-    : computeMixedSignal(mixedSignal.recipeId, []).samples;
+  const inSamples =
+    mixedSignal.samples.length > 0
+      ? mixedSignal.samples
+      : computeMixedSignal(mixedSignal.recipeId, []).samples;
 
   const effectiveFreq = Math.max(0.2, freqScale);
   for (let i = 0; i < sampleCount; i++) {
@@ -308,9 +292,10 @@ export function computeMarinatedSignal(
   sampleCount = 401,
 ): PipelineSignal {
   const samples: number[] = [];
-  const inSamples = seasonedSignal.samples.length > 0
-    ? seasonedSignal.samples
-    : computeMixedSignal(seasonedSignal.recipeId, []).samples;
+  const inSamples =
+    seasonedSignal.samples.length > 0
+      ? seasonedSignal.samples
+      : computeMixedSignal(seasonedSignal.recipeId, []).samples;
 
   const effectiveScale = Math.max(0.1, timeScale);
   for (let i = 0; i < sampleCount; i++) {
@@ -345,9 +330,10 @@ export function computeConvolvedSignal(
   pos: number,
   sampleCount = 401,
 ): PipelineSignal {
-  const inSamples = marinatedSignal.samples.length > 0
-    ? marinatedSignal.samples
-    : computeMixedSignal(marinatedSignal.recipeId, []).samples;
+  const inSamples =
+    marinatedSignal.samples.length > 0
+      ? marinatedSignal.samples
+      : computeMixedSignal(marinatedSignal.recipeId, []).samples;
 
   const kernel = getStaticCookingKernel(methodId as CookingMethodType);
   const kLen = kernel.length;
@@ -361,7 +347,7 @@ export function computeConvolvedSignal(
     let acc = 0;
     for (let k = 0; k < kLen; k++) {
       const idx = n - k - shiftSamples;
-      const xVal = sampleAt(inSamples, ((idx / (sampleCount - 1)) % 1 + 1) % 1);
+      const xVal = sampleAt(inSamples, (((idx / (sampleCount - 1)) % 1) + 1) % 1);
       acc += xVal * (kernel[k] ?? 0);
     }
     convolved[n] = acc;
@@ -476,11 +462,7 @@ export function getIdealDishSignal(recipeId: string, sampleCount = 401): Pipelin
     sampleCount,
   );
   // 3. Marinated with recipe target timeScale
-  const marinated = computeMarinatedSignal(
-    seasoned,
-    recipe.marinateTarget.timeScale,
-    sampleCount,
-  );
+  const marinated = computeMarinatedSignal(seasoned, recipe.marinateTarget.timeScale, sampleCount);
   // 4. Convolved with recipe target cooking method at 100% depth
   const cooked = computeConvolvedSignal(
     marinated,
@@ -550,10 +532,7 @@ export function initializeAllExpectedSignals(sampleCount = 401): Record<string, 
 /**
  * React hook to subscribe to the expected signal of a recipe.
  */
-export function useExpectedSignal(
-  recipeId?: string,
-  sampleCount = 401,
-): PipelineSignal {
+export function useExpectedSignal(recipeId?: string, sampleCount = 401): PipelineSignal {
   const activeId = recipeId ?? getActiveRecipe().id;
   const [signal, setSignalState] = useState<PipelineSignal>(() =>
     getExpectedSignal(activeId, sampleCount),
@@ -597,11 +576,7 @@ export function getDefaultPipelineSignal(
   );
   if (stage === "seasoned") return seasoned;
 
-  const marinated = computeMarinatedSignal(
-    seasoned,
-    recipe.marinateTarget.timeScale,
-    sampleCount,
-  );
+  const marinated = computeMarinatedSignal(seasoned, recipe.marinateTarget.timeScale, sampleCount);
   if (stage === "marinated") return marinated;
 
   return computeConvolvedSignal(

@@ -174,9 +174,15 @@ def piccolo(n: int, f0: float = 880.0) -> np.ndarray:
 
 
 def carrot(n: int = C.FRAME, f0: float = 4.5) -> np.ndarray:
-    """y = 5 - (1 + cos(0.5x))^4"""
+    """y = 5 - (1 + cos(0.5x))^4
+
+    Cycle count is a fixed constant, not the ingredient's seeded pitch —
+    `f0` here is a display/gameplay value (hundreds of Hz), not a cycles-per-
+    frame count, and using it directly would push this shape's harmonics far
+    above its ideal_cutoff (same convention as lettuce()/onion()).
+    """
     t = np.arange(n) / n
-    x = 4.0 * np.pi * f0 * t
+    x = 4.0 * np.pi * 4.5 * t
     y = 5.0 - np.power(1.0 + np.cos(0.5 * x), 4.0)
     # Center and normalize into [-1, 1]
     norm_y = (y + 3.0) / 8.0
@@ -184,9 +190,12 @@ def carrot(n: int = C.FRAME, f0: float = 4.5) -> np.ndarray:
 
 
 def cucumber(n: int = C.FRAME, f0: float = 7.0) -> np.ndarray:
-    """y = 6 * tanh(4 * cos(x))"""
+    """y = 6 * tanh(4 * cos(x))
+
+    Cycle count is a fixed constant — see carrot() docstring.
+    """
     t = np.arange(n) / n
-    x = 2.0 * np.pi * f0 * t
+    x = 2.0 * np.pi * 7.0 * t
     y = 6.0 * np.tanh(4.0 * np.cos(x))
     return C.normalize((y / 6.0).astype(np.float32), 0.9)
 
@@ -250,8 +259,11 @@ def lettuce(n: int = C.FRAME, f0: float = 3.0) -> np.ndarray:
 
 
 def tomato(n: int = C.FRAME, f0: float = 5.0) -> np.ndarray:
-    """Heart / cardoid trace: y(t) = 1.3 cos(t) - 0.5 cos(2t) - 0.2 cos(3t)"""
-    t = (np.arange(n) / n) * (2.0 * np.pi * f0)
+    """Heart / cardoid trace: y(t) = 1.3 cos(t) - 0.5 cos(2t) - 0.2 cos(3t)
+
+    Cycle count is a fixed constant — see carrot() docstring.
+    """
+    t = (np.arange(n) / n) * (2.0 * np.pi * 5.0)
     y = 1.3 * np.cos(t) - 0.5 * np.cos(2.0 * t) - 0.2 * np.cos(3.0 * t)
     return C.normalize((y / 2.0).astype(np.float32), 0.9)
 

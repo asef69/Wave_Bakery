@@ -6,7 +6,11 @@ import { ChefFourier } from "@/components/game/ChefFourier";
 import { GameButton } from "@/components/game/GameButton";
 import { IngredientGlyph } from "@/components/game/IngredientGlyph";
 import { IngredientSignalModal } from "@/components/game/IngredientSignalModal";
-import { ALL_AVAILABLE_INGREDIENTS, getMathematicalSignal, type IngredientDetail } from "@/lib/recipes";
+import {
+  ALL_AVAILABLE_INGREDIENTS,
+  getMathematicalSignal,
+  type IngredientDetail,
+} from "@/lib/recipes";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/pantry")({
@@ -156,7 +160,8 @@ function PantryScreen() {
                   </p>
                   <p className="mt-0.5 font-mono text-[9px] font-bold text-primary">
                     {getMathematicalSignal(ing.name)?.parametricCurve
-                      ? (getMathematicalSignal(ing.name)?.parametricCurve?.domainDisplay ?? "Parametric")
+                      ? (getMathematicalSignal(ing.name)?.parametricCurve?.domainDisplay ??
+                        "Parametric")
                       : getMathematicalSignal(ing.name)?.domainDisplay
                         ? getMathematicalSignal(ing.name)!.domainDisplay
                         : `${ing.freq} Hz`}

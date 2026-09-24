@@ -72,7 +72,13 @@ export interface SessionItemOut {
   voice: string;
   f0: number;
   components: Array<{ freq: number; amp: number }>;
-  contaminants: Array<{ kind: string; amp: number; band_lo: number; band_hi: number; freq?: number }>;
+  contaminants: Array<{
+    kind: string;
+    amp: number;
+    band_lo: number;
+    band_hi: number;
+    freq?: number;
+  }>;
   prep_score: number;
   accepted: boolean;
   dirty: SignalPayload;
@@ -185,6 +191,57 @@ export interface SubmitResult {
   player_dish: SignalPayload;
   target_spectrum: SpectrumPayload;
   player_spectrum: SpectrumPayload;
+}
+
+export interface LeaderboardRow {
+  rank: number;
+  player_id: string;
+  handle: string;
+  score: number;
+  stars: number;
+  recipe_id: string;
+  recipe_name: string;
+  created_at: string;
+}
+
+export interface GlobalRankRow {
+  rank: number;
+  player_id: string;
+  handle: string;
+  points: number;
+  rank_title: string;
+  dishes_served: number;
+  best_score: number;
+}
+
+export interface RecipeStats {
+  recipe_id: string;
+  recipe_name: string;
+  tier: number;
+  plays: number;
+  average_score: number;
+  best_score: number;
+  five_star_rate: number;
+}
+
+export interface GlobalStats {
+  players: number;
+  sessions_started: number;
+  dishes_served: number;
+  average_score: number;
+  hardest_recipe: string | null;
+  easiest_recipe: string | null;
+  recipes: RecipeStats[];
+}
+
+export interface PlayerHistoryRow {
+  attempt_id: string;
+  recipe_id: string;
+  recipe_name: string;
+  score: number;
+  stars: number;
+  points_awarded: number;
+  created_at: string;
 }
 
 export interface SpeakerState {
@@ -364,6 +421,10 @@ class ApiClient {
     }>("/players/me");
   }
 
+  async getPlayerHistory(limit = 25): Promise<PlayerHistoryRow[]> {
+    return this.request<PlayerHistoryRow[]>(`/players/me/history?limit=${limit}`);
+  }
+
   // Catalogue
   async getRecipes(): Promise<RecipeOut[]> {
     return this.request<RecipeOut[]>("/recipes");
@@ -377,8 +438,8 @@ class ApiClient {
     return this.request<IngredientOut[]>("/ingredients");
   }
 
-  async getAppliances(): Promise<any[]> {
-    return this.request<any[]>("/appliances");
+  async getAppliances(): Promise<unknown[]> {
+    return this.request<unknown[]>("/appliances");
   }
 
   // Sessions
@@ -393,18 +454,28 @@ class ApiClient {
     return this.request<GameSessionOut>(`/sessions/${sessionId}`);
   }
 
-  async filterIngredient(sessionId: string, slot: number, payload: FilterRequest): Promise<FilterResponse> {
+  async filterIngredient(
+    sessionId: string,
+    slot: number,
+    payload: FilterRequest,
+  ): Promise<FilterResponse> {
     return this.request<FilterResponse>(`/sessions/${sessionId}/ingredients/${slot}/filter`, {
       method: "POST",
       body: JSON.stringify(payload),
     });
   }
 
-  async acceptIngredient(sessionId: string, slot: number): Promise<{ status: string; prep_score: number }> {
-    return this.request<{ status: string; prep_score: number }>(`/sessions/${sessionId}/ingredients/${slot}/accept`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    });
+  async acceptIngredient(
+    sessionId: string,
+    slot: number,
+  ): Promise<{ status: string; prep_score: number }> {
+    return this.request<{ status: string; prep_score: number }>(
+      `/sessions/${sessionId}/ingredients/${slot}/accept`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    );
   }
 
   async setParams(sessionId: string, params: Record<string, unknown>): Promise<StagesOut> {
@@ -428,7 +499,10 @@ class ApiClient {
     });
   }
 
-  async beamDelivery(sessionId: string, payload: BeamDeliveryRequest): Promise<BeamDeliveryResponse> {
+  async beamDelivery(
+    sessionId: string,
+    payload: BeamDeliveryRequest,
+  ): Promise<BeamDeliveryResponse> {
     return this.request<BeamDeliveryResponse>(`/sessions/${sessionId}/beam-delivery`, {
       method: "POST",
       body: JSON.stringify(payload),
@@ -436,9 +510,17 @@ class ApiClient {
   }
 
   // Leaderboard
-  async getLeaderboard(recipeId?: string) {
-    const q = recipeId ? `?recipe_id=${recipeId}` : "";
-    return this.request<any[]>(`/leaderboard${q}`);
+  async getLeaderboard(recipeId?: string, limit = 20): Promise<LeaderboardRow[]> {
+    const q = recipeId ? `?recipe_id=${recipeId}&limit=${limit}` : `?limit=${limit}`;
+    return this.request<LeaderboardRow[]>(`/leaderboard${q}`);
+  }
+
+  async getGlobalRanking(limit = 20): Promise<GlobalRankRow[]> {
+    return this.request<GlobalRankRow[]>(`/leaderboard/global?limit=${limit}`);
+  }
+
+  async getStats(): Promise<GlobalStats> {
+    return this.request<GlobalStats>("/stats");
   }
 
   // Authoritative Direct DSP Services
@@ -544,7 +626,11 @@ class ApiClient {
       peak_sidelobe_level_db: number;
       window_weights: number[];
       beam_pattern: Array<{ angle: number; intensity: number }>;
-      table_spillovers: Array<{ table_id: number; table_name: string; spillover_intensity_pct: number }>;
+      table_spillovers: Array<{
+        table_id: number;
+        table_name: string;
+        spillover_intensity_pct: number;
+      }>;
     }>("/dsp/beamforming", {
       method: "POST",
       body: JSON.stringify(payload),
@@ -582,7 +668,9 @@ class ApiClient {
 
   // Health
   async getHealth() {
-    return this.request<{ status: string; version: string; sample_rate: number; frame: number }>("/health");
+    return this.request<{ status: string; version: string; sample_rate: number; frame: number }>(
+      "/health",
+    );
   }
 }
 

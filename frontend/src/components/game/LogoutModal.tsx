@@ -81,11 +81,15 @@ export function LogoutModal({
             <div className="flex items-center gap-2.5">
               <ChefHat className="h-5 w-5 text-primary" />
               <p className="font-display text-base font-extrabold text-foreground">
-                Active Chef: <span className="text-gradient-warm">{chefName ? `Chef ${chefName}` : "Active Chef"}</span>
+                Active Chef:{" "}
+                <span className="text-gradient-warm">
+                  {chefName ? `Chef ${chefName}` : "Active Chef"}
+                </span>
               </p>
             </div>
             <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-              Logging out will clear your active session on this kitchen station. Your leaderboard scores, star ratings, and recipe progress remain safely stored.
+              Logging out will clear your active session on this kitchen station. Your leaderboard
+              scores, star ratings, and recipe progress remain safely stored.
             </p>
           </div>
 

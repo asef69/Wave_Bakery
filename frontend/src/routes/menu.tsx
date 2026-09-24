@@ -3,9 +3,8 @@ import { useState } from "react";
 import { BookOpen, HelpCircle, LogOut, Settings as SettingsIcon, Trophy } from "lucide-react";
 
 import kitchenBg from "@/assets/kitchen-bg.jpg";
+import { ChefAuthModal } from "@/components/game/ChefAuthModal";
 import { ChefFourier } from "@/components/game/ChefFourier";
-import { ChefNameModal } from "@/components/game/ChefNameModal";
-import { LogoutModal } from "@/components/game/LogoutModal";
 import { GameButton } from "@/components/game/GameButton";
 import { WaveformDisplay } from "@/components/game/WaveformDisplay";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -38,39 +37,25 @@ const navIcons = [
 ];
 
 function MainMenu() {
-  const [chefName, saveChefName] = useChefName();
-  const [isNameModalOpen, setIsNameModalOpen] = useState(false);
-  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
+  const [chefName] = useChefName();
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const navigate = useNavigate();
 
   const handleEnterKitchen = () => {
     if (!chefName) {
-      setIsNameModalOpen(true);
+      setIsAuthModalOpen(true);
     } else {
       navigate({ to: "/kitchen-hub" });
     }
   };
 
-  const handleChefNameConfirm = (name: string) => {
-    saveChefName(name);
-    setIsNameModalOpen(false);
-    navigate({ to: "/kitchen-hub" });
-  };
-
   return (
     <TooltipProvider delayDuration={150}>
       <main className="relative min-h-screen overflow-hidden">
-        <ChefNameModal
-          isOpen={isNameModalOpen}
-          onClose={() => setIsNameModalOpen(false)}
-          onConfirm={handleChefNameConfirm}
-          currentName={chefName}
-          allowCancel={true}
-        />
-
-        <LogoutModal
-          isOpen={isLogoutModalOpen}
-          onClose={() => setIsLogoutModalOpen(false)}
+        <ChefAuthModal
+          isOpen={isAuthModalOpen}
+          onClose={() => setIsAuthModalOpen(false)}
+          onSuccess={() => navigate({ to: "/kitchen-hub" })}
         />
 
         {/* TOP-RIGHT UTILITY HUD ICON CLUSTER */}
@@ -105,9 +90,9 @@ function MainMenu() {
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={() => setIsLogoutModalOpen(true)}
-                  aria-label="Log Out"
-                  className="flex h-10 w-10 items-center justify-center rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-400 transition-all duration-150 hover:scale-105 hover:border-rose-500 hover:bg-rose-500 hover:text-white active:scale-95 cursor-pointer sm:h-11 sm:w-11"
+                  onClick={() => setIsAuthModalOpen(true)}
+                  aria-label="Chef Profile"
+                  className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/40 bg-primary/10 text-primary transition-all duration-150 hover:scale-105 hover:border-primary hover:bg-primary hover:text-white active:scale-95 cursor-pointer sm:h-11 sm:w-11"
                 >
                   <LogOut className="h-4 w-4 sm:h-5 sm:w-5" />
                 </button>
@@ -115,9 +100,9 @@ function MainMenu() {
               <TooltipContent
                 side="bottom"
                 sideOffset={8}
-                className="border border-rose-500/50 bg-card px-3 py-1.5 font-mono text-xs font-bold text-rose-400 shadow-xl tracking-wider"
+                className="border border-primary/50 bg-card px-3 py-1.5 font-mono text-xs font-bold text-primary shadow-xl tracking-wider"
               >
-                Log Out (Chef {chefName})
+                Profile / Switch Chef ({chefName})
               </TooltipContent>
             </Tooltip>
           )}
@@ -147,7 +132,7 @@ function MainMenu() {
                   <span>👨‍🍳 Chef {chefName}</span>
                   <button
                     type="button"
-                    onClick={() => setIsLogoutModalOpen(true)}
+                    onClick={() => setIsAuthModalOpen(true)}
                     className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/25 text-primary hover:bg-rose-500 hover:text-white transition-colors cursor-pointer"
                     title="Log Out / Switch Chef"
                     aria-label="Log Out"

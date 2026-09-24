@@ -395,7 +395,9 @@ function GenerateScreen() {
                       </p>
                       <div className="flex items-center gap-1.5">
                         <span className="font-mono text-[9px] tracking-wider text-muted-foreground uppercase">
-                          {getMathematicalSignal(i.name) ? `${getMathematicalSignal(i.name)!.waveformType} wave` : i.instrument}
+                          {getMathematicalSignal(i.name)
+                            ? `${getMathematicalSignal(i.name)!.waveformType} wave`
+                            : i.instrument}
                         </span>
                         {i.washable ? (
                           <span className="rounded bg-primary/20 px-1 py-0.2 font-mono text-[8px] font-bold text-primary uppercase">
@@ -448,7 +450,9 @@ function GenerateScreen() {
                   {activeMathSignal ? "Signal Type" : "Instrument"}
                 </p>
                 <p className="font-display text-lg font-bold text-foreground">
-                  {activeMathSignal ? `${activeMathSignal.waveformType.toUpperCase()} WAVE` : activeIng.instrument}
+                  {activeMathSignal
+                    ? `${activeMathSignal.waveformType.toUpperCase()} WAVE`
+                    : activeIng.instrument}
                 </p>
               </div>
             </div>
@@ -467,14 +471,19 @@ function GenerateScreen() {
                   Ideal Reference Signal
                 </p>
                 <span className="font-mono text-[9px] tracking-[0.14em] text-signal/50 uppercase">
-                  {activeMathSignal ? `${activeMathSignal.waveformType} wave` : activeIng.instrument} ({activeIng.freq} Hz)
+                  {activeMathSignal
+                    ? `${activeMathSignal.waveformType} wave`
+                    : activeIng.instrument}{" "}
+                  ({activeIng.freq} Hz)
                 </span>
               </div>
               <GameButton
                 size="sm"
                 variant="secondary"
                 className="uppercase text-xs"
-                onClick={() => handlePlayAudio(`ideal-${activeIng.name}`, idealSamples, activeIng.freq)}
+                onClick={() =>
+                  handlePlayAudio(`ideal-${activeIng.name}`, idealSamples, activeIng.freq)
+                }
               >
                 {playingClip === `ideal-${activeIng.name}` ? "🔊 Playing..." : "▶ Play Reference"}
               </GameButton>
@@ -512,7 +521,9 @@ function GenerateScreen() {
                 size="sm"
                 variant="lab"
                 className="uppercase text-xs"
-                onClick={() => handlePlayAudio(`raw-${activeIng.name}`, activeSamples, activeIng.freq)}
+                onClick={() =>
+                  handlePlayAudio(`raw-${activeIng.name}`, activeSamples, activeIng.freq)
+                }
               >
                 {playingClip === `raw-${activeIng.name}` ? "🔊 Playing..." : "▶ Play Raw Signal"}
               </GameButton>
@@ -547,10 +558,11 @@ function GenerateScreen() {
               <GameButton
                 variant="lab"
                 className="w-full uppercase text-xs sm:w-auto"
-                onClick={() => handlePlayAudio(`active-${activeIng.name}`, activeSamples, activeIng.freq)}
+                onClick={() =>
+                  handlePlayAudio(`active-${activeIng.name}`, activeSamples, activeIng.freq)
+                }
               >
-                <Volume2 className="mr-1.5 h-3.5 w-3.5" />
-                ▶ Play Signal Output
+                <Volume2 className="mr-1.5 h-3.5 w-3.5" />▶ Play Signal Output
               </GameButton>
             )}
           </div>

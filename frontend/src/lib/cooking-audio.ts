@@ -1,12 +1,12 @@
 /**
  * Cooking Audio Impulse Response Engine
- * 
+ *
  * Provides high-fidelity discrete impulse responses h[n] for the 4 culinary cooking methods:
  * - GRILL: Multi-tap rapid geometric decay with high-frequency crisp reflection
  * - FRY: Dense sizzling acoustic bursts with exponential decay envelope
  * - BAKE: Smooth thermal diffusion / Gaussian acoustic dispersion
  * - BOIL: Rolling bubble cavitation / damped low-frequency resonator
- * 
+ *
  * Includes static pre-extracted 64-128 sample kernels with mono energy normalization
  * and dynamic Web Audio WAV loading capability.
  */

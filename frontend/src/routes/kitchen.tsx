@@ -7,6 +7,7 @@ import type { MachineId } from "@/components/game/KitchenMachines";
 import { KitchenStation, type StationDef } from "@/components/game/KitchenStation";
 import { RecipeTimerBadge, TimeExpiredModal } from "@/components/game/RecipeTimer";
 import { getRecipeRunSession, recipes, useActiveRecipe, useRecipeProgress } from "@/lib/recipes";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/kitchen")({
   head: () => ({
@@ -26,63 +27,12 @@ export const Route = createFileRoute("/kitchen")({
   component: KitchenHub,
 });
 
-const stations: StationDef[] = [
-  {
-    id: "generate",
-    label: "Generate signal",
-    purpose: "Ingredient → instrument → signal",
-    to: "/generate",
-    chefLine: "Every ingredient begins as a signal.",
-    step: 1,
-  },
-  {
-    id: "filter",
-    label: "Filter",
-    purpose: "Clean the noise in the frequency domain",
-    to: "/filtering",
-    chefLine: "This one is noisy. Let's clean it in the frequency domain.",
-    step: 2,
-  },
-  {
-    id: "mix",
-    label: "Mix",
-    purpose: "Combine ingredient signals",
-    to: "/mixing",
-    chefLine: "Now let's combine our clean ingredient signals.",
-    step: 3,
-  },
-  {
-    id: "season",
-    label: "Season",
-    purpose: "Amplitude scaling",
-    to: "/transform",
-    chefLine: "Amplitude is our seasoning. Adjust it to the recipe!",
-    step: 4,
-  },
-  {
-    id: "marinate",
-    label: "Marinate",
-    purpose: "Time scaling",
-    to: "/marinate",
-    chefLine: "Stretch or compress the signal to change its timing.",
-    step: 5,
-  },
-  {
-    id: "cook",
-    label: "Cook",
-    purpose: "Convolution with a cooking impulse",
-    to: "/cooking",
-    chefLine: "Now for the final step — convolution!",
-    step: 6,
-  },
-];
-
 const STEP_OBJECTIVES: Record<number, string> = {
   1: "Generate Ingredient Signals",
   2: "Clean Noisy Ingredients",
   3: "Combine Ingredients in Bowl",
   4: "Season Signal Amplitude & Frequency",
-  5: "Marinate with Time Scaling",
+  5: "Marinate / Modulate / Decimate",
   6: "Convolve with Cooking Impulse",
   7: "Final Signal Comparison",
   8: "Recipe Complete & Served",
@@ -101,6 +51,80 @@ function KitchenHub() {
   const [unlockedStep] = useRecipeProgress();
   const [hovered, setHovered] = useState<MachineId | null>(null);
   const [lockedFeedback, setLockedFeedback] = useState<string | null>(null);
+
+  const stations: StationDef[] = [
+    {
+      id: "generate",
+      label: "Generate signal",
+      purpose: "Ingredient → instrument → signal",
+      to: "/generate",
+      chefLine: "Every ingredient begins as a signal.",
+      step: 1,
+    },
+    {
+      id: "filter",
+      label: "Filter",
+      purpose: "Clean the noise in the frequency domain",
+      to: "/filtering",
+      chefLine: "This one is noisy. Let's clean it in the frequency domain.",
+      step: 2,
+    },
+    {
+      id: "mix",
+      label: "Mix",
+      purpose: "Combine ingredient signals",
+      to: "/mixing",
+      chefLine: "Now let's combine our clean ingredient signals.",
+      step: 3,
+    },
+    {
+      id: "season",
+      label: "Season",
+      purpose: "Amplitude scaling",
+      to: "/transform",
+      chefLine: "Amplitude is our seasoning. Adjust it to the recipe!",
+      step: 4,
+    },
+    {
+      id: "marinate",
+      label: "Marinate",
+      purpose: "Time scaling",
+      to: "/marinate",
+      chefLine: "Stretch or compress the signal to change its timing.",
+      step: 5,
+    },
+    ...(recipe.requiresCaramelize
+      ? [
+          {
+            id: "caramelize" as MachineId,
+            label: "Caramelize",
+            purpose: "AM modulation & carrier envelope",
+            to: "/caramelize",
+            chefLine: "Torch with high-frequency carrier wave to caramelize flavor!",
+            step: 5,
+          },
+        ]
+      : recipe.requiresChop
+        ? [
+            {
+              id: "chop" as MachineId,
+              label: "Chop / Decimate",
+              purpose: "Nyquist downsampling & anti-aliasing",
+              to: "/chop",
+              chefLine: "Chop with decimation factor while guarding against aliasing!",
+              step: 5,
+            },
+          ]
+        : []),
+    {
+      id: "cook",
+      label: "Cook",
+      purpose: "Convolution with a cooking impulse",
+      to: "/cooking",
+      chefLine: "Now for the final step — convolution!",
+      step: 6,
+    },
+  ];
 
   const currentStep = Math.min(6, unlockedStep);
   const totalSteps = 6;
@@ -275,8 +299,15 @@ function KitchenHub() {
 
         {/* ---------- BACK COUNTER ---------- */}
         <section aria-label="Back counter machines" className="mt-10">
-          <div className="grid grid-cols-3 gap-6">
-            {stations.slice(0, 3).map((s) => (
+          <div
+            className={cn(
+              "grid gap-6",
+              stations.slice(0, Math.ceil(stations.length / 2)).length > 3
+                ? "grid-cols-4"
+                : "grid-cols-3",
+            )}
+          >
+            {stations.slice(0, Math.ceil(stations.length / 2)).map((s) => (
               <KitchenStation
                 key={s.id}
                 station={s}
@@ -296,8 +327,15 @@ function KitchenHub() {
 
         {/* ---------- FRONT COUNTER ---------- */}
         <section aria-label="Front counter machines" className="mt-12">
-          <div className="grid grid-cols-3 gap-6">
-            {stations.slice(3).map((s) => (
+          <div
+            className={cn(
+              "grid gap-6",
+              stations.slice(Math.ceil(stations.length / 2)).length > 3
+                ? "grid-cols-4"
+                : "grid-cols-3",
+            )}
+          >
+            {stations.slice(Math.ceil(stations.length / 2)).map((s) => (
               <KitchenStation
                 key={s.id}
                 station={s}
@@ -316,7 +354,6 @@ function KitchenHub() {
             <span className="absolute inset-x-6 top-1 h-px bg-white/40 dark:bg-white/20" />
           </div>
         </section>
-
 
         {/* ---------- CHEF IN THE ROOM ---------- */}
         <div className="mt-12 flex flex-wrap items-end justify-between gap-8">

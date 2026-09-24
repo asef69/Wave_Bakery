@@ -40,7 +40,7 @@ export function AudioPlayButton({
       className={cn(
         "inline-flex items-center gap-1.5 font-mono text-xs uppercase cursor-pointer transition-all",
         isPlaying && "ring-2 ring-primary bg-primary/20 text-primary animate-pulse",
-        className
+        className,
       )}
     >
       {isPlaying ? (
@@ -52,4 +52,3 @@ export function AudioPlayButton({
     </GameButton>
   );
 }
-

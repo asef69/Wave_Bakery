@@ -1,6 +1,6 @@
 /**
  * Core Mathematical DSP Engine for WaveBakery (CSE220)
- * 
+ *
  * Provides pure mathematical implementations of:
  * - Radix-2 Cooley-Tukey Fast Fourier Transform (FFT) & Inverse FFT (IFFT)
  * - Frequency-Domain Low-Pass Filter with transition band
@@ -327,10 +327,7 @@ export function normalizedRootMeanSquareError(x: number[], y: number[]): number 
  * @param targetSamples Discrete samples of ideal target dish
  * @returns Match percentage in [0, 100]%
  */
-export function computeSignalSimilarity(
-  playerSamples: number[],
-  targetSamples: number[],
-): number {
+export function computeSignalSimilarity(playerSamples: number[], targetSamples: number[]): number {
   if (!playerSamples.length || !targetSamples.length) return 0;
 
   const rXy = normalizedCrossCorrelation(playerSamples, targetSamples);

@@ -9,6 +9,7 @@ import { LabShell } from "@/components/game/LabShell";
 import { SignalAudioPlayer, type PlaybackState } from "@/lib/audio";
 import {
   computeMarinatedSignal,
+  getNextStationPath,
   recipes,
   recordStageAccuracy,
   savePipelineStageSignal,
@@ -114,6 +115,7 @@ function MarinatingLab() {
         progress: 0,
       }));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeScale]);
 
   const handleTogglePlay = () => {
@@ -229,8 +231,8 @@ function MarinatingLab() {
       chefLine={chefLine}
       backTo="/kitchen"
       backLabel="← Back to Kitchen"
-      nextTo={done ? "/cooking" : undefined}
-      nextLabel="Go to Cooking →"
+      nextTo={done ? getNextStationPath("/marinate", recipe) : undefined}
+      nextLabel="Next Station →"
     >
       {/* HUD */}
       <div className="kitchen-card flex flex-wrap items-center gap-x-8 gap-y-3 px-6 py-4">
@@ -353,9 +355,7 @@ function MarinatingLab() {
               <div className="flex items-center gap-2">
                 <span
                   className={`inline-block h-2.5 w-2.5 rounded-full ${
-                    playbackState.isPlaying
-                      ? "bg-signal animate-ping"
-                      : "bg-muted-foreground/40"
+                    playbackState.isPlaying ? "bg-signal animate-ping" : "bg-muted-foreground/40"
                   }`}
                 />
                 <span className="font-mono text-xs font-bold tracking-wider text-foreground uppercase">
@@ -373,7 +373,10 @@ function MarinatingLab() {
                 <span className="font-bold text-signal">
                   {playbackState.currentTime.toFixed(1)}s
                 </span>
-                <span className="text-muted-foreground"> / {playbackState.duration.toFixed(1)}s</span>
+                <span className="text-muted-foreground">
+                  {" "}
+                  / {playbackState.duration.toFixed(1)}s
+                </span>
               </div>
             </div>
 

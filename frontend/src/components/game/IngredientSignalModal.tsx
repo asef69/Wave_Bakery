@@ -5,7 +5,11 @@ import { GameButton } from "@/components/game/GameButton";
 import { IngredientGlyph } from "@/components/game/IngredientGlyph";
 import { WaveformDisplay } from "@/components/game/WaveformDisplay";
 import { SignalAudioPlayer, type PlaybackState } from "@/lib/audio";
-import { computeIngredientSamples, getMathematicalSignal, type IngredientDetail } from "@/lib/recipes";
+import {
+  computeIngredientSamples,
+  getMathematicalSignal,
+  type IngredientDetail,
+} from "@/lib/recipes";
 import {
   loadChickenAudio,
   getCachedChickenAudio,
@@ -69,15 +73,14 @@ export function IngredientSignalModal({ ingredient, onClose }: IngredientSignalM
     if (ingredient) {
       setPlotMode(
         ingredient.name === "Tomato" ||
-        ingredient.name === "Onion" ||
-        ingredient.name === "Sauce" ||
-        ingredient.name === "Egg"
+          ingredient.name === "Onion" ||
+          ingredient.name === "Sauce" ||
+          ingredient.name === "Egg"
           ? "square"
           : "rectangle",
       );
     }
-  }, [ingredient?.name]);
-
+  }, [ingredient?.name, ingredient]);
 
   const mathSignal = useMemo(() => {
     return ingredient ? getMathematicalSignal(ingredient.name) : null;
@@ -224,7 +227,11 @@ export function IngredientSignalModal({ ingredient, onClose }: IngredientSignalM
         {/* Technical Badges */}
         <div className="mt-4 flex flex-wrap items-center gap-2 border-b border-border/60 pb-4">
           <span className="rounded-md border border-primary/40 bg-primary/10 px-2.5 py-0.5 font-mono text-[10px] font-extrabold tracking-wider text-primary uppercase">
-            {isChicken ? "RECORDED PCM AUDIO" : mathSignal?.parametricCurve ? "PARAMETRIC 2D" : "TIME DOMAIN"}
+            {isChicken
+              ? "RECORDED PCM AUDIO"
+              : mathSignal?.parametricCurve
+                ? "PARAMETRIC 2D"
+                : "TIME DOMAIN"}
           </span>
           <span className="rounded-md border border-border bg-secondary px-2.5 py-0.5 font-mono text-[10px] font-extrabold tracking-wider text-muted-foreground uppercase">
             {isChicken
@@ -280,7 +287,7 @@ export function IngredientSignalModal({ ingredient, onClose }: IngredientSignalM
                     "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[10px] font-extrabold tracking-wider uppercase transition-all cursor-pointer",
                     plotMode === "square"
                       ? "bg-primary text-primary-foreground shadow-xs"
-                      : "text-muted-foreground hover:text-foreground"
+                      : "text-muted-foreground hover:text-foreground",
                   )}
                   title="Square plot (1:1 equal visual scaling)"
                 >
@@ -294,7 +301,7 @@ export function IngredientSignalModal({ ingredient, onClose }: IngredientSignalM
                     "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[10px] font-extrabold tracking-wider uppercase transition-all cursor-pointer",
                     plotMode === "rectangle"
                       ? "bg-primary text-primary-foreground shadow-xs"
-                      : "text-muted-foreground hover:text-foreground"
+                      : "text-muted-foreground hover:text-foreground",
                   )}
                   title="Rectangle plot (original proportions)"
                 >
@@ -359,7 +366,10 @@ export function IngredientSignalModal({ ingredient, onClose }: IngredientSignalM
                   <span className="font-bold text-primary font-mono">
                     {playbackState.currentTime.toFixed(1)}s
                   </span>
-                  <span className="text-muted-foreground"> / {playbackState.duration.toFixed(1)}s</span>
+                  <span className="text-muted-foreground">
+                    {" "}
+                    / {playbackState.duration.toFixed(1)}s
+                  </span>
                 </div>
               </div>
 
@@ -422,15 +432,27 @@ export function IngredientSignalModal({ ingredient, onClose }: IngredientSignalM
 
             {/* Pitch & Metadata */}
             <div className="mt-6 pt-3 border-t border-border/50 flex items-center justify-between font-mono text-xs text-muted-foreground">
-              <div className="flex items-center gap-1.5">
-                <span className="text-foreground font-medium">{isChicken ? "Source:" : "Base Pitch:"}</span>
-                <span className="text-primary font-bold">
-                  {isChicken ? "Recorded WAV" : `${Math.round(220 * (ingredient.freq / 4))} Hz`}
-                </span>
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-foreground font-medium">
+                    {isChicken ? "Source:" : "Base Pitch:"}
+                  </span>
+                  <span className="text-primary font-bold">
+                    {isChicken ? "Recorded WAV" : `${Math.round(220 * (ingredient.freq / 4))} Hz`}
+                  </span>
+                </div>
+                {ingredient.washable && ingredient.idealCutoff && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-foreground font-medium text-[10px] uppercase tracking-wider">
+                      Ideal Cutoff:
+                    </span>
+                    <span className="text-destructive font-bold text-[10px]">
+                      {ingredient.idealCutoff} Hz
+                    </span>
+                  </div>
+                )}
               </div>
-              <div className="text-[11px]">
-                Duration: {playbackState.duration.toFixed(2)}s
-              </div>
+              <div className="text-[11px]">Duration: {playbackState.duration.toFixed(2)}s</div>
             </div>
           </div>
         </div>
@@ -467,13 +489,18 @@ export function IngredientSignalModal({ ingredient, onClose }: IngredientSignalM
               </div>
               <div className="rounded-lg bg-background/60 p-2.5 border border-border/50">
                 <div className="text-[10px] text-muted-foreground uppercase">Source Asset</div>
-                <div className="mt-0.5 text-sm font-bold text-signal truncate" title="public/sounds/chicken.wav">
+                <div
+                  className="mt-0.5 text-sm font-bold text-signal truncate"
+                  title="public/sounds/chicken.wav"
+                >
                   chicken.wav
                 </div>
               </div>
             </div>
             <p className="mt-2.5 font-mono text-[10px] text-muted-foreground">
-              Real acoustic recording decoded via Web Audio API AudioBuffer (public/sounds/chicken.wav). Waveform display and audio playback stream from the exact same decoded PCM samples.
+              Real acoustic recording decoded via Web Audio API AudioBuffer
+              (public/sounds/chicken.wav). Waveform display and audio playback stream from the exact
+              same decoded PCM samples.
             </p>
           </div>
         )}
@@ -483,7 +510,9 @@ export function IngredientSignalModal({ ingredient, onClose }: IngredientSignalM
           <div className="mt-5 rounded-xl border-2 border-primary/40 bg-primary/10 p-4 shadow-sm">
             <div className="flex items-center justify-between">
               <span className="font-mono text-[10px] font-extrabold tracking-widest text-primary uppercase">
-                {mathSignal.parametricCurve ? "PARAMETRIC SIGNAL DEFINITION" : "MATHEMATICAL SIGNAL"}
+                {mathSignal.parametricCurve
+                  ? "PARAMETRIC SIGNAL DEFINITION"
+                  : "MATHEMATICAL SIGNAL"}
               </span>
               <span className="rounded bg-primary/20 px-2 py-0.5 font-mono text-[9px] font-bold text-primary uppercase">
                 {mathSignal.waveformType}
@@ -519,31 +548,30 @@ export function IngredientSignalModal({ ingredient, onClose }: IngredientSignalM
                     ? ` (parametric leaf curve, A₁ = 2.2, A₂ = 0.45, -8π ≤ t ≤ 8π)`
                     : mathSignal.ingredientName === "Milk"
                       ? ` (scattered liquid ripples, non-harmonic superposition: 0.7x, 1.3x, 2.1x)`
-                    : mathSignal.ingredientName === "Beef Patty" || mathSignal.ingredientName === "Patty"
-                      ? ` (parametric repeated horizontal ovals, a = 2.5, b = 0.7, 2π ≤ t ≤ 8π)`
-                      : mathSignal.ingredientName === "Bun"
-                        ? ` (smooth bun dome profile with fine surface variation, f = ${ingredient.freq} Hz)`
-                        : mathSignal.ingredientName === "Noodles" || mathSignal.ingredientName === "Noodle"
-                          ? ` (parametric trochoid curve with 12 curling loops, -12π ≤ t ≤ 12π)`
-                          : mathSignal.ingredientName === "Butter"
-                            ? ` (periodic trapezoidal blocks, period = 14, A = 1.2, domain: -21 < x < 21)`
-                            : mathSignal.ingredientName === "Tomato"
-                              ? ` (parametric tomato contour, 3 lobes, 0 ≤ t ≤ 6π)`
-                              : mathSignal.ingredientName === "Onion"
-                                ? ` (parametric Archimedean onion spiral, 9 concentric layers, 0 ≤ t ≤ 6π)`
-                                : mathSignal.ingredientName === "Carrot"
-                                  ? ` (quartic cosine taper waveform, f = ${ingredient.freq} Hz)`
-                                  : mathSignal.ingredientName === "Cucumber"
-                                    ? ` (hyperbolic tangent saturated waveform, f = ${ingredient.freq} Hz)`
-                                    : mathSignal.ingredientName === "Sauce"
-                                      ? ` (parametric 5-lobed sauce rosette, 0 ≤ t ≤ 6π)`
-                                      : mathSignal.ingredientName === "Egg"
-                                        ? ` (parametric egg contour, 0 ≤ t ≤ 6π)`
-                                        : ` (f = ${ingredient.freq} Hz, A = ${mathSignal.defaultAmplitude}, φ = 0)`}
+                      : mathSignal.ingredientName === "Beef Patty" ||
+                          mathSignal.ingredientName === "Patty"
+                        ? ` (parametric repeated horizontal ovals, a = 2.5, b = 0.7, 2π ≤ t ≤ 8π)`
+                        : mathSignal.ingredientName === "Bun"
+                          ? ` (smooth bun dome profile with fine surface variation, f = ${ingredient.freq} Hz)`
+                          : mathSignal.ingredientName === "Noodles" ||
+                              mathSignal.ingredientName === "Noodle"
+                            ? ` (parametric trochoid curve with 12 curling loops, -12π ≤ t ≤ 12π)`
+                            : mathSignal.ingredientName === "Butter"
+                              ? ` (periodic trapezoidal blocks, period = 14, A = 1.2, domain: -21 < x < 21)`
+                              : mathSignal.ingredientName === "Tomato"
+                                ? ` (parametric tomato contour, 3 lobes, 0 ≤ t ≤ 6π)`
+                                : mathSignal.ingredientName === "Onion"
+                                  ? ` (parametric Archimedean onion spiral, 9 concentric layers, 0 ≤ t ≤ 6π)`
+                                  : mathSignal.ingredientName === "Carrot"
+                                    ? ` (quartic cosine taper waveform, f = ${ingredient.freq} Hz)`
+                                    : mathSignal.ingredientName === "Cucumber"
+                                      ? ` (hyperbolic tangent saturated waveform, f = ${ingredient.freq} Hz)`
+                                      : mathSignal.ingredientName === "Sauce"
+                                        ? ` (parametric 5-lobed sauce rosette, 0 ≤ t ≤ 6π)`
+                                        : mathSignal.ingredientName === "Egg"
+                                          ? ` (parametric egg contour, 0 ≤ t ≤ 6π)`
+                                          : ` (f = ${ingredient.freq} Hz, A = ${mathSignal.defaultAmplitude}, φ = 0)`}
             </p>
-
-
-
           </div>
         )}
 
