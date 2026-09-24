@@ -8,7 +8,9 @@ import { GameButton } from "@/components/game/GameButton";
 import { LabShell } from "@/components/game/LabShell";
 import { SignalAudioPlayer, type PlaybackState } from "@/lib/audio";
 import {
+  api,
   computeSeasonedSignal,
+  getRecipeRunSession,
   recipes,
   recordStageAccuracy,
   savePipelineStageSignal,
@@ -164,16 +166,46 @@ function SeasoningLab() {
   useEffect(() => {
     if (done || unlockedStep >= 5) {
       if (done) unlock(5);
-      savePipelineStageSignal(recipe.id, "seasoned", playerSeasoned);
+      
       recordStageAccuracy("seasoning", accuracy);
       updateRecipeRunSession({
         seasonGain: amp,
         seasonFreq: freq,
         seasoningAccuracy: accuracy,
       });
-      syncSessionParamsToBackend(recipe.id);
+
+      const session = getRecipeRunSession();
+      if (session?.backendSessionId) {
+        const payload = {
+          seasoning: amp,
+          frequency: freq,
+          blend: freq,
+          marinate: session.marinateTime ?? recipe.marinateTarget.timeScale,
+          appliances: [session.cookingAppliance || recipe.cookingMethod.id],
+        };
+        api.setParams(session.backendSessionId, payload).then((stages) => {
+          if (stages.blended?.plot && stages.blended.plot.length > 0) {
+            savePipelineStageSignal(recipe.id, "seasoned", {
+              recipeId: recipe.id,
+              stage: "seasoned",
+              samples: stages.blended.plot,
+              sampleRate: stages.blended.sample_rate ?? playerSeasoned.sampleRate,
+              duration: playerSeasoned.duration,
+              frequency: playerSeasoned.frequency,
+              timestamp: Date.now(),
+              metadata: { source: "backend-stage-blended", amp, freq },
+            });
+          } else {
+            savePipelineStageSignal(recipe.id, "seasoned", playerSeasoned);
+          }
+        }).catch(() => {
+          savePipelineStageSignal(recipe.id, "seasoned", playerSeasoned);
+        });
+      } else {
+        savePipelineStageSignal(recipe.id, "seasoned", playerSeasoned);
+      }
     }
-  }, [done, unlockedStep, playerSeasoned, recipe.id, unlock, accuracy, amp, freq]);
+  }, [done, unlockedStep, playerSeasoned, recipe.id, unlock, accuracy, amp, freq, recipe.cookingMethod.id, recipe.marinateTarget.timeScale]);
 
   const chefLine = done
     ? "Perfect! The signal has just the right flavor character."

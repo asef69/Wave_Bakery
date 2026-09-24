@@ -311,18 +311,43 @@ export function computeSeasonedSignal(
   freqScale: number,
   sampleCount = 401,
 ): PipelineSignal {
-  const samples: number[] = [];
   const inSamples =
     mixedSignal.samples.length > 0
       ? mixedSignal.samples
       : computeMixedSignal(mixedSignal.recipeId, []).samples;
 
-  const effectiveFreq = Math.max(0.2, freqScale);
+  const effectiveFreq = Math.max(0.05, freqScale);
+  const n = Math.max(2, Math.round(inSamples.length / effectiveFreq));
+  
+  // time_scale(x, alpha) where alpha = effectiveFreq
+  // src = np.arange(n) * alpha
+  const scaledSamples: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const srcIndex = i * effectiveFreq;
+    if (srcIndex < 0 || srcIndex > inSamples.length - 1) {
+      scaledSamples.push(0);
+    } else {
+      const idx = Math.floor(srcIndex);
+      const frac = srcIndex - idx;
+      const s0 = inSamples[idx] ?? 0;
+      const s1 = inSamples[idx + 1] ?? s0;
+      scaledSamples.push((s0 + frac * (s1 - s0)) * amplitude);
+    }
+  }
+
+  // Ensure it fits the requested sampleCount
+  const samples: number[] = [];
   for (let i = 0; i < sampleCount; i++) {
-    const t = i / (sampleCount - 1);
-    const u = (t * effectiveFreq) % 1;
-    const s = sampleAt(inSamples, u);
-    samples.push(s * amplitude);
+    const srcIndex = (i / (sampleCount - 1)) * (scaledSamples.length - 1);
+    if (srcIndex < 0 || srcIndex > scaledSamples.length - 1) {
+      samples.push(0);
+    } else {
+      const idx = Math.floor(srcIndex);
+      const frac = srcIndex - idx;
+      const s0 = scaledSamples[idx] ?? 0;
+      const s1 = scaledSamples[idx + 1] ?? s0;
+      samples.push(s0 + frac * (s1 - s0));
+    }
   }
 
   return {
@@ -355,12 +380,16 @@ export function computeMarinatedSignal(
       ? seasonedSignal.samples
       : computeMixedSignal(seasonedSignal.recipeId, []).samples;
 
-  const effectiveScale = Math.max(0.1, timeScale);
+  const effectiveScale = Math.max(0.01, timeScale);
+  const shiftSamples = Math.round((effectiveScale / Math.max(1, seasonedSignal.duration)) * sampleCount);
+
   for (let i = 0; i < sampleCount; i++) {
-    const t = i / (sampleCount - 1);
-    const u = (t / effectiveScale) % 1;
-    const s = sampleAt(inSamples, u);
-    samples.push(s);
+    const srcIndex = i - shiftSamples;
+    if (srcIndex >= 0 && srcIndex < inSamples.length) {
+      samples.push(inSamples[srcIndex] ?? 0);
+    } else {
+      samples.push(0);
+    }
   }
 
   return {
@@ -400,7 +429,9 @@ export function computeConvolvedSignal(
   const tau = Math.max(0, Math.min(100, pos)) / 100;
   const shiftSamples = Math.round(tau * 30);
 
-  // Linear discrete convolution with boundary handling
+  // Circular discrete convolution: y[n] = sum_k x[(n-k-shift) mod N] * h[k].
+  // Wraparound (not zero-padded) boundary handling, consistent with the
+  // periodic-snippet model the rest of the pipeline uses (sampleAt wraps too).
   for (let n = 0; n < sampleCount; n++) {
     let acc = 0;
     for (let k = 0; k < kLen; k++) {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { getMathematicalSignal } from "./signals";
 import { getIdealDishSignal, getOrSaveExpectedSignal } from "./pipeline";
 import { api, type SubmitResult } from "./api";
@@ -947,10 +947,7 @@ export function useRecipeBestScores(): Record<string, number> {
   return scores;
 }
 
-export function enrichRecipeWithBestScore(
-  recipe: Recipe,
-  scores?: Record<string, number>,
-): Recipe {
+export function enrichRecipeWithBestScore(recipe: Recipe, scores?: Record<string, number>): Recipe {
   const bestScores = scores ?? getRecipeBestScores();
   const bestScore = bestScores[recipe.id] ?? null;
   const stars = bestScore !== null ? (bestScore >= 900 ? 3 : bestScore >= 700 ? 2 : 1) : 0;
@@ -1268,14 +1265,17 @@ export async function syncSessionParamsToBackend(recipeId?: string): Promise<voi
   if (!activeRecipe) return;
 
   const appliance = session.cookingAppliance || activeRecipe.cookingMethod.id;
+  const seasonFreq = session.seasonFreq ?? activeRecipe.seasoningTarget.frequency;
+  // Field names must match backend schemas.CookParams exactly (seasoning,
+  // frequency, blend, marinate, appliances, ...) — pydantic silently drops
+  // unrecognized keys and falls back to defaults instead of erroring, so a
+  // mismatch here means the player's actual dials never reach the score.
   const payload = {
-    season_gain: session.seasonGain ?? activeRecipe.seasoningTarget.amplitude,
-    season_freq: session.seasonFreq ?? activeRecipe.seasoningTarget.frequency,
-    marinate_time: session.marinateTime ?? activeRecipe.marinateTarget.timeScale,
+    seasoning: session.seasonGain ?? activeRecipe.seasoningTarget.amplitude,
+    frequency: seasonFreq,
+    blend: seasonFreq,
+    marinate: session.marinateTime ?? activeRecipe.marinateTarget.timeScale,
     appliances: [appliance],
-    fry_temp: 180,
-    bake_time: 20,
-    boil_power: 80,
   };
 
   try {
@@ -1458,10 +1458,10 @@ export function useRecipeProgress(): [number, (stage: number) => void] {
     };
   }, []);
 
-  const unlock = (newStage: number) => {
+  const unlock = useCallback((newStage: number) => {
     setUnlockedStage(newStage);
     setStageState(getUnlockedStage());
-  };
+  }, []);
 
   return [stage, unlock];
 }

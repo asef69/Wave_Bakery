@@ -8,8 +8,10 @@ import { GameButton } from "@/components/game/GameButton";
 import { LabShell } from "@/components/game/LabShell";
 import { SignalAudioPlayer, type PlaybackState } from "@/lib/audio";
 import {
+  api,
   computeMarinatedSignal,
   getNextStationPath,
+  getRecipeRunSession,
   recipes,
   recordStageAccuracy,
   savePipelineStageSignal,
@@ -161,15 +163,45 @@ function MarinatingLab() {
   useEffect(() => {
     if (done || unlockedStep >= 6) {
       if (done) unlock(6);
-      savePipelineStageSignal(recipe.id, "marinated", playerMarinated);
+      
       recordStageAccuracy("marinating", accuracy);
       updateRecipeRunSession({
         marinateTime: timeScale,
         marinatingAccuracy: accuracy,
       });
-      syncSessionParamsToBackend(recipe.id);
+
+      const session = getRecipeRunSession();
+      if (session?.backendSessionId) {
+        const payload = {
+          seasoning: session.seasonGain ?? recipe.seasoningTarget.amplitude,
+          frequency: session.seasonFreq ?? recipe.seasoningTarget.frequency,
+          blend: session.seasonFreq ?? recipe.seasoningTarget.frequency,
+          marinate: timeScale,
+          appliances: [session.cookingAppliance || recipe.cookingMethod.id],
+        };
+        api.setParams(session.backendSessionId, payload).then((stages) => {
+          if (stages.marinated?.plot && stages.marinated.plot.length > 0) {
+            savePipelineStageSignal(recipe.id, "marinated", {
+              recipeId: recipe.id,
+              stage: "marinated",
+              samples: stages.marinated.plot,
+              sampleRate: stages.marinated.sample_rate ?? playerMarinated.sampleRate,
+              duration: playerMarinated.duration,
+              frequency: playerMarinated.frequency,
+              timestamp: Date.now(),
+              metadata: { source: "backend-stage-marinated", timeScale },
+            });
+          } else {
+            savePipelineStageSignal(recipe.id, "marinated", playerMarinated);
+          }
+        }).catch(() => {
+          savePipelineStageSignal(recipe.id, "marinated", playerMarinated);
+        });
+      } else {
+        savePipelineStageSignal(recipe.id, "marinated", playerMarinated);
+      }
     }
-  }, [done, unlockedStep, playerMarinated, recipe.id, unlock, accuracy, timeScale]);
+  }, [done, unlockedStep, playerMarinated, recipe.id, unlock, accuracy, timeScale, recipe.cookingMethod.id, recipe.seasoningTarget]);
 
   const chefLine = done
     ? "That feels properly marinated! The waveform aligns with the target timing."

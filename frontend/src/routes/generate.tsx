@@ -7,10 +7,13 @@ import { IngredientGlyph } from "@/components/game/IngredientGlyph";
 import { LabShell } from "@/components/game/LabShell";
 import { MiniWave } from "@/components/game/MiniWave";
 import { SignalAudioPlayer } from "@/lib/audio";
+import type { SessionItemOut } from "@/lib/api";
 import {
   ALL_AVAILABLE_INGREDIENTS,
+  api,
   computeIngredientSamples,
   getMathematicalSignal,
+  getRecipeRunSession,
   type IngredientDetail,
   useActiveRecipe,
   useRecipeProgress,
@@ -123,9 +126,46 @@ function GenerateScreen() {
     return getMathematicalSignal(activeIng.name);
   }, [activeIng]);
 
+  // The backend's real per-slot dirty/clean signal for the active ingredient
+  // — when a session already exists (it does from the moment the recipe run
+  // starts), Generate Signal must show the exact same array that Filtering
+  // will later show and operate on. Without this, the two stations render
+  // the same ingredient from two independent implementations (this page's
+  // local JS math vs. the server's real synthesis + contamination), and any
+  // small divergence between them reads as "a different shape" once you
+  // move from one station to the next.
+  const session = getRecipeRunSession();
+  const backendSessionId = session?.backendSessionId;
+  const slotIndex = recipe.ingredients.findIndex(
+    (n) => n.toLowerCase() === activeIng.name.toLowerCase(),
+  );
+  const [backendItem, setBackendItem] = useState<SessionItemOut | null>(null);
+
+  useEffect(() => {
+    setBackendItem(null);
+    if (!backendSessionId || slotIndex < 0 || isChicken) return;
+    let cancelled = false;
+    api
+      .getSession(backendSessionId)
+      .then((s) => {
+        if (cancelled) return;
+        const item = s.items.find((it) => it.slot === slotIndex) ?? null;
+        setBackendItem(item);
+      })
+      .catch((err) => {
+        console.warn("Backend session fetch error (falling back to client DSP):", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [backendSessionId, slotIndex, isChicken]);
+
   const idealSamples = useMemo(() => {
     if (isChicken) {
       return chickenAudio ? chickenAudio.samples : getChickenStaticSamples();
+    }
+    if (backendItem?.clean_preview?.plot && backendItem.clean_preview.plot.length > 0) {
+      return backendItem.clean_preview.plot;
     }
     return computeIngredientSamples({
       freq: activeIng.freq,
@@ -134,11 +174,17 @@ function GenerateScreen() {
       seed: 0,
       noise: 0,
     });
-  }, [activeIng, isChicken, chickenAudio]);
+  }, [activeIng, isChicken, chickenAudio, backendItem]);
 
   const activeSamples = useMemo(() => {
     if (isChicken) {
       return chickenAudio ? chickenAudio.samples : getChickenStaticSamples();
+    }
+    if (generated && activeIng.washable && backendItem?.dirty?.plot && backendItem.dirty.plot.length > 0) {
+      return backendItem.dirty.plot;
+    }
+    if (!generated && backendItem?.clean_preview?.plot && backendItem.clean_preview.plot.length > 0) {
+      return backendItem.clean_preview.plot;
     }
     return computeIngredientSamples({
       freq: activeIng.freq,
@@ -147,7 +193,7 @@ function GenerateScreen() {
       seed: 0,
       noise: activeIng.washable ? (generated ? 0.88 : 0.1) : 0.0,
     });
-  }, [activeIng, generated, isChicken, chickenAudio]);
+  }, [activeIng, generated, isChicken, chickenAudio, backendItem]);
 
   // Filtered catalogue list
   const visibleCatalogue = useMemo(() => {

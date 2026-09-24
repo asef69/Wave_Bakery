@@ -101,7 +101,7 @@ def filter_curve(bands, tools, points: int = 512) -> tuple[list[float], list[flo
 def clean_signal(ingredient: Ingredient) -> np.ndarray:
     try:
         sig = instruments.synth(ingredient.voice, C.FRAME, ingredient.f0)
-        return C.normalize(sig, 0.9)
+        return sig
     except Exception:
         f = ingredient.f0 if ingredient.f0 and ingredient.f0 > 0 else 440.0
         return C.normalize(C.tone(C.FRAME, 0.9, f), 0.9)
@@ -117,7 +117,9 @@ def dirty_signal(item: SessionIngredient, ingredient: Ingredient,
     clean = clean_signal(ingredient)
     # Only washable ingredients arrive contaminated; non-washable items arrive clean.
     effective_diff = difficulty if getattr(ingredient, 'washable', False) else 0.0
-    dirty, found = contamination.corrupt(clean, effective_diff, item.seed)
+    dirty, found = contamination.corrupt(
+        clean, effective_diff, item.seed,
+        ideal_cutoff=getattr(ingredient, 'ideal_cutoff', None))
 
     comps = [{'freq': float(ingredient.f0 or 440.0), 'amp': 1.0}]
     return clean, dirty, [c.dict() for c in found], comps

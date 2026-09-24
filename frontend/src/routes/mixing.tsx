@@ -7,8 +7,10 @@ import { GameButton } from "@/components/game/GameButton";
 import { IngredientGlyph, type IngredientKind } from "@/components/game/IngredientGlyph";
 import { SignalAudioPlayer } from "@/lib/audio";
 import {
+  api,
   computeMixedSignal,
   getMathematicalSignal,
+  getRecipeRunSession,
   type IngredientDetail,
   recipes,
   recordStageAccuracy,
@@ -21,11 +23,7 @@ import {
   getFilteredIngredient,
   getRecipeIngredientSamples,
 } from "@/lib/pipeline";
-import {
-  computeSuperpositionPath,
-  parametricPath,
-  samplesToPath,
-} from "@/lib/signals";
+import { parametricPath, samplesToPath } from "@/lib/signals";
 import { getCachedChickenAudio } from "@/lib/chicken-audio";
 import { cn } from "@/lib/utils";
 
@@ -84,7 +82,11 @@ function buildTrayIngredients(
       kind: (s.kind ?? "generic") as IngredientKind,
       freq: s.freq ?? 2 + (resolvedIdx % 4) * 1.5,
       amp: math?.defaultAmplitude ?? (0.5 + (resolvedIdx % 3) * 0.25),
-      seed: (resolvedIdx + 1) * 0.85,
+      // Must match Signal Generation's phase (seed: 0) exactly — see the
+      // identical note in filtering.tsx's activeQueue. A per-index phase
+      // here made every ingredient's individual trace in the Mixing bowl a
+      // rotated version of the shape Generate Signal showed for it.
+      seed: 0,
       trace: TRACE_COLORS[resolvedIdx % TRACE_COLORS.length]!,
     };
   });
@@ -180,9 +182,21 @@ function MixingLab() {
       if (filtered && filtered.length > 0) {
         map[ing.name] = filtered;
       } else {
+        // Must match computeMixedSignal's own fallback noise (used for the
+        // solid "combined" trace) exactly: a washable ingredient that
+        // hasn't been through Filtering yet is still noisy everywhere, not
+        // just in the combined trace. Omitting noise here left this
+        // per-ingredient (dashed) trace clean while the combined trace it's
+        // supposed to equal (for a single-ingredient bowl) was jagged/noisy
+        // — two visibly different curves for what the legend calls the same
+        // signal, reading as "two signals" overlaid instead of one.
+        const detail = recipe.ingredientDetails.find(
+          (d) => d.name.toLowerCase() === ing.name.toLowerCase(),
+        );
         map[ing.name] = getRecipeIngredientSamples(recipe.id, ing.name, {
           freq: ing.freq,
           seed: ing.seed,
+          noise: detail?.washable ? 0.85 : 0.0,
           sampleCount: 401,
         });
       }
@@ -206,9 +220,25 @@ function MixingLab() {
     return computeMixedSignal(recipe.id, inBowl.map((i) => i.name));
   }, [recipe.id, inBowl]);
 
+  // Once handleMix confirms the backend's real superposition, this holds
+  // those exact samples so the post-mix graph displays the same signal that
+  // was persisted for Seasoning — not the frontend-only preview.
+  const [committedMixedSamples, setCommittedMixedSamples] = useState<number[] | null>(null);
+
+  // The solid "combined" trace must render the exact signal that gets saved
+  // for this stage and carried into Seasoning — not a separate geometric
+  // superposition of parametric curves, which produces a visually different
+  // shape for any bowl containing a parametric ingredient (lettuce, tomato,
+  // onion, cucumber, carrot, egg, sauce) and made the Mixing Lab preview
+  // disagree with what Seasoning showed next. Once handleMix has confirmed
+  // the backend's real superposition, prefer that exact array.
   const superpositionPath = useMemo(() => {
-    return computeSuperpositionPath(inBowl, ingredientSamplesMap, W, H);
-  }, [inBowl, ingredientSamplesMap]);
+    if (mixed && committedMixedSamples) {
+      return samplesToPath(committedMixedSamples, W, H, 0.4);
+    }
+    if (!mixedSignal || inBowl.length === 0) return "";
+    return samplesToPath(mixedSignal.samples, W, H, 0.4);
+  }, [mixed, committedMixedSamples, mixedSignal, inBowl.length]);
 
   const [player, setPlayer] = useState<SignalAudioPlayer | null>(null);
 
@@ -235,6 +265,7 @@ function MixingLab() {
   const reset = () => {
     setBowl([]);
     setMixed(false);
+    setCommittedMixedSamples(null);
     setPlaying(false);
     if (player) player.destroy();
   };
@@ -246,7 +277,7 @@ function MixingLab() {
     const isOnlyChicken = inBowl.length === 1 && inBowl[0]?.name.toLowerCase() === "chicken";
     const cachedChicken = getCachedChickenAudio();
     const newPlayer = new SignalAudioPlayer({
-      samples: mixedSignal.samples,
+      samples: mixed && committedMixedSamples ? committedMixedSamples : mixedSignal.samples,
       frequency: mixedSignal.frequency,
       duration: isOnlyChicken && cachedChicken ? cachedChicken.duration : 2.5,
       audioBuffer: isOnlyChicken ? (cachedChicken?.buffer ?? null) : null,
@@ -258,7 +289,6 @@ function MixingLab() {
 
   const handleMix = () => {
     if (!mixedSignal) return;
-    savePipelineStageSignal(recipe.id, "mixed", mixedSignal);
 
     const recipeSet = new Set(recipe.ingredients.map((i) => i.toLowerCase()));
     const bowlSet = new Set(inBowl.map((i) => i.name.toLowerCase()));
@@ -268,6 +298,38 @@ function MixingLab() {
     }
     const mixAcc = Math.round((matchCount / Math.max(1, recipeSet.size)) * 100);
     recordStageAccuracy("mixing", mixAcc);
+
+    // Persist the locally-computed mix immediately so the game never stalls
+    // waiting on the network, then — when the bowl holds the full recipe and
+    // a backend session exists — replace it with the backend's actual
+    // superposition (stage_mix, a real sample-wise sum of every accepted,
+    // server-filtered ingredient) so Seasoning receives the true backend
+    // mixed result rather than a frontend-only approximation.
+    savePipelineStageSignal(recipe.id, "mixed", mixedSignal);
+
+    const session = getRecipeRunSession();
+    const isFullRecipeBowl = bowlSet.size === recipeSet.size && matchCount === recipeSet.size;
+    if (session?.backendSessionId && isFullRecipeBowl) {
+      api
+        .getStages(session.backendSessionId)
+        .then((stages) => {
+          if (!stages.mixed?.plot || stages.mixed.plot.length === 0) return;
+          savePipelineStageSignal(recipe.id, "mixed", {
+            recipeId: recipe.id,
+            stage: "mixed",
+            samples: stages.mixed.plot,
+            sampleRate: stages.mixed.sample_rate ?? mixedSignal.sampleRate,
+            duration: mixedSignal.duration,
+            frequency: mixedSignal.frequency,
+            timestamp: Date.now(),
+            metadata: { source: "backend-stage-mix" },
+          });
+          setCommittedMixedSamples(stages.mixed.plot);
+        })
+        .catch((err) => {
+          console.warn("Backend mix fetch error (keeping local mix):", err);
+        });
+    }
 
     setMixed(true);
     setPlaying(false);

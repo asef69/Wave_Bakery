@@ -208,12 +208,16 @@ function ScoreScreen() {
   }, [session]);
 
   const timeBonus = remainingSec * 2;
-  const totalScore =
+  // Time and Precision Oven/System Delivery bonuses must apply on top of
+  // whichever base score is available — previously they were scoped inside
+  // only the local-fallback branch of this ternary, so whenever the backend
+  // submit succeeded (the normal path), both bonuses were silently dropped
+  // and Precision Oven work had zero effect on the final score.
+  const baseScore =
     displayScore !== null
       ? displayScore
-      : Math.round((similarity * 0.5 + stageAvg * 0.5) * 10 * diffMultiplier) +
-        timeBonus +
-        deliveryBonus;
+      : Math.round((similarity * 0.5 + stageAvg * 0.5) * 10 * diffMultiplier);
+  const totalScore = baseScore + timeBonus + deliveryBonus;
 
   // Dynamic feedback from Chef Fourier based on lowest score
   const chefFeedback = useMemo(() => {

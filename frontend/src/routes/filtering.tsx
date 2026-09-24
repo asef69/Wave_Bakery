@@ -7,6 +7,7 @@ import { GameButton } from "@/components/game/GameButton";
 import { IngredientGlyph, type IngredientKind } from "@/components/game/IngredientGlyph";
 import { SignalAudioPlayer } from "@/lib/audio";
 import { applyLowPassFilter, computeSignalSimilarity, fft } from "@/lib/dsp";
+import type { SessionItemOut } from "@/lib/api";
 import {
   api,
   getRecipeIngredientSamples,
@@ -49,7 +50,7 @@ type QueueItem = {
   baseFreq: number;
 };
 
-const MIN_HZ = 100;
+const MIN_HZ = 0;
 const MAX_HZ = 900;
 const THRESHOLD = 85;
 
@@ -179,14 +180,20 @@ function Spectrum({
     if (rawSamples && rawSamples.length > 0) {
       const { magnitude } = fft(rawSamples);
       const N = magnitude.length;
-      const sampleRate = 44100;
+      let maxOverallMag = 0;
+      for (let i = 0; i < N / 2; i++) {
+        const m = magnitude[i] ?? 0;
+        if (m > maxOverallMag) maxOverallMag = m;
+      }
+
+      const sampleRate = 22050; // The true backend sample rate
       const binHz = sampleRate / N;
 
       return Array.from({ length: 40 }, (_, i) => {
         const hz = MIN_HZ + (i / 39) * (MAX_HZ - MIN_HZ);
         const centerBin = Math.round(hz / binHz);
-        const binStart = Math.max(0, centerBin - 1);
-        const binEnd = Math.min(Math.floor(N / 2), centerBin + 1);
+        const binStart = Math.max(0, centerBin - 2);
+        const binEnd = Math.min(Math.floor(N / 2), centerBin + 2);
 
         let maxMag = 0;
         for (let b = binStart; b <= binEnd; b++) {
@@ -194,8 +201,8 @@ function Spectrum({
           if (m > maxMag) maxMag = m;
         }
 
-        const normH = Math.min(98, Math.max(6, (maxMag / (N * 0.12)) * 100));
-        const isSignal = normH > 28;
+        const normH = maxOverallMag > 0 ? Math.min(98, Math.max(2, (maxMag / maxOverallMag) * 100)) : 2;
+        const isSignal = normH > 40; // True peaks will stand out above 40%
         return { hz, h: normH, isSignal };
       });
     }
@@ -343,13 +350,23 @@ function FilteringLab() {
         name: i.name,
         kind: (i.kind ?? "generic") as IngredientKind,
         idealCutoff: i.idealCutoff ?? 400 + idx * 80,
-        seed: idx + 1.2,
+        // Must match Signal Generation's phase (seed: 0) exactly — this value
+        // is passed straight through as the wave's phase offset, which
+        // shifts where the periodic curve starts. Using a per-index offset
+        // here (previously idx + 1.2) made every washable ingredient's
+        // "raw/clean" shape in Filtering a rotated version of the identical
+        // curve Generate Signal showed for it, reading as "a different
+        // shape" even though the underlying formula was the same.
+        seed: 0,
         baseFreq: i.freq ?? 3 + idx * 1.5,
       }));
   }, [selectedIngredients]);
 
   const [index, setIndex] = useState(0);
-  const [cutoff, setCutoff] = useState(MIN_HZ);
+  // Start wide open (keep everything) rather than at MIN_HZ (0 Hz, which
+  // squashes every visible bar to near-zero height before the player has
+  // touched anything, making the spectrum look empty/broken on first view).
+  const [cutoff, setCutoff] = useState(MAX_HZ);
   const [applied, setApplied] = useState(false);
   const [cleanedCount, setCleanedCount] = useState(0);
   const [showDragCue, setShowDragCue] = useState(true);
@@ -372,6 +389,35 @@ function FilteringLab() {
   const effectiveSlot = slotIndex >= 0 ? slotIndex : index;
 
   const [backendPrepScore, setBackendPrepScore] = useState<number | null>(null);
+  // The backend's actual dirty/clean samples for this ingredient slot — the
+  // server-authoritative signal that filtering must display and operate on,
+  // not a separately-computed frontend approximation (see also
+  // saveFilteredIngredient below, which stores the backend's real filtered
+  // result instead of a locally-approximated one).
+  const [backendItem, setBackendItem] = useState<SessionItemOut | null>(null);
+  const [backendFilteredPlot, setBackendFilteredPlot] = useState<number[] | null>(null);
+
+  // Fetch the server's real contaminated/clean signal for this slot whenever
+  // the session or the active ingredient changes.
+  useEffect(() => {
+    setBackendItem(null);
+    setBackendFilteredPlot(null);
+    if (!backendSessionId) return;
+    let cancelled = false;
+    api
+      .getSession(backendSessionId)
+      .then((session) => {
+        if (cancelled) return;
+        const item = session.items.find((it) => it.slot === effectiveSlot) ?? null;
+        setBackendItem(item);
+      })
+      .catch((err) => {
+        console.warn("Backend session fetch error (falling back to client DSP):", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [backendSessionId, effectiveSlot]);
 
   useEffect(() => {
     if (applied && backendSessionId) {
@@ -384,32 +430,51 @@ function FilteringLab() {
           if (res && res.prep && typeof res.prep.score === "number") {
             setBackendPrepScore(res.prep.score);
           }
+          if (res?.signal?.plot && res.signal.plot.length > 0) {
+            setBackendFilteredPlot(res.signal.plot);
+          }
         })
         .catch((err) => {
           console.warn("Backend filtering error (falling back to client DSP):", err);
         });
     } else {
       setBackendPrepScore(null);
+      setBackendFilteredPlot(null);
     }
   }, [applied, backendSessionId, effectiveSlot, cutoff]);
 
+  // Raw (noisy) input: the server's actual contaminated signal when a
+  // backend session exists, so the displayed input is exactly what the
+  // server will filter — not a separately-generated approximation. Falls
+  // back to the local generator only when no backend session is available.
   const rawSamples = useMemo(() => {
+    if (backendItem?.dirty?.plot && backendItem.dirty.plot.length > 0) {
+      return backendItem.dirty.plot;
+    }
     return getRecipeIngredientSamples(recipe.id, current.name, {
       noise: 0.85,
       seed: current.seed,
       freq: current.baseFreq,
     });
-  }, [recipe.id, current.name, current.seed, current.baseFreq]);
+  }, [backendItem, recipe.id, current.name, current.seed, current.baseFreq]);
 
   const cleanSamples = useMemo(() => {
+    if (backendItem?.clean_preview?.plot && backendItem.clean_preview.plot.length > 0) {
+      return backendItem.clean_preview.plot;
+    }
     return getRecipeIngredientSamples(recipe.id, current.name, {
       noise: 0.0,
       seed: current.seed,
       freq: current.baseFreq,
     });
-  }, [recipe.id, current.name, current.seed, current.baseFreq]);
+  }, [backendItem, recipe.id, current.name, current.seed, current.baseFreq]);
 
-  const filteredSamples = useMemo(() => {
+  // Local client-side approximation, used only as a live "drag the slider"
+  // preview before the filter is applied, or as an offline fallback when no
+  // backend session exists. Once the filter is actually applied and the
+  // server responds, the real backend result (backendFilteredPlot) takes
+  // over as the displayed/saved filtered signal.
+  const localFilteredSamples = useMemo(() => {
     return rawSamples.map((raw, i) => {
       const clean = cleanSamples[i] ?? 0;
       const noise = raw - clean;
@@ -432,6 +497,11 @@ function FilteringLab() {
       return clean * signalGain + noise * noiseGain;
     });
   }, [rawSamples, cleanSamples, cutoff, current.idealCutoff]);
+
+  const filteredSamples =
+    applied && backendFilteredPlot && backendFilteredPlot.length > 0
+      ? backendFilteredPlot
+      : localFilteredSamples;
 
   const cleanliness = useMemo(() => {
     if (backendPrepScore !== null && applied) {
@@ -511,7 +581,7 @@ function FilteringLab() {
     if (!cleanedThis) setCleanedCount((c) => c + 1);
     if (index + 1 < total) {
       setIndex((i) => i + 1);
-      setCutoff(MIN_HZ);
+      setCutoff(MAX_HZ);
       setApplied(false);
       setBackendPrepScore(null);
     }
@@ -796,7 +866,7 @@ function FilteringLab() {
                     variant="secondary"
                     size="sm"
                     onClick={() => {
-                      setCutoff(MIN_HZ);
+                      setCutoff(MAX_HZ);
                       setApplied(false);
                     }}
                   >

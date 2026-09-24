@@ -13,6 +13,29 @@
 
 import { CHICKEN_STATIC_PCM_SAMPLES } from "./chicken-samples";
 
+/**
+ * Contamination noise added to washable ingredients' 1D audio/DSP samples.
+ *
+ * Deliberately a sum of several closely-spaced, non-integer "cycles across
+ * the sample buffer" tones (not a single `sin(t * 12.9898 * 400 + ...)`
+ * term): that older formula multiplies normalized time by ~5196 rad, which
+ * is a digital frequency far above Nyquist — it doesn't look like broadband
+ * noise once FFT'd, it aliases down into one dominant tone that swamps the
+ * ingredient's own harmonic content in the Filtering Lab's spectrum display,
+ * making the "signal vs noise" bars look wrong (one huge spike, everything
+ * else flat) instead of noise genuinely spread above the ideal cutoff.
+ */
+function ingredientNoise(normT: number, phase: number, noiseAmount?: number): number {
+  if (!noiseAmount) return 0;
+  const seedOffset = (phase || 1) * 37.1;
+  const tones = [15.3, 18.7, 22.1, 26.9, 31.4];
+  let n = 0;
+  for (let i = 0; i < tones.length; i++) {
+    n += Math.sin(2 * Math.PI * tones[i]! * normT + seedOffset * (i + 1));
+  }
+  return (n / tones.length) * noiseAmount * 0.85;
+}
+
 export interface MathematicalSignalParams {
   frequency: number;
   amplitude?: number;
@@ -82,7 +105,7 @@ export function evaluateTriangleWave(t: number, params: MathematicalSignalParams
   const clamped = Math.max(-1, Math.min(1, s));
   const val = amp * (2 / Math.PI) * Math.asin(clamped);
   if (params.noise) {
-    const n = Math.sin(t * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(t, phi, params.noise);
     return val - n;
   }
   return val;
@@ -100,7 +123,7 @@ export function evaluateSquareWave(t: number, params: MathematicalSignalParams):
   const sign = s >= 0 ? 1 : -1;
   const val = amp * sign;
   if (params.noise) {
-    const n = Math.sin(t * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(t, phi, params.noise);
     return val - n;
   }
   return val;
@@ -223,7 +246,7 @@ export function evaluateBreadWave(
 
   if (params.noise) {
     const phi = params.phase ?? 0;
-    const n = Math.sin(t * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(t, phi, params.noise);
     return val - n;
   }
   return val;
@@ -293,7 +316,7 @@ export function evaluatePattyWave(normT: number, params: MathematicalSignalParam
   const val = amp * (evaluatePattyParametric(t).y / 0.7);
 
   if (params.noise) {
-    const n = Math.sin(normT * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(normT, phi, params.noise);
     return val - n;
   }
   return val;
@@ -406,7 +429,7 @@ export function evaluateLettuceWave(normT: number, params: MathematicalSignalPar
   const val = amp * ((2.2 * Math.cos(t) + 0.45 * Math.cos(7.5 * t)) / 2.65);
 
   if (params.noise) {
-    const n = Math.sin(normT * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(normT, phi, params.noise);
     return val - n;
   }
   return val;
@@ -478,7 +501,7 @@ export function evaluateMilkWave(t: number, params: MathematicalSignalParams): n
   const val = amp * (rawY / 2.3);
 
   if (params.noise) {
-    const n = Math.sin(t * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(t, phi, params.noise);
     return val - n;
   }
   return val;
@@ -537,7 +560,7 @@ export function evaluateFlourWave(t: number, params: MathematicalSignalParams): 
   const val = amp * (sq1 - sq2 * cosTerm);
 
   if (params.noise) {
-    const n = Math.sin(t * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(t, phi, params.noise);
     return val - n;
   }
   return val;
@@ -619,7 +642,7 @@ export function evaluateNoodleWave(normT: number, params: MathematicalSignalPara
   const val = amp * Math.cos(theta); // 5 cos(θ) normalized to [-1, 1]
 
   if (params.noise) {
-    const n = Math.sin(normT * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(normT, phi, params.noise);
     return val - n;
   }
   return val;
@@ -692,7 +715,7 @@ export function evaluateBunWave(t: number, params: MathematicalSignalParams): nu
   const val = amp * ((rawY - 2.5) / 2.5);
 
   if (params.noise) {
-    const n = Math.sin(t * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(t, phi, params.noise);
     return val - n;
   }
   return val;
@@ -761,7 +784,7 @@ export function evaluateButterWave(normT: number, params: MathematicalSignalPara
   const val = amp * (rawY - 0.6);
 
   if (params.noise) {
-    const n = Math.sin(normT * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(normT, phi, params.noise);
     return val - n;
   }
   return val;
@@ -860,7 +883,7 @@ export function evaluateTomatoWave(normT: number, params: MathematicalSignalPara
   const val = amp * (pt.y / 1.7);
 
   if (params.noise) {
-    const n = Math.sin(normT * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(normT, phi, params.noise);
     return val - n;
   }
   return val;
@@ -960,7 +983,7 @@ export function evaluateOnionWave(normT: number, params: MathematicalSignalParam
   const val = amp * (pt.y / maxRadius);
 
   if (params.noise) {
-    const n = Math.sin(normT * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(normT, phi, params.noise);
     return val - n;
   }
   return val;
@@ -1038,7 +1061,7 @@ export function evaluateCarrotWave(t: number, params: MathematicalSignalParams):
   const val = amp * ((rawY + 3) / 8);
 
   if (params.noise) {
-    const n = Math.sin(t * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(t, phi, params.noise);
     return val - n;
   }
   return val;
@@ -1114,7 +1137,7 @@ export function evaluateCucumberWave(t: number, params: MathematicalSignalParams
   const val = amp * (rawY / 6);
 
   if (params.noise) {
-    const n = Math.sin(t * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(t, phi, params.noise);
     return val - n;
   }
   return val;
@@ -1212,7 +1235,7 @@ export function evaluateSauceWave(normT: number, params: MathematicalSignalParam
   const val = amp * (pt.y / 3);
 
   if (params.noise) {
-    const n = Math.sin(normT * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(normT, phi, params.noise);
     return val - n;
   }
   return val;
@@ -1312,7 +1335,7 @@ export function evaluateEggWave(normT: number, params: MathematicalSignalParams)
   const val = amp * (pt.y / 2.2);
 
   if (params.noise) {
-    const n = Math.sin(normT * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(normT, phi, params.noise);
     return val - n;
   }
   return val;
@@ -1546,6 +1569,7 @@ export function computeSuperpositionPath(
   ingredientSamplesMap: Record<string, number[]>,
   width = 1000,
   height = 320,
+  backendMixedSamples: number[] | null = null,
 ): string {
   if (!inBowlIngredients || inBowlIngredients.length === 0) return "";
 
@@ -1553,6 +1577,18 @@ export function computeSuperpositionPath(
     const math = getMathematicalSignal(ing.name);
     return Boolean(math?.parametricCurve);
   });
+
+  // Helper to sample the backend array at normalized time u
+  const sampleBackend = (u: number) => {
+    if (!backendMixedSamples || backendMixedSamples.length === 0) return 0;
+    const len = backendMixedSamples.length;
+    const exactIdx = u * (len - 1);
+    const idx = Math.floor(exactIdx);
+    const frac = exactIdx - idx;
+    const s0 = backendMixedSamples[idx] ?? 0;
+    const s1 = backendMixedSamples[Math.min(len - 1, idx + 1)] ?? s0;
+    return s0 + frac * (s1 - s0);
+  };
 
   // CASE 1: Exactly ONE ingredient in the bowl
   if (inBowlIngredients.length === 1) {
@@ -1563,9 +1599,32 @@ export function computeSuperpositionPath(
         ing.name.toLowerCase().includes(k),
       );
       const pts = math.parametricCurve.generatePoints(601);
+      
+      // If we have backend samples, map their normalized Y values onto the parametric curve's Y bounds
+      if (backendMixedSamples && backendMixedSamples.length > 0) {
+        // Find parametric Y bounds to scale backend samples into
+        let minY = Infinity;
+        let maxY = -Infinity;
+        for (const p of pts) {
+          if (p.y < minY) minY = p.y;
+          if (p.y > maxY) maxY = p.y;
+        }
+        const yCenter = (minY + maxY) / 2;
+        const yRange = (maxY - minY) || 1;
+        // The backend samples are roughly [-1, 1], so we map [-1, 1] -> [minY, maxY]
+        for (let i = 0; i < pts.length; i++) {
+          const point = pts[i];
+          if (!point) continue;
+          const u = i / (pts.length - 1);
+          const backendY = sampleBackend(u);
+          // Overwrite the parametric Y with the backend DSP Y (scaled to the shape's original bounding box)
+          point.y = yCenter + backendY * (yRange / 2.0) * 1.5;
+        }
+      }
+
       return parametricPath(width, height, pts, 24, isClosed);
     }
-    const samples = ingredientSamplesMap[ing.name] ?? [];
+    const samples = backendMixedSamples?.length ? backendMixedSamples : (ingredientSamplesMap[ing.name] ?? []);
     return samplesToPath(samples, width, height, 0.35);
   }
 
@@ -1583,6 +1642,7 @@ export function computeSuperpositionPath(
       (ing) => !getMathematicalSignal(ing.name)?.parametricCurve,
     );
 
+    // If using backend samples, we only need X from parametric curves
     for (let i = 0; i < sampleCount; i++) {
       const u = i / (sampleCount - 1);
       let sumX = 0;
@@ -1594,18 +1654,26 @@ export function computeSuperpositionPath(
         const t = curve.tMin + u * (curve.tMax - curve.tMin);
         const pt = curve.evaluate(t);
         sumX += pt.x;
-        sumY += pt.y;
+        sumY += pt.y; // base parametric Y
       }
 
-      for (const ing of oneDList) {
-        const samples = ingredientSamplesMap[ing.name];
-        if (samples && samples.length > 0) {
-          const exactIdx = u * (samples.length - 1);
-          const idx = Math.floor(exactIdx);
-          const frac = exactIdx - idx;
-          const s0 = samples[idx] ?? 0;
-          const s1 = samples[Math.min(samples.length - 1, idx + 1)] ?? s0;
-          sumY += s0 + frac * (s1 - s0);
+      if (backendMixedSamples && backendMixedSamples.length > 0) {
+        // If we have a true backend mix, replace sumY entirely.
+        // We scale it assuming parametric sums usually fall in a reasonable bound.
+        // We multiply by parametricIngredients.length to roughly match the size of the combined shapes
+        sumY = sampleBackend(u) * 2.0 * parametricIngredients.length;
+      } else {
+        // Fallback local geometric sum for 1D ingredients
+        for (const ing of oneDList) {
+          const samples = ingredientSamplesMap[ing.name];
+          if (samples && samples.length > 0) {
+            const exactIdx = u * (samples.length - 1);
+            const idx = Math.floor(exactIdx);
+            const frac = exactIdx - idx;
+            const s0 = samples[idx] ?? 0;
+            const s1 = samples[Math.min(samples.length - 1, idx + 1)] ?? s0;
+            sumY += s0 + frac * (s1 - s0);
+          }
         }
       }
 
@@ -1616,6 +1684,10 @@ export function computeSuperpositionPath(
   }
 
   // CASE 3: Multiple ordinary 1D ingredients (NO parametric ingredients)
+  if (backendMixedSamples && backendMixedSamples.length > 0) {
+    return samplesToPath(backendMixedSamples, width, height, 0.35);
+  }
+
   const sampleLen = 401;
   const mixed1D = new Array<number>(sampleLen).fill(0);
   for (const ing of inBowlIngredients) {

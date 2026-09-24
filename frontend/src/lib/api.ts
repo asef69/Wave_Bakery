@@ -6,11 +6,15 @@
  * dish judging, score evaluations, and phased array beamforming.
  */
 
-const API_BASE =
-  typeof window !== "undefined" &&
-  (window.location.port === "5173" || window.location.port === "3000")
-    ? "http://127.0.0.1:8000/api"
-    : "/api";
+// In dev, always hit the backend directly rather than relying on Vite's
+// `/api` proxy: this dev server (TanStack Start) intercepts `/api/*`
+// requests with its own route-not-found handler before Vite's proxy ever
+// sees them, so a relative path 404s. Hardcoding a match on port "5173"
+// was also fragile — any port already in use (common across dev sessions)
+// bumps Vite to 5174+ and silently breaks every API call, including
+// registration. `import.meta.env.DEV` is true regardless of which port
+// Vite actually picks.
+const API_BASE = import.meta.env.DEV ? "http://127.0.0.1:8000/api" : "/api";
 
 const TOKEN_KEY = "wavekitchen_player_token";
 
@@ -139,6 +143,24 @@ export interface FilterResponse {
     db: number[][];
   } | null;
   accepted: boolean;
+}
+
+// Must match backend schemas.CookParams field-for-field: pydantic silently
+// drops unrecognized keys and falls back to defaults instead of raising an
+// error, so a mismatch here means player input silently never reaches the
+// score. All fields optional since the backend fills in defaults for any
+// left out.
+export interface CookParams {
+  seasoning?: number;
+  blend?: number;
+  frequency?: number;
+  marinate?: number;
+  carrier?: number | null;
+  depth?: number | null;
+  chop_factor?: number | null;
+  anti_alias?: boolean;
+  appliances?: string[];
+  cooking_method?: string | null;
 }
 
 export interface StagesOut {
@@ -478,7 +500,7 @@ class ApiClient {
     );
   }
 
-  async setParams(sessionId: string, params: Record<string, unknown>): Promise<StagesOut> {
+  async setParams(sessionId: string, params: CookParams): Promise<StagesOut> {
     return this.request<StagesOut>(`/sessions/${sessionId}/params`, {
       method: "PUT",
       body: JSON.stringify(params),
