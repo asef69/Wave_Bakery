@@ -6,6 +6,12 @@ import { DragTutorialCue } from "@/components/game/DragTutorialCue";
 import { GameButton } from "@/components/game/GameButton";
 import { IngredientGlyph, type IngredientKind } from "@/components/game/IngredientGlyph";
 import { SignalAudioPlayer } from "@/lib/audio";
+import {
+  loadChickenAudio,
+  getCachedChickenAudio,
+  getChickenStaticSamples,
+  type DecodedChickenAudio,
+} from "@/lib/chicken-audio";
 import { applyLowPassFilter, computeSignalSimilarity, fft } from "@/lib/dsp";
 import type { SessionItemOut } from "@/lib/api";
 import {
@@ -19,6 +25,7 @@ import {
   useRecipeProgress,
   useSelectedIngredients,
 } from "@/lib/recipes";
+import { getMathematicalSignal, parametricPath } from "@/lib/signals";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/filtering")({
@@ -78,6 +85,52 @@ function wavePath(
   return pts.join(" ");
 }
 
+function getParametricPointsWithNoise(
+  basePoints: Array<{ x: number; y: number }>,
+  noiseLevel: number,
+  signalScale: number = 1.0,
+  seed: number = 0,
+): Array<{ x: number; y: number }> {
+  if (!basePoints || basePoints.length === 0) return [];
+  if (noiseLevel <= 0.001 && Math.abs(signalScale - 1.0) < 0.001) {
+    return basePoints;
+  }
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (let i = 0; i < basePoints.length; i++) {
+    const p = basePoints[i]!;
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+
+  const spanX = maxX - minX || 1;
+  const spanY = maxY - minY || 1;
+  const midX = (minX + maxX) / 2;
+  const midY = (minY + maxY) / 2;
+  const N = basePoints.length;
+
+  return basePoints.map((p, i) => {
+    const u = i / (N - 1);
+    const n1 = Math.sin(u * Math.PI * 48 + (seed + 1) * 31.7);
+    const n2 = Math.sin(u * Math.PI * 104 + (seed + 2) * 59.3) * 0.6;
+    const n3 = Math.sin(u * Math.PI * 172 + (seed + 3) * 83.1) * 0.35;
+    const n = (n1 + n2 + n3) / 1.95;
+
+    const dx = n * spanX * 0.045 * noiseLevel;
+    const dy = n * spanY * 0.045 * noiseLevel;
+
+    const x = midX + (p.x - midX) * signalScale + dx;
+    const y = midY + (p.y - midY) * signalScale + dy;
+
+    return { x, y };
+  });
+}
+
 function LabWave({
   label,
   sublabel,
@@ -87,8 +140,11 @@ function LabWave({
   tall = false,
   tone = "signal",
   samples,
+  parametricPoints,
+  square = false,
   onPlay,
   playLabel = "▶ Play",
+  badge,
 }: {
   label: string;
   sublabel?: string;
@@ -98,42 +154,89 @@ function LabWave({
   tall?: boolean;
   tone?: "signal" | "warm";
   samples?: number[];
+  parametricPoints?: Array<{ x: number; y: number }> | null;
+  square?: boolean;
   onPlay?: () => void;
   playLabel?: string;
+  badge?: string;
 }) {
-  const w = 640;
-  const h = 200;
-  const mid = h / 2;
+  const hasParametric = Boolean(parametricPoints && parametricPoints.length > 0);
+  const [viewMode, setViewMode] = useState<"2d" | "1d">("2d");
+
+  const show2D = hasParametric && viewMode === "2d";
   const stroke = tone === "warm" ? "var(--primary-glow)" : "var(--signal)";
 
+  const plotWidth = show2D ? (square ? 600 : 800) : 640;
+  const plotHeight = show2D ? (square ? 600 : tall ? 240 : 160) : tall ? 220 : 140;
+  const mid = plotHeight / 2;
+
   let pathD = "";
-  if (samples && samples.length > 0) {
+  if (show2D && parametricPoints) {
+    pathD = parametricPath(plotWidth, plotHeight, parametricPoints, square ? 28 : 20, square);
+  } else if (samples && samples.length > 0) {
     const len = samples.length;
     const pts: string[] = [];
     for (let i = 0; i < len; i++) {
-      const x = (i / (len - 1)) * w;
+      const x = (i / (len - 1)) * plotWidth;
       const s = samples[i] ?? 0;
-      const y = mid - s * h * 0.38;
+      const y = mid - s * plotHeight * 0.38;
       pts.push(`${i === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`);
     }
     pathD = pts.join(" ");
   } else {
-    pathD = wavePath(w, h, { freq, seed, noise, amp: 1 });
+    pathD = wavePath(plotWidth, plotHeight, { freq, seed, noise, amp: 1 });
   }
 
   return (
     <div className="lab-panel relative overflow-hidden p-4">
       <div className="lab-grid absolute inset-0 opacity-40" aria-hidden />
       <div className="relative z-10 flex items-center justify-between gap-3">
-        <span className="font-display text-xs font-bold tracking-[0.24em] text-signal uppercase">
-          {label}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="font-display text-xs font-bold tracking-[0.24em] text-signal uppercase">
+            {label}
+          </span>
+          {badge ? (
+            <span className="rounded bg-primary/20 px-1.5 py-0.2 font-mono text-[8px] font-bold text-primary uppercase">
+              {badge}
+            </span>
+          ) : null}
+        </div>
         <div className="flex items-center gap-2">
           {sublabel ? (
             <span className="font-mono text-[10px] tracking-[0.16em] text-muted-foreground uppercase">
               {sublabel}
             </span>
           ) : null}
+          {hasParametric && (
+            <div className="flex items-center rounded-md border border-border/80 bg-secondary/80 p-0.5 font-mono text-[9px]">
+              <button
+                type="button"
+                onClick={() => setViewMode("2d")}
+                className={cn(
+                  "rounded px-1.5 py-0.5 font-bold uppercase transition-colors cursor-pointer",
+                  viewMode === "2d"
+                    ? "bg-primary text-primary-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+                title="2D Parametric Shape (Pantry View)"
+              >
+                2D
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("1d")}
+                className={cn(
+                  "rounded px-1.5 py-0.5 font-bold uppercase transition-colors cursor-pointer",
+                  viewMode === "1d"
+                    ? "bg-primary text-primary-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+                title="1D Time-Domain Wave (DSP Samples)"
+              >
+                1D
+              </button>
+            </div>
+          )}
           {onPlay ? (
             <button
               onClick={onPlay}
@@ -145,21 +248,98 @@ function LabWave({
         </div>
       </div>
       <svg
-        viewBox={`0 0 ${w} ${h}`}
-        preserveAspectRatio="none"
-        className={cn("relative z-10 mt-3 w-full", tall ? "h-56" : "h-28")}
+        viewBox={`0 0 ${plotWidth} ${plotHeight}`}
+        preserveAspectRatio={show2D && square ? "xMidYMid meet" : "none"}
+        className={cn("relative z-10 mt-3 w-full", tall ? "h-64" : "h-32")}
         aria-hidden
       >
         <line
           x1="0"
           y1={mid}
-          x2={w}
+          x2={plotWidth}
           y2={mid}
           stroke="var(--signal)"
           strokeWidth="1"
           opacity="0.18"
         />
-        <path d={pathD} fill="none" stroke={stroke} strokeWidth="2.5" strokeLinecap="round" />
+        {show2D && square && (
+          <>
+            <line
+              x1={plotWidth / 2}
+              y1="0"
+              x2={plotWidth / 2}
+              y2={plotHeight}
+              stroke="var(--border)"
+              strokeDasharray="4 4"
+              strokeWidth="1"
+              opacity="0.4"
+            />
+            <line
+              x1={plotWidth / 4}
+              y1="0"
+              x2={plotWidth / 4}
+              y2={plotHeight}
+              stroke="var(--border)"
+              strokeDasharray="2 4"
+              strokeWidth="0.75"
+              opacity="0.15"
+            />
+            <line
+              x1={(plotWidth * 3) / 4}
+              y1="0"
+              x2={(plotWidth * 3) / 4}
+              y2={plotHeight}
+              stroke="var(--border)"
+              strokeDasharray="2 4"
+              strokeWidth="0.75"
+              opacity="0.15"
+            />
+            <line
+              x1="0"
+              y1={plotHeight / 4}
+              x2={plotWidth}
+              y2={plotHeight / 4}
+              stroke="var(--border)"
+              strokeDasharray="2 4"
+              strokeWidth="0.75"
+              opacity="0.15"
+            />
+            <line
+              x1="0"
+              y1={(plotHeight * 3) / 4}
+              x2={plotWidth}
+              y2={(plotHeight * 3) / 4}
+              stroke="var(--border)"
+              strokeDasharray="2 4"
+              strokeWidth="0.75"
+              opacity="0.15"
+            />
+            <circle
+              cx={plotWidth / 2}
+              cy={plotHeight / 2}
+              r="2.5"
+              fill={stroke}
+              opacity="0.5"
+            />
+          </>
+        )}
+        <path
+          d={pathD}
+          fill="none"
+          stroke={stroke}
+          strokeWidth="5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity="0.22"
+        />
+        <path
+          d={pathD}
+          fill="none"
+          stroke={stroke}
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
       </svg>
     </div>
   );
@@ -521,6 +701,115 @@ function FilteringLab() {
 
   const [recordedAccuracies, setRecordedAccuracies] = useState<number[]>([]);
 
+  const mathSignal = useMemo(() => {
+    return getMathematicalSignal(current.name);
+  }, [current.name]);
+
+  const canonicalParametricPoints = useMemo(() => {
+    if (!mathSignal?.parametricCurve) return null;
+    return mathSignal.parametricCurve.generatePoints(601);
+  }, [mathSignal]);
+
+  const isSquareShape = useMemo(() => {
+    return (
+      current.name === "Tomato" ||
+      current.name === "Onion" ||
+      current.name === "Sauce" ||
+      current.name === "Egg"
+    );
+  }, [current.name]);
+
+  const isChicken = current.name.toLowerCase() === "chicken" || current.kind === "chicken";
+  const [chickenAudio, setChickenAudio] = useState<DecodedChickenAudio | null>(() =>
+    getCachedChickenAudio(),
+  );
+
+  useEffect(() => {
+    if (!isChicken) return;
+    let isCancelled = false;
+    loadChickenAudio("/sounds/chicken.wav")
+      .then((data) => {
+        if (!isCancelled) {
+          setChickenAudio(data);
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to decode chicken.wav in Filtering:", err);
+      });
+    return () => {
+      isCancelled = true;
+    };
+  }, [isChicken]);
+
+  // Target clean parametric points: identical to Pantry canonical curve
+  const targetParametricPoints = canonicalParametricPoints;
+
+  // Raw noisy input parametric points: full noise level on the canonical contour
+  const rawParametricPoints = useMemo(() => {
+    if (!canonicalParametricPoints) return null;
+    return getParametricPointsWithNoise(canonicalParametricPoints, 1.0, 1.0, current.seed);
+  }, [canonicalParametricPoints, current.seed]);
+
+  // Filtered parametric points: noise removed and shape adjusted based on filtering state
+  const filteredParametricPoints = useMemo(() => {
+    if (!canonicalParametricPoints) return null;
+
+    let noiseRatio = 1.0;
+    let signalScale = 1.0;
+
+    if (isClean || cleanedThis) {
+      noiseRatio = 0.0;
+      signalScale = 1.0;
+    } else if (applied && backendPrepScore !== null) {
+      if (backendPrepScore >= 85) {
+        noiseRatio = Math.max(0, (100 - backendPrepScore) / 100);
+        signalScale = 1.0;
+      } else {
+        noiseRatio = Math.max(0, Math.min(1, (100 - backendPrepScore) / 80));
+        signalScale = Math.max(0.65, backendPrepScore / 100);
+      }
+    } else {
+      // Live preview during slider sweep
+      if (cutoff < current.idealCutoff) {
+        signalScale = Math.max(0.4, 1 - (current.idealCutoff - cutoff) / 250);
+        noiseRatio = 0.0;
+      } else {
+        signalScale = 1.0;
+        const noiseRange = MAX_HZ - current.idealCutoff;
+        const rawFrac = noiseRange > 0 ? (cutoff - current.idealCutoff) / noiseRange : 0;
+        noiseRatio = Math.pow(Math.max(0, Math.min(1, rawFrac)), 1.4);
+      }
+    }
+
+    return getParametricPointsWithNoise(
+      canonicalParametricPoints,
+      noiseRatio,
+      signalScale,
+      current.seed,
+    );
+  }, [
+    canonicalParametricPoints,
+    isClean,
+    cleanedThis,
+    applied,
+    backendPrepScore,
+    cutoff,
+    current.idealCutoff,
+    current.seed,
+  ]);
+
+  // Main input signal parametric points
+  const mainParametricPoints = useMemo(() => {
+    if (!canonicalParametricPoints) return null;
+    if (isClean || cleanedThis) {
+      return canonicalParametricPoints;
+    }
+    if (applied) {
+      return filteredParametricPoints;
+    }
+    return rawParametricPoints;
+  }, [canonicalParametricPoints, isClean, cleanedThis, applied, filteredParametricPoints, rawParametricPoints]);
+
   const [player, setPlayer] = useState<SignalAudioPlayer | null>(null);
   const [activePlayerId, setActivePlayerId] = useState<string | null>(null);
 
@@ -539,8 +828,23 @@ function FilteringLab() {
         return;
       }
     }
+
+    const isChickenAudio = isChicken || current.name.toLowerCase().includes("chicken");
+    const dur = isChickenAudio && chickenAudio ? chickenAudio.duration : 2.5;
+    // For pure/clean chicken, pass the decoded AudioBuffer for pristine reproduction
+    const audioBufferToUse =
+      isChickenAudio && (type === "clean" || (type === "main" && (isClean || cleanedThis)))
+        ? (chickenAudio?.buffer ?? null)
+        : null;
+
     const newPlayer = new SignalAudioPlayer(
-      { samples: samplesToPlay, frequency: current.baseFreq, duration: 2.0 },
+      {
+        samples: samplesToPlay,
+        frequency: current.baseFreq,
+        duration: dur,
+        audioBuffer: audioBufferToUse,
+        ingredientName: current.name,
+      },
       (s) => {
         if (s.isEnded) setActivePlayerId(null);
       },
@@ -832,16 +1136,34 @@ function FilteringLab() {
                     <h2 className="font-display text-4xl font-extrabold tracking-tight text-foreground uppercase">
                       {current.name}
                     </h2>
-                    <p className="mt-1 font-mono text-[10px] tracking-[0.2em] uppercase">
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 font-mono text-[9px] uppercase">
                       <span className="text-muted-foreground">signal status — </span>
                       <span
                         className={
-                          isClean || cleanedThis ? "text-signal" : "text-[oklch(0.65_0.17_35)]"
+                          isClean || cleanedThis ? "text-signal font-bold" : "text-[oklch(0.65_0.17_35)] font-bold"
                         }
                       >
                         {isClean || cleanedThis ? "clean" : "noisy"}
                       </span>
-                    </p>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5 font-mono text-[9px]">
+                      <span className="rounded border border-primary/40 bg-primary/10 px-2 py-0.5 font-bold text-primary uppercase">
+                        {isChicken
+                          ? "RECORDED PCM AUDIO"
+                          : mathSignal?.parametricCurve
+                            ? "PARAMETRIC 2D"
+                            : mathSignal
+                              ? `${mathSignal.waveformType.toUpperCase()} WAVE`
+                              : "TIME DOMAIN"}
+                      </span>
+                      <span className="rounded border border-border bg-secondary/80 px-2 py-0.5 text-muted-foreground uppercase">
+                        {isChicken
+                          ? "WAV RECORDING"
+                          : mathSignal?.parametricCurve
+                            ? (mathSignal.parametricCurve.domainDisplay ?? "PARAMETRIC CURVE")
+                            : mathSignal?.equationDisplay ?? `${current.baseFreq} Hz`}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -880,10 +1202,34 @@ function FilteringLab() {
                 <div className="grid content-start gap-4">
                   <LabWave
                     label="Time domain"
-                    sublabel="noisy ingredient signal"
-                    samples={rawSamples}
+                    sublabel={
+                      isClean || cleanedThis
+                        ? "clean ingredient signal"
+                        : applied
+                          ? "filtered ingredient signal"
+                          : "noisy ingredient signal"
+                    }
+                    samples={
+                      isClean || cleanedThis
+                        ? cleanSamples
+                        : applied
+                          ? filteredSamples
+                          : rawSamples
+                    }
+                    parametricPoints={mainParametricPoints}
+                    square={isSquareShape}
                     tall
-                    onPlay={() => handlePlaySignal("raw-main", rawSamples)}
+                    tone={applied && !isClean && !cleanedThis ? "warm" : "signal"}
+                    onPlay={() =>
+                      handlePlaySignal(
+                        "raw-main",
+                        isClean || cleanedThis
+                          ? cleanSamples
+                          : applied
+                            ? filteredSamples
+                            : rawSamples,
+                      )
+                    }
                     playLabel={activePlayerId === "raw-main" ? "⏸ Pause" : "▶ Play"}
                   />
                   <p className="font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase">
@@ -972,13 +1318,23 @@ function FilteringLab() {
                   label="Raw Input"
                   sublabel="noisy ingredient signal"
                   samples={rawSamples}
+                  parametricPoints={rawParametricPoints}
+                  square={isSquareShape}
                   onPlay={() => handlePlaySignal("raw", rawSamples)}
                   playLabel={activePlayerId === "raw" ? "⏸ Pause" : "▶ Play Raw"}
                 />
                 <LabWave
                   label="Filtered Output"
-                  sublabel={applied ? "player filtered result" : "filter not applied"}
+                  sublabel={
+                    applied
+                      ? isClean || cleanedThis
+                        ? "clean signal matched"
+                        : "player filtered result"
+                      : "filter not applied"
+                  }
                   samples={filteredSamples}
+                  parametricPoints={filteredParametricPoints}
+                  square={isSquareShape}
                   tone="warm"
                   onPlay={() => handlePlaySignal("filtered", filteredSamples)}
                   playLabel={activePlayerId === "filtered" ? "⏸ Pause" : "▶ Play Output"}
@@ -987,6 +1343,8 @@ function FilteringLab() {
                   label="Target Clean Signal"
                   sublabel="desired pure waveform"
                   samples={cleanSamples}
+                  parametricPoints={targetParametricPoints}
+                  square={isSquareShape}
                   onPlay={() => handlePlaySignal("clean", cleanSamples)}
                   playLabel={activePlayerId === "clean" ? "⏸ Pause" : "▶ Play Target"}
                 />

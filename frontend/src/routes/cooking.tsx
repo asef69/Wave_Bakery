@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ChefFourier } from "@/components/game/ChefFourier";
 import { DragTutorialCue } from "@/components/game/DragTutorialCue";
@@ -9,6 +9,7 @@ import { MiniWave } from "@/components/game/MiniWave";
 import { SignalAudioPlayer } from "@/lib/audio";
 import {
   computeConvolvedSignal,
+  getRecipeRunSession,
   recipes,
   recordStageAccuracy,
   saveCookedSignal,
@@ -19,6 +20,7 @@ import {
   usePipelineStageSignal,
   useRecipeProgress,
 } from "@/lib/recipes";
+import { invalidateDownstreamStages } from "@/lib/pipeline";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/cooking")({
@@ -56,13 +58,53 @@ function CookingLab() {
   const requiredMethod = methods.find((m) => m.id === recipe.cookingMethod.id) ?? methods[0]!;
 
   const alreadyCompleted = unlockedStep >= 7;
-  const [method, setMethod] = useState<(typeof methods)[number] | null>(() =>
-    alreadyCompleted ? requiredMethod : null,
-  );
-  const [pos, setPos] = useState(() => (alreadyCompleted ? 100 : 0));
-  const [cooked, setCooked] = useState(() => alreadyCompleted);
-  const [showDragCue, setShowDragCue] = useState(() => !alreadyCompleted);
+
+  const storedCooked = useMemo(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const key = `wavebakery_pipeline_${recipe.id}_cooked`;
+        const stored = window.localStorage.getItem(key);
+        if (stored) {
+          const parsed = JSON.parse(stored) as { metadata?: { methodId?: string; pos?: number }; samples?: number[] };
+          if (Array.isArray(parsed?.samples) && parsed.samples.length > 0) {
+            return parsed;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return null;
+  }, [recipe.id]);
+
+  const initialMethod = useMemo(() => {
+    if (storedCooked?.metadata?.methodId) {
+      const found = methods.find((m) => m.id === storedCooked.metadata?.methodId);
+      if (found) return found;
+    }
+    const session = getRecipeRunSession();
+    if (session?.cookingAppliance) {
+      const found = methods.find((m) => m.id === session.cookingAppliance);
+      if (found) return found;
+    }
+    return alreadyCompleted ? requiredMethod : null;
+  }, [storedCooked, alreadyCompleted, requiredMethod]);
+
+  const initialPos = useMemo(() => {
+    if (typeof storedCooked?.metadata?.pos === "number") {
+      return storedCooked.metadata.pos;
+    }
+    const session = getRecipeRunSession();
+    if (typeof session?.cookingPos === "number") return session.cookingPos;
+    return alreadyCompleted ? 100 : 0;
+  }, [storedCooked, alreadyCompleted]);
+
+  const [method, setMethod] = useState<(typeof methods)[number] | null>(initialMethod);
+  const [pos, setPos] = useState(initialPos);
+  const [cooked, setCooked] = useState(() => storedCooked != null || alreadyCompleted);
+  const [showDragCue, setShowDragCue] = useState(() => storedCooked == null && !alreadyCompleted);
   const [player, setPlayer] = useState<SignalAudioPlayer | null>(null);
+  const userModifiedRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -108,6 +150,11 @@ function CookingLab() {
   useEffect(() => {
     if (isCookingComplete) {
       unlock(7);
+
+      if (userModifiedRef.current) {
+        invalidateDownstreamStages(recipe.id, "cooked");
+      }
+
       const methodScore = isTargetSelected ? 50 : 15;
       const depthScore = Math.min(50, Math.round((currentPos / 100) * 50));
       recordStageAccuracy("cooking", methodScore + depthScore);
@@ -328,6 +375,7 @@ function CookingLab() {
                 <button
                   key={m.id}
                   onClick={() => {
+                    userModifiedRef.current = true;
                     setMethod(m);
                     setCooked(false);
                   }}
@@ -431,8 +479,12 @@ function CookingLab() {
               min={0}
               max={100}
               value={pos}
-              onPointerDown={() => setShowDragCue(false)}
+              onPointerDown={() => {
+                userModifiedRef.current = true;
+                setShowDragCue(false);
+              }}
               onChange={(e) => {
+                userModifiedRef.current = true;
                 setShowDragCue(false);
                 setPos(Number(e.target.value));
               }}
@@ -483,6 +535,7 @@ function CookingLab() {
               className="uppercase"
               disabled={!method && !alreadyCompleted}
               onClick={() => {
+                userModifiedRef.current = true;
                 if (!method) setMethod(requiredMethod);
                 setPos(100);
                 setCooked(true);

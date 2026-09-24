@@ -161,7 +161,7 @@ def test_over_filtering_is_detected_and_rejected(client, chef):
     sid = client.post('/api/sessions', json={'recipe_id': 'toast'},
                       headers=auth(chef)).json()['id']
     r = client.post(f'/api/sessions/{sid}/ingredients/0/filter',
-                    json={'bands': [], 'tools': [{'kind': 'lowpass', 'cutoff': 60}]},
+                    json={'bands': [], 'tools': [{'kind': 'lowpass', 'cutoff': 15}]},
                     headers=auth(chef)).json()
     assert r['prep']['over_filtered'] is True
     assert client.post(f'/api/sessions/{sid}/ingredients/0/accept',

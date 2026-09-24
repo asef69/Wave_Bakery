@@ -59,7 +59,7 @@ function CompleteScreen() {
     if (finalScore > 0) {
       saveRecipeBestScore(recipe.id, finalScore);
     }
-    saveCurrentDishScoreToLeaderboard({ recipeId: recipe.id });
+    saveCurrentDishScoreToLeaderboard({ recipeId: recipe.id, score: finalScore });
     return () => {
       if (player) player.destroy();
     };

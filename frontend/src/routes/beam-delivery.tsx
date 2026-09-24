@@ -113,14 +113,14 @@ function PrecisionOvenScreen() {
   const [pipelineCooked] = usePipelineStageSignal(recipe.id, "cooked");
 
   const dishSamples = useMemo(() => {
-    if (cookedSignal.samples && cookedSignal.samples.length > 0) {
-      return cookedSignal.samples;
-    }
     if (pipelineCooked.samples && pipelineCooked.samples.length > 0) {
       return pipelineCooked.samples;
     }
+    if (cookedSignal.samples && cookedSignal.samples.length > 0) {
+      return cookedSignal.samples;
+    }
     return getDefaultPipelineSignal(recipe.id, "cooked").samples;
-  }, [cookedSignal.samples, pipelineCooked.samples, recipe.id]);
+  }, [pipelineCooked.samples, cookedSignal.samples, recipe.id]);
 
   // Target reference dish signal for recipe
   const targetSignal = useMemo(() => getIdealDishSignal(recipe.id), [recipe.id]);
@@ -341,10 +341,16 @@ function PrecisionOvenScreen() {
       pos: 100,
       timestamp: Date.now(),
       samples: reconstructedSamples,
+      metadata: {
+        ovenSamplingRate: activeRate,
+        spectrumMatchPercent,
+        timeDomainSimilarity,
+        overallScore,
+      },
     });
-    savePipelineStageSignal(recipe.id, "cooked", {
+    savePipelineStageSignal(recipe.id, "delivered", {
       recipeId: recipe.id,
-      stage: "cooked",
+      stage: "delivered",
       samples: reconstructedSamples,
       sampleRate: 44100,
       duration: 3.0,

@@ -1578,18 +1578,6 @@ export function computeSuperpositionPath(
     return Boolean(math?.parametricCurve);
   });
 
-  // Helper to sample the backend array at normalized time u
-  const sampleBackend = (u: number) => {
-    if (!backendMixedSamples || backendMixedSamples.length === 0) return 0;
-    const len = backendMixedSamples.length;
-    const exactIdx = u * (len - 1);
-    const idx = Math.floor(exactIdx);
-    const frac = exactIdx - idx;
-    const s0 = backendMixedSamples[idx] ?? 0;
-    const s1 = backendMixedSamples[Math.min(len - 1, idx + 1)] ?? s0;
-    return s0 + frac * (s1 - s0);
-  };
-
   // CASE 1: Exactly ONE ingredient in the bowl
   if (inBowlIngredients.length === 1) {
     const ing = inBowlIngredients[0]!;
@@ -1599,50 +1587,27 @@ export function computeSuperpositionPath(
         ing.name.toLowerCase().includes(k),
       );
       const pts = math.parametricCurve.generatePoints(601);
-      
-      // If we have backend samples, map their normalized Y values onto the parametric curve's Y bounds
-      if (backendMixedSamples && backendMixedSamples.length > 0) {
-        // Find parametric Y bounds to scale backend samples into
-        let minY = Infinity;
-        let maxY = -Infinity;
-        for (const p of pts) {
-          if (p.y < minY) minY = p.y;
-          if (p.y > maxY) maxY = p.y;
-        }
-        const yCenter = (minY + maxY) / 2;
-        const yRange = (maxY - minY) || 1;
-        // The backend samples are roughly [-1, 1], so we map [-1, 1] -> [minY, maxY]
-        for (let i = 0; i < pts.length; i++) {
-          const point = pts[i];
-          if (!point) continue;
-          const u = i / (pts.length - 1);
-          const backendY = sampleBackend(u);
-          // Overwrite the parametric Y with the backend DSP Y (scaled to the shape's original bounding box)
-          point.y = yCenter + backendY * (yRange / 2.0) * 1.5;
-        }
-      }
-
       return parametricPath(width, height, pts, 24, isClosed);
     }
-    const samples = backendMixedSamples?.length ? backendMixedSamples : (ingredientSamplesMap[ing.name] ?? []);
+    const samples = ingredientSamplesMap[ing.name] ?? (backendMixedSamples?.length ? backendMixedSamples : []);
     return samplesToPath(samples, width, height, 0.35);
   }
 
   // CASE 2: At least one parametric ingredient in the bowl
   if (parametricIngredients.length > 0) {
     const sampleCount = 601;
-    const isClosed = !inBowlIngredients.some((ing) =>
+    const hasOpen = inBowlIngredients.some((ing) =>
       ["patty", "lettuce", "noodle"].some((k) =>
         ing.name.toLowerCase().includes(k),
       ),
     );
-
-    const pts: Array<{ x: number; y: number }> = [];
     const oneDList = inBowlIngredients.filter(
       (ing) => !getMathematicalSignal(ing.name)?.parametricCurve,
     );
+    const isClosed = !hasOpen && oneDList.length === 0;
 
-    // If using backend samples, we only need X from parametric curves
+    const pts: Array<{ x: number; y: number }> = [];
+
     for (let i = 0; i < sampleCount; i++) {
       const u = i / (sampleCount - 1);
       let sumX = 0;
@@ -1654,26 +1619,18 @@ export function computeSuperpositionPath(
         const t = curve.tMin + u * (curve.tMax - curve.tMin);
         const pt = curve.evaluate(t);
         sumX += pt.x;
-        sumY += pt.y; // base parametric Y
+        sumY += pt.y;
       }
 
-      if (backendMixedSamples && backendMixedSamples.length > 0) {
-        // If we have a true backend mix, replace sumY entirely.
-        // We scale it assuming parametric sums usually fall in a reasonable bound.
-        // We multiply by parametricIngredients.length to roughly match the size of the combined shapes
-        sumY = sampleBackend(u) * 2.0 * parametricIngredients.length;
-      } else {
-        // Fallback local geometric sum for 1D ingredients
-        for (const ing of oneDList) {
-          const samples = ingredientSamplesMap[ing.name];
-          if (samples && samples.length > 0) {
-            const exactIdx = u * (samples.length - 1);
-            const idx = Math.floor(exactIdx);
-            const frac = exactIdx - idx;
-            const s0 = samples[idx] ?? 0;
-            const s1 = samples[Math.min(samples.length - 1, idx + 1)] ?? s0;
-            sumY += s0 + frac * (s1 - s0);
-          }
+      for (const ing of oneDList) {
+        const samples = ingredientSamplesMap[ing.name];
+        if (samples && samples.length > 0) {
+          const exactIdx = u * (samples.length - 1);
+          const idx = Math.floor(exactIdx);
+          const frac = exactIdx - idx;
+          const s0 = samples[idx] ?? 0;
+          const s1 = samples[Math.min(samples.length - 1, idx + 1)] ?? s0;
+          sumY += s0 + frac * (s1 - s0);
         }
       }
 

@@ -1425,7 +1425,7 @@ export function resetRecipeProgress(recipeId?: string) {
       window.localStorage.removeItem(`wavebakery_filtered_ingredients_${activeId}`);
       window.localStorage.removeItem(`wavebakery_cooked_signal_${activeId}`);
 
-      const stages = ["raw", "filtered", "mixed", "seasoned", "marinated", "cooked"];
+      const stages = ["raw", "filtered", "mixed", "seasoned", "marinated", "cooked", "delivered"];
       for (const stage of stages) {
         window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_${stage}`);
       }
@@ -1795,6 +1795,7 @@ export interface CookedSignalData {
   pos: number;
   timestamp: number;
   samples: number[];
+  metadata?: Record<string, unknown>;
 }
 
 const COOKING_METHOD_CONFIGS: Record<string, { name: string; freq: number; amp: number }> = {

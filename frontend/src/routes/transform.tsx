@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Pause, Play, RotateCcw } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ChefFourier } from "@/components/game/ChefFourier";
 import { DragTutorialCue } from "@/components/game/DragTutorialCue";
@@ -13,6 +13,7 @@ import {
   getRecipeRunSession,
   recipes,
   recordStageAccuracy,
+  resampleSignal,
   savePipelineStageSignal,
   syncSessionParamsToBackend,
   updateRecipeRunSession,
@@ -20,6 +21,7 @@ import {
   usePipelineStageSignal,
   useRecipeProgress,
 } from "@/lib/recipes";
+import { invalidateDownstreamStages } from "@/lib/pipeline";
 
 export const Route = createFileRoute("/transform")({
   head: () => ({
@@ -64,9 +66,46 @@ function SeasoningLab() {
   const targetAmp = recipe.seasoningTarget.amplitude;
   const targetFreq = recipe.seasoningTarget.frequency;
 
-  const [amp, setAmp] = useState(0.4);
-  const [freq, setFreq] = useState(0.4);
-  const [showDragCue, setShowDragCue] = useState(true);
+  const storedSeasoned = useMemo(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const key = `wavebakery_pipeline_${recipe.id}_seasoned`;
+        const stored = window.localStorage.getItem(key);
+        if (stored) {
+          const parsed = JSON.parse(stored) as { metadata?: { amplitude?: number; freqScale?: number }; samples?: number[] };
+          if (Array.isArray(parsed?.samples) && parsed.samples.length > 0) {
+            return parsed;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return null;
+  }, [recipe.id]);
+
+  const initialAmp = useMemo(() => {
+    if (typeof storedSeasoned?.metadata?.amplitude === "number") {
+      return storedSeasoned.metadata.amplitude;
+    }
+    const session = getRecipeRunSession();
+    if (typeof session?.seasonGain === "number") return session.seasonGain;
+    return 0.4;
+  }, [storedSeasoned]);
+
+  const initialFreq = useMemo(() => {
+    if (typeof storedSeasoned?.metadata?.freqScale === "number") {
+      return storedSeasoned.metadata.freqScale;
+    }
+    const session = getRecipeRunSession();
+    if (typeof session?.seasonFreq === "number") return session.seasonFreq;
+    return 0.4;
+  }, [storedSeasoned]);
+
+  const [amp, setAmp] = useState(initialAmp);
+  const [freq, setFreq] = useState(initialFreq);
+  const [showDragCue, setShowDragCue] = useState(() => storedSeasoned == null);
+  const userModifiedRef = useRef(false);
 
   const playerSeasoned = useMemo(() => {
     return computeSeasonedSignal(mixedSignal, amp, freq);
@@ -167,12 +206,18 @@ function SeasoningLab() {
     if (done || unlockedStep >= 5) {
       if (done) unlock(5);
       
+      if (userModifiedRef.current) {
+        invalidateDownstreamStages(recipe.id, "seasoned");
+      }
+
       recordStageAccuracy("seasoning", accuracy);
       updateRecipeRunSession({
         seasonGain: amp,
         seasonFreq: freq,
         seasoningAccuracy: accuracy,
       });
+
+      savePipelineStageSignal(recipe.id, "seasoned", playerSeasoned);
 
       const session = getRecipeRunSession();
       if (session?.backendSessionId) {
@@ -183,26 +228,9 @@ function SeasoningLab() {
           marinate: session.marinateTime ?? recipe.marinateTarget.timeScale,
           appliances: [session.cookingAppliance || recipe.cookingMethod.id],
         };
-        api.setParams(session.backendSessionId, payload).then((stages) => {
-          if (stages.blended?.plot && stages.blended.plot.length > 0) {
-            savePipelineStageSignal(recipe.id, "seasoned", {
-              recipeId: recipe.id,
-              stage: "seasoned",
-              samples: stages.blended.plot,
-              sampleRate: stages.blended.sample_rate ?? playerSeasoned.sampleRate,
-              duration: playerSeasoned.duration,
-              frequency: playerSeasoned.frequency,
-              timestamp: Date.now(),
-              metadata: { source: "backend-stage-blended", amp, freq },
-            });
-          } else {
-            savePipelineStageSignal(recipe.id, "seasoned", playerSeasoned);
-          }
-        }).catch(() => {
-          savePipelineStageSignal(recipe.id, "seasoned", playerSeasoned);
+        api.setParams(session.backendSessionId, payload).catch((err) => {
+          console.warn("Backend setParams sync error:", err);
         });
-      } else {
-        savePipelineStageSignal(recipe.id, "seasoned", playerSeasoned);
       }
     }
   }, [done, unlockedStep, playerSeasoned, recipe.id, unlock, accuracy, amp, freq, recipe.cookingMethod.id, recipe.marinateTarget.timeScale]);
@@ -504,12 +532,17 @@ function SeasoningLab() {
                 </div>
               ) : null
             }
-            onDragStart={() => setShowDragCue(false)}
+            onDragStart={() => {
+              userModifiedRef.current = true;
+              setShowDragCue(false);
+            }}
             onChange={(v) => {
+              userModifiedRef.current = true;
               setShowDragCue(false);
               setAmp(v);
             }}
             onStep={(d) => {
+              userModifiedRef.current = true;
               setShowDragCue(false);
               setAmp((v) => Math.min(2, Math.max(0.4, +(v + d).toFixed(2))));
             }}
@@ -524,12 +557,17 @@ function SeasoningLab() {
             max={2}
             step={0.05}
             value={freq}
-            onDragStart={() => setShowDragCue(false)}
+            onDragStart={() => {
+              userModifiedRef.current = true;
+              setShowDragCue(false);
+            }}
             onChange={(e) => {
+              userModifiedRef.current = true;
               setShowDragCue(false);
               setFreq(e);
             }}
             onStep={(d) => {
+              userModifiedRef.current = true;
               setShowDragCue(false);
               setFreq((v) => Math.min(2, Math.max(0.4, +(v + d).toFixed(2))));
             }}

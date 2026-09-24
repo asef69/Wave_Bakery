@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Pause, Play, RotateCcw } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ChefFourier } from "@/components/game/ChefFourier";
 import { DragTutorialCue } from "@/components/game/DragTutorialCue";
@@ -14,6 +14,7 @@ import {
   getRecipeRunSession,
   recipes,
   recordStageAccuracy,
+  resampleSignal,
   savePipelineStageSignal,
   syncSessionParamsToBackend,
   updateRecipeRunSession,
@@ -21,6 +22,7 @@ import {
   usePipelineStageSignal,
   useRecipeProgress,
 } from "@/lib/recipes";
+import { invalidateDownstreamStages } from "@/lib/pipeline";
 
 export const Route = createFileRoute("/marinate")({
   head: () => ({
@@ -68,8 +70,37 @@ function MarinatingLab() {
   const [unlockedStep, unlock] = useRecipeProgress();
   const [seasonedSignal] = usePipelineStageSignal(recipe.id, "seasoned");
   const targetTime = recipe.marinateTarget.timeScale;
-  const [timeScale, setTimeScale] = useState(MIN_TIME);
-  const [showDragCue, setShowDragCue] = useState(true);
+
+  const storedMarinated = useMemo(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const key = `wavebakery_pipeline_${recipe.id}_marinated`;
+        const stored = window.localStorage.getItem(key);
+        if (stored) {
+          const parsed = JSON.parse(stored) as { metadata?: { timeScale?: number }; samples?: number[] };
+          if (Array.isArray(parsed?.samples) && parsed.samples.length > 0) {
+            return parsed;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return null;
+  }, [recipe.id]);
+
+  const initialTimeScale = useMemo(() => {
+    if (typeof storedMarinated?.metadata?.timeScale === "number") {
+      return storedMarinated.metadata.timeScale;
+    }
+    const session = getRecipeRunSession();
+    if (typeof session?.marinateTime === "number") return session.marinateTime;
+    return MIN_TIME;
+  }, [storedMarinated]);
+
+  const [timeScale, setTimeScale] = useState(initialTimeScale);
+  const [showDragCue, setShowDragCue] = useState(() => storedMarinated == null);
+  const userModifiedRef = useRef(false);
 
   const playerMarinated = useMemo(() => {
     return computeMarinatedSignal(seasonedSignal, timeScale);
@@ -164,11 +195,17 @@ function MarinatingLab() {
     if (done || unlockedStep >= 6) {
       if (done) unlock(6);
       
+      if (userModifiedRef.current) {
+        invalidateDownstreamStages(recipe.id, "marinated");
+      }
+
       recordStageAccuracy("marinating", accuracy);
       updateRecipeRunSession({
         marinateTime: timeScale,
         marinatingAccuracy: accuracy,
       });
+
+      savePipelineStageSignal(recipe.id, "marinated", playerMarinated);
 
       const session = getRecipeRunSession();
       if (session?.backendSessionId) {
@@ -179,26 +216,9 @@ function MarinatingLab() {
           marinate: timeScale,
           appliances: [session.cookingAppliance || recipe.cookingMethod.id],
         };
-        api.setParams(session.backendSessionId, payload).then((stages) => {
-          if (stages.marinated?.plot && stages.marinated.plot.length > 0) {
-            savePipelineStageSignal(recipe.id, "marinated", {
-              recipeId: recipe.id,
-              stage: "marinated",
-              samples: stages.marinated.plot,
-              sampleRate: stages.marinated.sample_rate ?? playerMarinated.sampleRate,
-              duration: playerMarinated.duration,
-              frequency: playerMarinated.frequency,
-              timestamp: Date.now(),
-              metadata: { source: "backend-stage-marinated", timeScale },
-            });
-          } else {
-            savePipelineStageSignal(recipe.id, "marinated", playerMarinated);
-          }
-        }).catch(() => {
-          savePipelineStageSignal(recipe.id, "marinated", playerMarinated);
+        api.setParams(session.backendSessionId, payload).catch((err) => {
+          console.warn("Backend setParams sync error:", err);
         });
-      } else {
-        savePipelineStageSignal(recipe.id, "marinated", playerMarinated);
       }
     }
   }, [done, unlockedStep, playerMarinated, recipe.id, unlock, accuracy, timeScale, recipe.cookingMethod.id, recipe.seasoningTarget]);
@@ -538,6 +558,7 @@ function MarinatingLab() {
                 variant="secondary"
                 size="sm"
                 onClick={() => {
+                  userModifiedRef.current = true;
                   setShowDragCue(false);
                   setTimeScale((v) => Math.max(MIN_TIME, +(v - STEP_TIME).toFixed(2)));
                 }}
@@ -551,8 +572,12 @@ function MarinatingLab() {
                 max={MAX_TIME}
                 step={STEP_TIME}
                 value={timeScale}
-                onPointerDown={() => setShowDragCue(false)}
+                onPointerDown={() => {
+                  userModifiedRef.current = true;
+                  setShowDragCue(false);
+                }}
                 onChange={(e) => {
+                  userModifiedRef.current = true;
                   setShowDragCue(false);
                   setTimeScale(Number(e.target.value));
                 }}
@@ -563,6 +588,7 @@ function MarinatingLab() {
                 variant="secondary"
                 size="sm"
                 onClick={() => {
+                  userModifiedRef.current = true;
                   setShowDragCue(false);
                   setTimeScale((v) => Math.min(MAX_TIME, +(v + STEP_TIME).toFixed(2)));
                 }}

@@ -22,8 +22,11 @@ import {
 import {
   getFilteredIngredient,
   getRecipeIngredientSamples,
+  invalidateDownstreamStages,
+  type PipelineSignal,
+  resampleSignal,
 } from "@/lib/pipeline";
-import { parametricPath, samplesToPath } from "@/lib/signals";
+import { computeSuperpositionPath, parametricPath, samplesToPath } from "@/lib/signals";
 import { getCachedChickenAudio } from "@/lib/chicken-audio";
 import { cn } from "@/lib/utils";
 
@@ -204,12 +207,36 @@ function MixingLab() {
     return map;
   }, [recipe.id, trayIngredients]);
 
-  const [bowl, setBowl] = useState<string[]>([]);
+  const storedMixed = useMemo(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const key = `wavebakery_pipeline_${recipe.id}_mixed`;
+        const stored = window.localStorage.getItem(key);
+        if (stored) {
+          const parsed = JSON.parse(stored) as PipelineSignal;
+          if (Array.isArray(parsed?.samples) && parsed.samples.length > 0) {
+            return parsed;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return null;
+  }, [recipe.id]);
+
+  const [bowl, setBowl] = useState<string[]>(() => {
+    const ings = storedMixed?.metadata?.["ingredients"];
+    if (ings && Array.isArray(ings)) {
+      return ings as string[];
+    }
+    return [];
+  });
   const [dragging, setDragging] = useState<string | null>(null);
   const [hovering, setHovering] = useState(false);
-  const [mixed, setMixed] = useState(false);
+  const [mixed, setMixed] = useState(() => storedMixed != null);
   const [playing, setPlaying] = useState(false);
-  const [showDragCue, setShowDragCue] = useState(true);
+  const [showDragCue, setShowDragCue] = useState(() => storedMixed == null);
 
   const total = trayIngredients.length;
   const inBowl = trayIngredients.filter((i) => bowl.includes(i.name));
@@ -223,22 +250,24 @@ function MixingLab() {
   // Once handleMix confirms the backend's real superposition, this holds
   // those exact samples so the post-mix graph displays the same signal that
   // was persisted for Seasoning — not the frontend-only preview.
-  const [committedMixedSamples, setCommittedMixedSamples] = useState<number[] | null>(null);
+  const [committedMixedSamples, setCommittedMixedSamples] = useState<number[] | null>(
+    () => storedMixed?.samples ?? null,
+  );
 
-  // The solid "combined" trace must render the exact signal that gets saved
-  // for this stage and carried into Seasoning — not a separate geometric
-  // superposition of parametric curves, which produces a visually different
-  // shape for any bowl containing a parametric ingredient (lettuce, tomato,
-  // onion, cucumber, carrot, egg, sauce) and made the Mixing Lab preview
-  // disagree with what Seasoning showed next. Once handleMix has confirmed
-  // the backend's real superposition, prefer that exact array.
+  // The solid "combined" trace renders the faithful superposition of ingredients
+  // in the bowl: exact canonical shape for single ingredients (overlapping perfectly),
+  // true 2D parametric superposition for special ingredients, and sample-wise
+  // addition for 1D ingredients.
   const superpositionPath = useMemo(() => {
-    if (mixed && committedMixedSamples) {
-      return samplesToPath(committedMixedSamples, W, H, 0.4);
-    }
-    if (!mixedSignal || inBowl.length === 0) return "";
-    return samplesToPath(mixedSignal.samples, W, H, 0.4);
-  }, [mixed, committedMixedSamples, mixedSignal, inBowl.length]);
+    if (inBowl.length === 0) return "";
+    return computeSuperpositionPath(
+      inBowl,
+      ingredientSamplesMap,
+      W,
+      H,
+      mixed && committedMixedSamples ? committedMixedSamples : null,
+    );
+  }, [inBowl, ingredientSamplesMap, mixed, committedMixedSamples]);
 
   const [player, setPlayer] = useState<SignalAudioPlayer | null>(null);
 
@@ -299,12 +328,9 @@ function MixingLab() {
     const mixAcc = Math.round((matchCount / Math.max(1, recipeSet.size)) * 100);
     recordStageAccuracy("mixing", mixAcc);
 
-    // Persist the locally-computed mix immediately so the game never stalls
-    // waiting on the network, then — when the bowl holds the full recipe and
-    // a backend session exists — replace it with the backend's actual
-    // superposition (stage_mix, a real sample-wise sum of every accepted,
-    // server-filtered ingredient) so Seasoning receives the true backend
-    // mixed result rather than a frontend-only approximation.
+    // Invalidate downstream stages since mixing output has changed
+    invalidateDownstreamStages(recipe.id, "mixed");
+
     savePipelineStageSignal(recipe.id, "mixed", mixedSignal);
 
     const session = getRecipeRunSession();
@@ -312,22 +338,8 @@ function MixingLab() {
     if (session?.backendSessionId && isFullRecipeBowl) {
       api
         .getStages(session.backendSessionId)
-        .then((stages) => {
-          if (!stages.mixed?.plot || stages.mixed.plot.length === 0) return;
-          savePipelineStageSignal(recipe.id, "mixed", {
-            recipeId: recipe.id,
-            stage: "mixed",
-            samples: stages.mixed.plot,
-            sampleRate: stages.mixed.sample_rate ?? mixedSignal.sampleRate,
-            duration: mixedSignal.duration,
-            frequency: mixedSignal.frequency,
-            timestamp: Date.now(),
-            metadata: { source: "backend-stage-mix" },
-          });
-          setCommittedMixedSamples(stages.mixed.plot);
-        })
         .catch((err) => {
-          console.warn("Backend mix fetch error (keeping local mix):", err);
+          console.warn("Backend mix sync error:", err);
         });
     }
 
@@ -733,52 +745,19 @@ function MixingLab() {
                         }
 
                         // Closed parametric contours (Egg, Tomato, Onion, Sauce)
-                        const closedList = inBowl.filter((i) => {
-                          const m = getMathematicalSignal(i.name);
-                          return (
-                            Boolean(m?.parametricCurve) &&
-                            !["patty", "lettuce", "noodle"].some((k) =>
-                              i.name.toLowerCase().includes(k),
-                            )
-                          );
-                        });
-                        const closedIdx = closedList.findIndex((i) => i.name === ing.name);
-                        const totalClosed = closedList.length;
                         const pts = math.parametricCurve.generatePoints(601);
-
-                        if (totalClosed <= 1) {
-                          return (
-                            <path
-                              key={ing.name}
-                              d={parametricPath(W, H, pts, 24, true)}
-                              fill="none"
-                              stroke={ing.trace}
-                              strokeWidth="3.5"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeDasharray={idx % 2 === 0 ? "10 6" : "4 6"}
-                              opacity="0.95"
-                            />
-                          );
-                        }
-
-                        const slotWidth = W / totalClosed;
                         return (
-                          <g
+                          <path
                             key={ing.name}
-                            transform={`translate(${closedIdx * slotWidth}, 0)`}
-                          >
-                            <path
-                              d={parametricPath(slotWidth, H, pts, 24, true)}
-                              fill="none"
-                              stroke={ing.trace}
-                              strokeWidth="3.5"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeDasharray={idx % 2 === 0 ? "10 6" : "4 6"}
-                              opacity="0.95"
-                            />
-                          </g>
+                            d={parametricPath(W, H, pts, 24, true)}
+                            fill="none"
+                            stroke={ing.trace}
+                            strokeWidth="3.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeDasharray={idx % 2 === 0 ? "10 6" : "4 6"}
+                            opacity="0.95"
+                          />
                         );
                       }
 

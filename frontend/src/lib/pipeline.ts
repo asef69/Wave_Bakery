@@ -3,7 +3,7 @@ import { type CookedSignalData, getActiveRecipe, recipes } from "./recipes";
 import { CHICKEN_SIGNAL_DEFINITION, getMathematicalSignal, MATHEMATICAL_SIGNALS } from "./signals";
 import { getStaticCookingKernel, type CookingMethodType } from "./cooking-audio";
 
-export type PipelineStage = "raw" | "filtered" | "mixed" | "seasoned" | "marinated" | "cooked";
+export type PipelineStage = "raw" | "filtered" | "mixed" | "seasoned" | "marinated" | "cooked" | "delivered";
 
 export interface PipelineSignal {
   recipeId: string;
@@ -31,6 +31,20 @@ export function sampleAt(samples: number[], normT: number): number {
   const s0 = samples[idx] ?? 0;
   const s1 = samples[Math.min(len - 1, idx + 1)] ?? s0;
   return s0 + frac * (s1 - s0);
+}
+
+/**
+ * Resamples an array of samples to targetCount points using linear interpolation.
+ */
+export function resampleSignal(samples: number[], targetCount = 401): number[] {
+  if (!samples || samples.length === 0) return new Array(targetCount).fill(0);
+  if (samples.length === targetCount) return samples;
+  const out = new Array<number>(targetCount);
+  for (let i = 0; i < targetCount; i++) {
+    const t = i / (targetCount - 1);
+    out[i] = sampleAt(samples, t);
+  }
+  return out;
 }
 
 /**
@@ -84,6 +98,7 @@ export function saveFilteredIngredient(
       current[ingredientName.toLowerCase()] = samples;
       window.localStorage.setItem(key, JSON.stringify(current));
       window.dispatchEvent(new Event("wavebakery_filtered_ingredients_changed"));
+      invalidateDownstreamStages(recipeId, "filtered");
     } catch {
       // ignore
     }
@@ -384,9 +399,9 @@ export function computeMarinatedSignal(
   const shiftSamples = Math.round((effectiveScale / Math.max(1, seasonedSignal.duration)) * sampleCount);
 
   for (let i = 0; i < sampleCount; i++) {
-    const srcIndex = i - shiftSamples;
-    if (srcIndex >= 0 && srcIndex < inSamples.length) {
-      samples.push(inSamples[srcIndex] ?? 0);
+    const srcNorm = (i - shiftSamples) / (sampleCount - 1);
+    if (srcNorm >= 0 && srcNorm <= 1) {
+      samples.push(sampleAt(inSamples, srcNorm));
     } else {
       samples.push(0);
     }
@@ -446,7 +461,7 @@ export function computeConvolvedSignal(
   const wetMix = Math.min(1, tau * 1.15);
   const outSamples = new Array<number>(sampleCount);
   for (let n = 0; n < sampleCount; n++) {
-    const dry = inSamples[n] ?? 0;
+    const dry = sampleAt(inSamples, n / (sampleCount - 1));
     const wet = convolved[n] ?? 0;
     let s = (1 - wetMix) * dry + wetMix * wet;
     if (methodId === "fry" && tau > 0.1) {
@@ -582,20 +597,6 @@ export function saveExpectedSignal(recipeId: string, signal: PipelineSignal) {
  * computing and persisting it if not already stored.
  */
 export function getExpectedSignal(recipeId: string, sampleCount = 401): PipelineSignal {
-  if (typeof window !== "undefined") {
-    try {
-      const key = `wavebakery_expected_signal_${recipeId}`;
-      const stored = window.localStorage.getItem(key);
-      if (stored) {
-        const parsed = JSON.parse(stored) as PipelineSignal;
-        if (parsed && Array.isArray(parsed.samples) && parsed.samples.length > 0) {
-          return parsed;
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }
   const ideal = getIdealDishSignal(recipeId, sampleCount);
   saveExpectedSignal(recipeId, ideal);
   return ideal;
@@ -644,6 +645,118 @@ export function useExpectedSignal(recipeId?: string, sampleCount = 401): Pipelin
   return signal;
 }
 
+export function hasPipelineStageSignal(recipeId: string, stage: PipelineStage): boolean {
+  if (typeof window !== "undefined") {
+    try {
+      const key = `wavebakery_pipeline_${recipeId}_${stage}`;
+      const stored = window.localStorage.getItem(key);
+      if (stored) {
+        const parsed = JSON.parse(stored) as PipelineSignal;
+        return Array.isArray(parsed?.samples) && parsed.samples.length > 0;
+      }
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+export function clearPipelineStageSignal(recipeId: string, stage: PipelineStage) {
+  if (typeof window !== "undefined") {
+    try {
+      const key = `wavebakery_pipeline_${recipeId}_${stage}`;
+      window.localStorage.removeItem(key);
+      window.dispatchEvent(new Event("wavebakery_pipeline_signal_changed"));
+    } catch {
+      // ignore
+    }
+  }
+}
+
+export function invalidateDownstreamStages(
+  recipeId: string,
+  changedStage: PipelineStage | "filtered",
+) {
+  if (typeof window === "undefined") return;
+
+  const stageOrder: (PipelineStage | "filtered")[] = [
+    "filtered",
+    "mixed",
+    "seasoned",
+    "marinated",
+    "cooked",
+    "delivered",
+  ];
+
+  const changedIdx = stageOrder.indexOf(changedStage);
+  if (changedIdx === -1) return;
+
+  const stagesToInvalidate = stageOrder.slice(changedIdx + 1);
+
+  for (const st of stagesToInvalidate) {
+    if (st === "cooked") {
+      window.localStorage.removeItem(`wavebakery_pipeline_${recipeId}_cooked`);
+      window.localStorage.removeItem(`wavebakery_cooked_signal_${recipeId}`);
+    } else if (st === "delivered") {
+      window.localStorage.removeItem(`wavebakery_pipeline_${recipeId}_delivered`);
+      try {
+        const cookedKey = `wavebakery_cooked_signal_${recipeId}`;
+        const stored = window.localStorage.getItem(cookedKey);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed && parsed.metadata) {
+            delete parsed.metadata.ovenSamplingRate;
+            delete parsed.metadata.spectrumMatchPercent;
+            delete parsed.metadata.timeDomainSimilarity;
+            delete parsed.metadata.overallScore;
+            window.localStorage.setItem(cookedKey, JSON.stringify(parsed));
+          }
+        }
+      } catch {
+        // ignore
+      }
+    } else {
+      window.localStorage.removeItem(`wavebakery_pipeline_${recipeId}_${st}`);
+    }
+  }
+
+  // Also clear session fields for invalidated stages
+  try {
+    const sessionKey = "wavebakery_recipe_session";
+    const storedSession = window.localStorage.getItem(sessionKey);
+    if (storedSession) {
+      const sess = JSON.parse(storedSession);
+      if (stagesToInvalidate.includes("mixed")) {
+        delete sess.mixingAccuracy;
+      }
+      if (stagesToInvalidate.includes("seasoned")) {
+        delete sess.seasonGain;
+        delete sess.seasonFreq;
+        delete sess.seasoningAccuracy;
+      }
+      if (stagesToInvalidate.includes("marinated")) {
+        delete sess.marinateTime;
+        delete sess.marinatingAccuracy;
+      }
+      if (stagesToInvalidate.includes("cooked")) {
+        delete sess.cookingAppliance;
+        delete sess.cookingPos;
+        delete sess.cookingAccuracy;
+      }
+      if (stagesToInvalidate.includes("delivered")) {
+        delete sess.deliveryAccuracy;
+      }
+      window.localStorage.setItem(sessionKey, JSON.stringify(sess));
+      window.dispatchEvent(new Event("wavebakery_session_changed"));
+    }
+  } catch {
+    // ignore
+  }
+
+  window.dispatchEvent(new Event("wavebakery_pipeline_signal_changed"));
+  window.dispatchEvent(new Event("wavebakery_cooked_signal_changed"));
+}
+
 /**
  * Deterministic fallback signal for any stage of a recipe.
  */
@@ -653,27 +766,47 @@ export function getDefaultPipelineSignal(
   sampleCount = 401,
 ): PipelineSignal {
   const recipe = recipes.find((r) => r.id === recipeId) ?? getActiveRecipe();
-  const mixed = computeMixedSignal(recipe.id, recipe.ingredients, sampleCount);
+  const mixed = hasPipelineStageSignal(recipe.id, "mixed")
+    ? getPipelineStageSignal(recipe.id, "mixed", sampleCount)
+    : computeMixedSignal(recipe.id, recipe.ingredients, sampleCount);
+
   if (stage === "raw" || stage === "filtered" || stage === "mixed") {
     return mixed;
   }
-  const seasoned = computeSeasonedSignal(
-    mixed,
-    recipe.seasoningTarget.amplitude,
-    recipe.seasoningTarget.frequency,
-    sampleCount,
-  );
+
+  const seasoned = hasPipelineStageSignal(recipe.id, "seasoned")
+    ? getPipelineStageSignal(recipe.id, "seasoned", sampleCount)
+    : computeSeasonedSignal(
+        mixed,
+        recipe.seasoningTarget.amplitude,
+        recipe.seasoningTarget.frequency,
+        sampleCount,
+      );
   if (stage === "seasoned") return seasoned;
 
-  const marinated = computeMarinatedSignal(seasoned, recipe.marinateTarget.timeScale, sampleCount);
+  const marinated = hasPipelineStageSignal(recipe.id, "marinated")
+    ? getPipelineStageSignal(recipe.id, "marinated", sampleCount)
+    : computeMarinatedSignal(seasoned, recipe.marinateTarget.timeScale, sampleCount);
   if (stage === "marinated") return marinated;
 
-  return computeConvolvedSignal(
-    marinated,
-    recipe.cookingMethod.id as "grill" | "fry" | "bake" | "boil",
-    100,
-    sampleCount,
-  );
+  const cooked = hasPipelineStageSignal(recipe.id, "cooked")
+    ? getPipelineStageSignal(recipe.id, "cooked", sampleCount)
+    : computeConvolvedSignal(
+        marinated,
+        recipe.cookingMethod.id as "grill" | "fry" | "bake" | "boil",
+        100,
+        sampleCount,
+      );
+  if (stage === "cooked") return cooked;
+
+  if (stage === "delivered") {
+    if (hasPipelineStageSignal(recipe.id, "delivered")) {
+      return getPipelineStageSignal(recipe.id, "delivered", sampleCount);
+    }
+    return cooked;
+  }
+
+  return cooked;
 }
 
 /**
@@ -687,7 +820,14 @@ export function savePipelineStageSignal(
   if (typeof window !== "undefined") {
     try {
       const key = `wavebakery_pipeline_${recipeId}_${stage}`;
-      window.localStorage.setItem(key, JSON.stringify(signal));
+      const normalizedSignal: PipelineSignal = {
+        ...signal,
+        samples:
+          signal.samples && signal.samples.length !== 401 && signal.samples.length > 0
+            ? resampleSignal(signal.samples, 401)
+            : signal.samples,
+      };
+      window.localStorage.setItem(key, JSON.stringify(normalizedSignal));
       window.dispatchEvent(new Event("wavebakery_pipeline_signal_changed"));
     } catch {
       // ignore
@@ -707,6 +847,12 @@ export function getPipelineStageSignal(
       if (stored) {
         const parsed = JSON.parse(stored) as PipelineSignal;
         if (parsed && Array.isArray(parsed.samples) && parsed.samples.length > 0) {
+          if (parsed.samples.length !== sampleCount) {
+            return {
+              ...parsed,
+              samples: resampleSignal(parsed.samples, sampleCount),
+            };
+          }
           return parsed;
         }
       }

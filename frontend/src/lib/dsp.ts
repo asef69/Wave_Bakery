@@ -330,8 +330,22 @@ export function normalizedRootMeanSquareError(x: number[], y: number[]): number 
 export function computeSignalSimilarity(playerSamples: number[], targetSamples: number[]): number {
   if (!playerSamples.length || !targetSamples.length) return 0;
 
-  const rXy = normalizedCrossCorrelation(playerSamples, targetSamples);
-  const nrmse = normalizedRootMeanSquareError(playerSamples, targetSamples);
+  let pSamples = playerSamples;
+  if (playerSamples.length !== targetSamples.length) {
+    pSamples = new Array<number>(targetSamples.length);
+    for (let i = 0; i < targetSamples.length; i++) {
+      const t = i / (targetSamples.length - 1);
+      const exact = t * (playerSamples.length - 1);
+      const idx = Math.floor(exact);
+      const frac = exact - idx;
+      const s0 = playerSamples[idx] ?? 0;
+      const s1 = playerSamples[Math.min(playerSamples.length - 1, idx + 1)] ?? s0;
+      pSamples[i] = s0 + frac * (s1 - s0);
+    }
+  }
+
+  const rXy = normalizedCrossCorrelation(pSamples, targetSamples);
+  const nrmse = normalizedRootMeanSquareError(pSamples, targetSamples);
 
   // Shape correlation component (mapped from [-1, 1] to [0, 1])
   const corrScore = Math.max(0, rXy);

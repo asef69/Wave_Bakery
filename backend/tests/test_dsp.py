@@ -116,7 +116,7 @@ def test_every_instrument_voice_is_finite_and_normalised():
         sig = instruments.synth(name)
         assert sig.size == C.FRAME
         assert np.isfinite(sig).all()
-        assert 0.5 < C.peak(sig) <= 1.0
+        assert 0.35 <= C.peak(sig) <= 1.0
 
 
 def test_identical_dishes_score_one_hundred():

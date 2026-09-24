@@ -400,6 +400,7 @@ export function saveCurrentDishScoreToLeaderboard(opts?: {
   recipeId?: string;
   accuracy?: number;
   deliveryBonus?: number;
+  score?: number;
 }): LeaderboardEntry {
   const session = getRecipeRunSession();
   const rawChefName = getChefName() || "Asef";
@@ -444,10 +445,12 @@ export function saveCurrentDishScoreToLeaderboard(opts?: {
     opts?.deliveryBonus ??
     (session?.deliveryAccuracy ? Math.round(session.deliveryAccuracy * 1.5) : 0);
   const timeBonus = remainingSec * 2;
-  const totalScore =
+  const calculatedScore =
     Math.round((similarity * 0.5 + stageAvg * 0.5) * 10 * diffMultiplier) +
     timeBonus +
     deliveryBonus;
+
+  const totalScore = opts?.score ?? session?.finalScore ?? calculatedScore;
 
   const startTime = session?.startTime ?? Date.now();
   const entryId = `run-${activeRecipe.id}-${diff}-${startTime}`;

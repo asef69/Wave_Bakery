@@ -24,6 +24,7 @@ import {
   useRecipeTimer,
 } from "@/lib/recipes";
 import { cn } from "@/lib/utils";
+import { getPipelineStageSignal, hasPipelineStageSignal } from "@/lib/pipeline";
 
 export const Route = createFileRoute("/score")({
   head: () => ({
@@ -83,7 +84,6 @@ function ScoreScreen() {
 
   useEffect(() => {
     unlock(8);
-    completeRecipeRun();
 
     // Submit to server-authoritative backend
     if (session?.backendSessionId && !backendSubmitResult) {
@@ -93,8 +93,6 @@ function ScoreScreen() {
         .then((result) => {
           setBackendSubmitResult(result);
           updateRecipeRunSession({ backendSubmitResult: result });
-          // Persist authoritative best score (only updates if new score is higher)
-          saveRecipeBestScore(recipe.id, result.score);
         })
         .catch((err) => {
           console.warn("Backend session submit error (falling back to client scoring):", err);
@@ -106,10 +104,32 @@ function ScoreScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.backendSessionId, backendSubmitResult, unlock]);
 
-  // Compute local fallback signal similarity
+  const deliveredSignal = useMemo(
+    () => getPipelineStageSignal(recipe.id, "delivered"),
+    [recipe.id],
+  );
+
+  const isDelivered =
+    cookedSignal.metadata?.["ovenSamplingRate"] != null ||
+    deliveredSignal.metadata?.["ovenSamplingRate"] != null ||
+    session?.deliveryAccuracy != null;
+
+  const playerSamples = useMemo(() => {
+    if (hasPipelineStageSignal(recipe.id, "delivered") && deliveredSignal.samples.length > 0) {
+      return deliveredSignal.samples;
+    }
+    if (cookedSignal.samples && cookedSignal.samples.length > 0) {
+      return cookedSignal.samples;
+    }
+    return backendSubmitResult?.player_dish?.plot ?? targetSignal.samples;
+  }, [recipe.id, deliveredSignal, cookedSignal.samples, backendSubmitResult, targetSignal.samples]);
+
+  const targetSamples = targetSignal.samples;
+
+  // Compute signal similarity directly on player's delivered output vs target
   const rawSimilarity = useMemo(() => {
-    return computeSignalSimilarity(cookedSignal.samples, targetSignal.samples);
-  }, [cookedSignal.samples, targetSignal.samples]);
+    return computeSignalSimilarity(playerSamples, targetSamples);
+  }, [playerSamples, targetSamples]);
 
   const similarity = Math.max(0, Math.min(100, Math.round(rawSimilarity)));
 
@@ -134,20 +154,13 @@ function ScoreScreen() {
       : similarity >= 75
         ? "★ ★ ☆"
         : "★ ☆ ☆";
+
   const displaySimilarity =
-    backendSubmitResult?.spectral_similarity != null
-      ? Math.max(0, Math.min(100, Math.round(backendSubmitResult.spectral_similarity * 100)))
-      : similarity;
-
-  const playerSamples =
-    backendSubmitResult?.player_dish?.plot && backendSubmitResult.player_dish.plot.length > 0
-      ? backendSubmitResult.player_dish.plot
-      : cookedSignal.samples;
-
-  const targetSamples =
-    backendSubmitResult?.target?.plot && backendSubmitResult.target.plot.length > 0
-      ? backendSubmitResult.target.plot
-      : targetSignal.samples;
+    isDelivered
+      ? similarity
+      : (backendSubmitResult?.spectral_similarity != null
+          ? Math.max(0, Math.min(100, Math.round(backendSubmitResult.spectral_similarity * 100)))
+          : similarity);
 
   // Generate dynamic customer critique
   const customerCritique = useMemo(() => {
@@ -215,7 +228,7 @@ function ScoreScreen() {
   // and Precision Oven work had zero effect on the final score.
   const baseScore =
     displayScore !== null
-      ? displayScore
+      ? Math.round(displayScore * 10 * diffMultiplier)
       : Math.round((similarity * 0.5 + stageAvg * 0.5) * 10 * diffMultiplier);
   const totalScore = baseScore + timeBonus + deliveryBonus;
 
@@ -254,41 +267,36 @@ function ScoreScreen() {
     return `${displaySimilarity}% similarity. ${lowest?.tip ?? "Keep refining each station to perfect the signal!"}`;
   }, [backendSubmitResult, displaySimilarity, filteringVal, mixingVal, transformVal, cookingVal]);
 
-  // Persist player run to leaderboard + best score
-  useEffect(() => {
-    const diff = session?.difficulty ?? "easy";
-    const startTime = session?.startTime ?? Date.now();
-    const entryId = `run-${recipe.id}-${diff}-${startTime}`;
-    addLeaderboardEntry({
-      id: entryId,
-      chefName: chefName || "Asef",
-      recipeId: recipe.id,
-      difficulty: diff,
-      score: totalScore,
-      accuracy: displaySimilarity,
-      timeRemaining: formattedTime || "0:00",
-      date: "Today",
-    });
-    // Always persist best score — covers: cached backendSubmitResult, fresh result, local fallback
-    const scoreToSave = backendSubmitResult ? Math.round(backendSubmitResult.score) : totalScore;
-    saveRecipeBestScore(recipe.id, scoreToSave);
-  }, [
-    session,
-    recipe.id,
-    chefName,
-    totalScore,
-    displaySimilarity,
-    formattedTime,
-    backendSubmitResult,
-  ]);
-
-  // Persist best score for this recipe
+  // Persist player run to leaderboard + best score + session
   useEffect(() => {
     if (totalScore > 0) {
       saveRecipeBestScore(recipe.id, totalScore);
+      completeRecipeRun(recipe.id, totalScore);
       updateRecipeRunSession({ finalScore: totalScore });
+
+      const diff = session?.difficulty ?? "easy";
+      const startTime = session?.startTime ?? Date.now();
+      const entryId = `run-${recipe.id}-${diff}-${startTime}`;
+      addLeaderboardEntry({
+        id: entryId,
+        chefName: chefName || "Asef",
+        recipeId: recipe.id,
+        difficulty: diff,
+        score: totalScore,
+        accuracy: displaySimilarity,
+        timeRemaining: formattedTime || "0:00",
+        date: "Today",
+      });
     }
-  }, [recipe.id, totalScore]);
+  }, [
+    recipe.id,
+    totalScore,
+    session?.difficulty,
+    session?.startTime,
+    chefName,
+    displaySimilarity,
+    formattedTime,
+  ]);
 
   if (unlockedStep < 7) {
     return (

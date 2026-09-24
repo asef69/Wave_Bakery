@@ -222,8 +222,9 @@ def cheese(n: int = C.FRAME, f0: float = 6.0) -> np.ndarray:
     """Matches frontend evaluateTriangleWave for Cheese: x(t) = (2/pi)
     asin(sin(2*pi*f*t)) with the ingredient's fixed f = 6 (its
     ingredientDetails.freq, not the seeded pitch)."""
+    freq = f0 if (0 < f0 <= 20.0) else 6.0
     t = np.arange(n) / (n - 1)
-    s = np.clip(np.sin(2.0 * np.pi * 6.0 * t), -1.0, 1.0)
+    s = np.clip(np.sin(2.0 * np.pi * freq * t), -1.0, 1.0)
     y = (2.0 / np.pi) * np.arcsin(s)
     return y.astype(np.float32)
 
@@ -251,6 +252,9 @@ def bread(n: int = C.FRAME, f0: float = 3.0) -> np.ndarray:
     f1 = 3.0
     f2 = f1 * 3.0
     y = 0.8 * np.sin(2.0 * np.pi * f1 * t) + 0.6 * np.sin(2.0 * np.pi * f2 * t)
+    peak = float(np.max(np.abs(y)))
+    if peak > 1.0:
+        y = y / peak
     return y.astype(np.float32)
 
 
@@ -452,6 +456,9 @@ def bun(n: int = C.FRAME, f0: float = 0.0) -> np.ndarray:
     base = np.maximum(0.0, 0.5 + 0.5 * np.cos(0.3 * x))
     raw_y = 5.0 * np.power(base, 0.25) + 0.03 * np.cos(9.0 * x)
     y = (raw_y - 2.5) / 2.5
+    peak = float(np.max(np.abs(y)))
+    if peak > 1.0:
+        y = y / peak
     return y.astype(np.float32)
 
 
