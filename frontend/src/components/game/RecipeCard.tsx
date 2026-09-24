@@ -1,6 +1,11 @@
 import { DishGlyph } from "@/components/game/DishGlyph";
 import { GameButton } from "@/components/game/GameButton";
-import { progressLabel, useBestScore, type Recipe } from "@/lib/recipes";
+import {
+  enrichRecipeWithBestScore,
+  progressLabel,
+  useRecipeBestScores,
+  type Recipe,
+} from "@/lib/recipes";
 import { cn } from "@/lib/utils";
 
 const difficultyTone: Record<Recipe["difficulty"], string> = {
@@ -30,8 +35,8 @@ function Stars({ count }: { count: number }) {
 }
 
 export function RecipeCard({ recipe, onCook }: { recipe: Recipe; onCook: () => void }) {
-  const { bestScore: liveBestScore, stars: liveStars } = useBestScore(recipe.id, recipe.bestScore);
-  const displayStars = liveStars ?? recipe.stars;
+  const bestScores = useRecipeBestScores();
+  const effectiveRecipe = enrichRecipeWithBestScore(recipe, bestScores);
 
   return (
     <article className="group kitchen-card relative flex flex-col gap-4 p-5 transition-transform duration-200 hover:-translate-y-1">
@@ -43,34 +48,34 @@ export function RecipeCard({ recipe, onCook }: { recipe: Recipe; onCook: () => v
 
       <header className="flex items-start justify-between gap-2 pl-3">
         <div>
-          <h3 className="font-display text-2xl font-extrabold text-foreground">{recipe.name}</h3>
-          <p className="text-xs font-semibold text-muted-foreground">{recipe.tagline}</p>
+          <h3 className="font-display text-2xl font-extrabold text-foreground">{effectiveRecipe.name}</h3>
+          <p className="text-xs font-semibold text-muted-foreground">{effectiveRecipe.tagline}</p>
         </div>
         <span
           className={cn(
             "shrink-0 rounded-full border bg-secondary/70 px-2.5 py-1 font-mono text-[10px] tracking-[0.16em] uppercase",
-            difficultyTone[recipe.difficulty],
+            difficultyTone[effectiveRecipe.difficulty],
           )}
         >
-          {recipe.difficulty}
+          {effectiveRecipe.difficulty}
         </span>
       </header>
 
       <div className="pl-3">
-        <DishGlyph dish={recipe.id} />
+        <DishGlyph dish={effectiveRecipe.id} />
       </div>
 
       <dl className="grid grid-cols-2 gap-2 pl-3 font-mono text-[11px] tracking-wide text-muted-foreground uppercase">
         <div className="rounded-xl border border-border bg-secondary/50 px-3 py-2">
           <dt>Ingredients</dt>
           <dd className="font-display text-base font-bold text-foreground">
-            {recipe.ingredients.length}
+            {effectiveRecipe.ingredients.length}
           </dd>
         </div>
         <div className="rounded-xl border border-border bg-secondary/50 px-3 py-2">
           <dt>Signal steps</dt>
           <dd className="font-display text-base font-bold text-foreground">
-            {recipe.pipeline.length}
+            {effectiveRecipe.pipeline.length}
           </dd>
         </div>
       </dl>
@@ -78,13 +83,13 @@ export function RecipeCard({ recipe, onCook }: { recipe: Recipe; onCook: () => v
       <div className="flex items-center justify-between gap-2 pl-3">
         <div>
           <p className="font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase">
-            {progressLabel[recipe.progress]}
+            {progressLabel[effectiveRecipe.progress]}
           </p>
           <p className="font-display text-sm font-bold text-foreground">
-            Best {liveBestScore !== null ? `${liveBestScore} pts` : "— — —"}
+            Best {effectiveRecipe.bestScore !== null ? `${effectiveRecipe.bestScore} pts` : "— — —"}
           </p>
         </div>
-        <Stars count={displayStars} />
+        <Stars count={effectiveRecipe.stars} />
       </div>
 
       <div className="pl-3">

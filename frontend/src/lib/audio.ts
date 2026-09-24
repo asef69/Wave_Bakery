@@ -1,4 +1,10 @@
 import { computeCookedSamples, type CookedSignalData } from "@/lib/recipes";
+import {
+  getCachedChickenAudio,
+  getChickenStaticSamples,
+  loadChickenAudio,
+} from "@/lib/chicken-audio";
+import { getPipelineStageSignal } from "@/lib/pipeline";
 
 export interface PlaybackState {
   isPlaying: boolean;
@@ -15,6 +21,7 @@ export interface SignalAudioSource {
   duration?: number;
   audioBuffer?: AudioBuffer | null;
   pan?: number; // -1.0 (left) to +1.0 (right)
+  ingredientName?: string;
 }
 
 /**
@@ -65,6 +72,34 @@ export class SignalAudioPlayer {
         this.pannerNode.connect(this.ctx.destination);
       } else {
         this.gainNode.connect(this.ctx.destination);
+      }
+
+      // Auto-bind recorded chicken audio if this source represents Chicken
+      const isChicken =
+        source.ingredientName?.toLowerCase() === "chicken" ||
+        source.samples === getChickenStaticSamples() ||
+        (source.samples &&
+          source.samples.length === 1000 &&
+          Math.abs((source.samples[999] ?? 0) - 0.65784) < 1e-4) ||
+        (source.samples &&
+          source.samples.length === 401 &&
+          Math.abs((source.samples[400] ?? 0) - 0.65784) < 1e-2);
+
+      if (!source.audioBuffer && isChicken) {
+        const cached = getCachedChickenAudio();
+        if (cached) {
+          source.audioBuffer = cached.buffer;
+          this.duration = cached.duration;
+        } else {
+          loadChickenAudio()
+            .then((decoded) => {
+              if (this.ctx && !this.isPlaying) {
+                this.buffer = decoded.buffer;
+                this.duration = decoded.duration;
+              }
+            })
+            .catch(() => {});
+        }
       }
 
       if (source.audioBuffer) {
@@ -362,15 +397,25 @@ export function playLevitationLaunchSound(pan: number = 0) {
  */
 export class CookedSignalAudioPlayer extends SignalAudioPlayer {
   constructor(signal: CookedSignalData, onUpdate?: (state: PlaybackState) => void) {
-    const samples =
-      signal.samples && signal.samples.length > 0
-        ? signal.samples
-        : computeCookedSamples({
-            frequency: signal.frequency,
-            amplitude: signal.amplitude,
-            noise: signal.noise,
-            shift: signal.shift,
-          });
+    let samples = signal.samples && signal.samples.length > 0 ? signal.samples : null;
+    if (!samples && signal.recipeId) {
+      try {
+        const stageSig = getPipelineStageSignal(signal.recipeId, "cooked");
+        if (stageSig && stageSig.samples && stageSig.samples.length > 0) {
+          samples = stageSig.samples;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    if (!samples) {
+      samples = computeCookedSamples({
+        frequency: signal.frequency,
+        amplitude: signal.amplitude,
+        noise: signal.noise,
+        shift: signal.shift,
+      });
+    }
     super({ samples, frequency: signal.frequency, duration: 3.0 }, onUpdate);
   }
 }

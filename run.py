@@ -19,6 +19,8 @@ import urllib.error
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_DIR = os.path.join(ROOT_DIR, "backend")
 FRONTEND_DIR = os.path.join(ROOT_DIR, "frontend")
+if not os.path.exists(os.path.join(FRONTEND_DIR, "package.json")):
+    FRONTEND_DIR = os.path.join(ROOT_DIR, "frontend", "wavekitchen-sim")
 
 def find_python():
     """Locate the project virtualenv Python or fallback to sys.executable."""

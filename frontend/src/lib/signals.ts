@@ -1442,5 +1442,190 @@ export const MATHEMATICAL_SIGNALS: Record<string, IngredientSignalDefinition> = 
 
 export function getMathematicalSignal(name?: string | null): IngredientSignalDefinition | null {
   if (!name) return null;
-  return MATHEMATICAL_SIGNALS[name] ?? null;
+  if (MATHEMATICAL_SIGNALS[name]) return MATHEMATICAL_SIGNALS[name];
+  const lower = name.toLowerCase().trim();
+  for (const [key, val] of Object.entries(MATHEMATICAL_SIGNALS)) {
+    if (key.toLowerCase() === lower) return val;
+  }
+  return null;
+}
+
+/**
+ * Computes an SVG path data string ('M ... L ...') mapping 2D parametric points
+ * into the specified width/height box with optional equal numerical aspect scaling.
+ */
+export function parametricPath(
+  width: number,
+  height: number,
+  points: Array<{ x: number; y: number }>,
+  padding = 16,
+  equalScale = false,
+): string {
+  if (!points || points.length === 0) return "";
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+
+  for (const p of points) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+
+  const spanX = maxX - minX || 1;
+  const spanY = maxY - minY || 1;
+  const usableWidth = width - 2 * padding;
+  const usableHeight = height - 2 * padding;
+
+  if (equalScale) {
+    const scale = Math.min(usableWidth / spanX, usableHeight / spanY);
+    const midX = (minX + maxX) / 2;
+    const midY = (minY + maxY) / 2;
+    const centerX = width / 2;
+    const centerY = height / 2;
+
+    const pathParts: string[] = [];
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      if (!p) continue;
+      const px = centerX + (p.x - midX) * scale;
+      const py = centerY - (p.y - midY) * scale;
+      pathParts.push(`${i === 0 ? "M" : "L"}${px.toFixed(2)} ${py.toFixed(2)}`);
+    }
+    return pathParts.join(" ");
+  }
+
+  const pathParts: string[] = [];
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    if (!p) continue;
+    const px = padding + ((p.x - minX) / spanX) * usableWidth;
+    const py = padding + ((maxY - p.y) / spanY) * usableHeight;
+    pathParts.push(`${i === 0 ? "M" : "L"}${px.toFixed(2)} ${py.toFixed(2)}`);
+  }
+  return pathParts.join(" ");
+}
+
+/**
+ * Maps 1D discrete time-domain samples to an SVG path string ('M ... L ...').
+ */
+export function samplesToPath(
+  samples: number[],
+  width = 1000,
+  height = 320,
+  scale = 0.35,
+): string {
+  const len = samples.length;
+  if (len === 0) return "";
+  const mid = height / 2;
+  const pts: string[] = [];
+  for (let i = 0; i < len; i++) {
+    const x = (i / (len - 1)) * width;
+    const s = samples[i] ?? 0;
+    const y = mid - s * height * scale;
+    pts.push(`${i === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`);
+  }
+  return pts.join(" ");
+}
+
+/**
+ * Computes the exact mathematical resulting / superposition SVG path for the Mixing stage.
+ *
+ * Requirements:
+ * 1. Single ingredient: exactly matches the individual signal's path (zero phase shift,
+ *    zero horizontal shift, zero amplitude change, zero normalization), visually overlapping.
+ * 2. Multiple 1D ingredients: sample-by-sample discrete superposition mixed[n] = sum(sig_k[n]).
+ * 3. Special/parametric ingredients: geometric superposition
+ *      x_mix(t) = sum(x_k(t)), y_mix(t) = sum(y_k(t))
+ *    preserving the 2D parametric geometry without collapsing into generic 1D waveforms.
+ */
+export function computeSuperpositionPath(
+  inBowlIngredients: Array<{ name: string }>,
+  ingredientSamplesMap: Record<string, number[]>,
+  width = 1000,
+  height = 320,
+): string {
+  if (!inBowlIngredients || inBowlIngredients.length === 0) return "";
+
+  const parametricIngredients = inBowlIngredients.filter((ing) => {
+    const math = getMathematicalSignal(ing.name);
+    return Boolean(math?.parametricCurve);
+  });
+
+  // CASE 1: Exactly ONE ingredient in the bowl
+  if (inBowlIngredients.length === 1) {
+    const ing = inBowlIngredients[0]!;
+    const math = getMathematicalSignal(ing.name);
+    if (math?.parametricCurve) {
+      const isClosed = !["patty", "lettuce", "noodle"].some((k) =>
+        ing.name.toLowerCase().includes(k),
+      );
+      const pts = math.parametricCurve.generatePoints(601);
+      return parametricPath(width, height, pts, 24, isClosed);
+    }
+    const samples = ingredientSamplesMap[ing.name] ?? [];
+    return samplesToPath(samples, width, height, 0.35);
+  }
+
+  // CASE 2: At least one parametric ingredient in the bowl
+  if (parametricIngredients.length > 0) {
+    const sampleCount = 601;
+    const isClosed = !inBowlIngredients.some((ing) =>
+      ["patty", "lettuce", "noodle"].some((k) =>
+        ing.name.toLowerCase().includes(k),
+      ),
+    );
+
+    const pts: Array<{ x: number; y: number }> = [];
+    const oneDList = inBowlIngredients.filter(
+      (ing) => !getMathematicalSignal(ing.name)?.parametricCurve,
+    );
+
+    for (let i = 0; i < sampleCount; i++) {
+      const u = i / (sampleCount - 1);
+      let sumX = 0;
+      let sumY = 0;
+
+      for (const ing of parametricIngredients) {
+        const math = getMathematicalSignal(ing.name)!;
+        const curve = math.parametricCurve!;
+        const t = curve.tMin + u * (curve.tMax - curve.tMin);
+        const pt = curve.evaluate(t);
+        sumX += pt.x;
+        sumY += pt.y;
+      }
+
+      for (const ing of oneDList) {
+        const samples = ingredientSamplesMap[ing.name];
+        if (samples && samples.length > 0) {
+          const exactIdx = u * (samples.length - 1);
+          const idx = Math.floor(exactIdx);
+          const frac = exactIdx - idx;
+          const s0 = samples[idx] ?? 0;
+          const s1 = samples[Math.min(samples.length - 1, idx + 1)] ?? s0;
+          sumY += s0 + frac * (s1 - s0);
+        }
+      }
+
+      pts.push({ x: sumX, y: sumY });
+    }
+
+    return parametricPath(width, height, pts, 24, isClosed);
+  }
+
+  // CASE 3: Multiple ordinary 1D ingredients (NO parametric ingredients)
+  const sampleLen = 401;
+  const mixed1D = new Array<number>(sampleLen).fill(0);
+  for (const ing of inBowlIngredients) {
+    const samples = ingredientSamplesMap[ing.name];
+    if (samples) {
+      for (let i = 0; i < sampleLen; i++) {
+        mixed1D[i] = (mixed1D[i] ?? 0) + (samples[i] ?? 0);
+      }
+    }
+  }
+
+  return samplesToPath(mixed1D, width, height, 0.35);
 }

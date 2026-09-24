@@ -96,8 +96,8 @@ export function SystemDeliveryLab() {
       eyebrow="Station 07 · System Delivery"
       title="System Delivery Lab"
       chefLine={chefLine}
-      backTo="/check-dish"
-      backLabel="← Back to Check Dish"
+      backTo="/beam-delivery"
+      backLabel="← Back to Precision Oven"
       nextTo="/score"
       nextLabel="SERVE DISH TO TASTING TABLE →"
     >
@@ -167,9 +167,9 @@ export function SystemDeliveryLab() {
 
       {/* FOOTER CTA */}
       <footer className="mt-8 flex items-center justify-between border-t border-border/80 pt-6">
-        <Link to="/check-dish">
+        <Link to="/beam-delivery">
           <GameButton variant="secondary" size="lg" className="uppercase font-bold">
-            ← Back to Check Dish
+            ← Back to Precision Oven
           </GameButton>
         </Link>
 
