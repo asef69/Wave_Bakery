@@ -63,9 +63,22 @@ export function systemPolesZeros(
           { re: 0.85 * c, im: 0.85 * s },
           { re: 0.85 * c, im: -0.85 * s },
         ],
-        gain: 1,
+        gain: notchGain(c),
       };
   }
+}
+
+/**
+ * Gain that gives the notch unity response away from its notch: normalised
+ * at DC (z = 1) or Nyquist (z = -1), whichever is farther from ω0. With
+ * g = 1 the dish itself was amplified (≈1.17x at DC for ω0 ≈ 2), so even a
+ * perfectly aimed notch damaged the dish.
+ */
+function notchGain(cosW0: number): number {
+  const rho = 0.85;
+  return cosW0 < 0
+    ? (1 - 2 * rho * cosW0 + rho * rho) / (2 - 2 * cosW0)
+    : (1 + 2 * rho * cosW0 + rho * rho) / (2 + 2 * cosW0);
 }
 
 /** Real coefficients of Π(z − rootᵢ), highest power first (roots come in conjugate pairs). */
@@ -110,16 +123,15 @@ export function applySystem(x: number[], sys: ZSystem): number[] {
   return y;
 }
 
+/** |H(e^{jω})|: how much the system scales a tone at ω (rad/sample). */
+export function gainAt(sys: ZSystem, omega: number): number {
+  const re = Math.cos(omega);
+  const im = Math.sin(omega);
+  const dist = (p: ZPoint) => Math.hypot(re - p.re, im - p.im);
+  const num = sys.zeros.reduce((acc, z) => acc * dist(z), 1);
+  const den = sys.poles.reduce((acc, p) => acc * dist(p), 1);
+  return Math.abs(sys.gain) * (num / Math.max(den, 1e-12));
+}
+
 /** Sampling rate below which the station's wobble sensor aliases. */
 export const SYSTEM_ALIAS_FREE_FS = 4000;
-
-/**
- * Station accuracy: the cart must be stable (all poles inside |z| = 1) and
- * the sensor alias-free. Stability dominates; aliasing costs 40%.
- */
-export function systemAccuracy(sys: ZSystem, samplingRateHz: number): number {
-  const maxPole = Math.max(0, ...sys.poles.map((p) => Math.hypot(p.re, p.im)));
-  const stability = maxPole < 1 ? 100 : 15;
-  const aliasFactor = samplingRateHz >= SYSTEM_ALIAS_FREE_FS ? 1 : 0.6;
-  return Math.round(stability * aliasFactor);
-}

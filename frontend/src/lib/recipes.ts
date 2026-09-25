@@ -1164,6 +1164,18 @@ export const DIFFICULTY_CONFIGS: Record<RecipeDifficulty, DifficultyConfig> = {
   },
 };
 
+/** Score multiplier per difficulty — DIFFICULTIES in backend/app/gameplay.py. */
+export const DIFFICULTY_MULTIPLIERS: Record<RecipeDifficulty, number> = {
+  easy: 0.8,
+  medium: 1.0,
+  hard: 1.25,
+  masterchef: 1.5,
+};
+
+export function difficultyMultiplier(difficulty: RecipeDifficulty | undefined): number {
+  return (difficulty && DIFFICULTY_MULTIPLIERS[difficulty]) ?? 1.0;
+}
+
 export interface RecipeRunSession {
   recipeId: string;
   difficulty: RecipeDifficulty;
@@ -1199,6 +1211,17 @@ export interface RecipeRunSession {
   systemPreset?: "lowpass1" | "resonator2" | "moving_avg" | "notch";
   systemPoleRadius?: number;
   systemSamplingHz?: number;
+  systemOmega?: number;
+  /** Precision Oven equaliser, in game Hz, relative to the dish fundamental f0. */
+  ovenSettings?: {
+    f0: number;
+    gains: [number, number, number];
+    cutoffHz: number;
+    notchHz: number;
+    notchOn: boolean;
+    /** The oven's verified sampling rate: it edits only up to fs/2. */
+    fs?: number;
+  };
 }
 
 export function startRecipeRun(recipeId: string, difficulty: RecipeDifficulty) {
@@ -1284,13 +1307,24 @@ export async function syncSessionParamsToBackend(recipeId?: string): Promise<voi
     ...(session.chopFactor != null
       ? { chop_factor: session.chopFactor, anti_alias: session.antiAlias ?? true }
       : {}),
-    // The oven's result can't be rebuilt server-side, so it is reported;
-    // System Delivery sends its settings and the server computes the score.
-    ...(session.deliveryAccuracy != null ? { delivery_accuracy: session.deliveryAccuracy } : {}),
+    // Finishing stations send their SETTINGS; the server applies the same
+    // burnt overtone, oven filter, road vibration and cart H(z) to its own
+    // dish and scores the result (backend/app/delivery.py).
+    ...(session.ovenSettings
+      ? {
+          oven_f0: session.ovenSettings.f0,
+          oven_gains: session.ovenSettings.gains,
+          oven_cutoff: session.ovenSettings.cutoffHz,
+          oven_notch: session.ovenSettings.notchHz,
+          oven_notch_on: session.ovenSettings.notchOn,
+          oven_fs: session.ovenSettings.fs ?? null,
+        }
+      : {}),
     ...(session.systemPreset
       ? {
           system_preset: session.systemPreset,
           system_pole_radius: session.systemPoleRadius ?? 0,
+          system_omega: session.systemOmega ?? 0,
           system_sampling_hz: session.systemSamplingHz ?? 8000,
         }
       : {}),
@@ -1326,7 +1360,18 @@ export function submitRunToBackend(recipeId?: string): Promise<SubmitResult | nu
   const request = syncSessionParamsToBackend(recipeId ?? session.recipeId)
     .then(() => api.submitSession(sid))
     .then((result) => {
-      updateRecipeRunSession({ backendSubmitResult: result });
+      // The server's verdict IS the run's final score. Store it here, not on
+      // whichever page happens to be open: leaving the score screen before
+      // the reply arrived used to leave the Complete page showing 0.
+      const total =
+        result.total_score ??
+        Math.round(result.score * 10 * difficultyMultiplier(session.difficulty));
+      updateRecipeRunSession({
+        backendSubmitResult: result,
+        finalScore: total,
+        finalStars: result.stars,
+      });
+      saveRecipeBestScore(recipeId ?? session.recipeId, total);
       return result;
     })
     .catch((err) => {
@@ -1492,7 +1537,16 @@ export function resetRecipeProgress(recipeId?: string) {
       window.localStorage.removeItem(`wavebakery_filtered_ingredients_${activeId}`);
       window.localStorage.removeItem(`wavebakery_cooked_signal_${activeId}`);
 
-      const stages = ["raw", "filtered", "mixed", "seasoned", "marinated", "cooked", "delivered"];
+      const stages = [
+        "raw",
+        "filtered",
+        "mixed",
+        "seasoned",
+        "marinated",
+        "cooked",
+        "delivered",
+        "served",
+      ];
       for (const stage of stages) {
         window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_${stage}`);
       }

@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session as DbSession
 from . import config
 from .dsp import core as C
 from .dsp import contamination, instruments, metrics, pipeline, systems
+from . import delivery
 from .models import GameSession, Ingredient, Player, Recipe, SessionIngredient
 
 RANKS = [
@@ -211,23 +212,28 @@ def compute_stages(db: DbSession, session: GameSession) -> tuple[dict, list[dict
     return stages, signals
 
 
-SYSTEM_ALIAS_FREE_FS = 4000.0
-
-
-def system_score_for(params: dict) -> float | None:
+def finish_dish(recipe_id: str, cooked: np.ndarray, reference: np.ndarray,
+                params: dict) -> tuple[np.ndarray, float | None, float | None]:
     """
-    System Delivery (z-plane) score from the player's settings, mirroring
-    frontend lib/z-system.ts: 100 for a stable cart (every pole inside
-    |z| = 1), 15 if unstable, x0.6 if the sensor samples below 4 kHz.
+    The dish actually served, rebuilt from the player's finishing settings:
+    cooking leaves a burnt overtone; the Precision Oven (if used) filters it;
+    the delivery cart (if used) adds road vibration and filters with its H(z).
+    Returns (served dish, oven sub-score, cart sub-score). Mirrors the
+    browser (frontend/src/lib/delivery.ts), so both judge the same problem.
     """
-    preset = params.get('system_preset')
-    if preset is None:
-        return None
-    r = float(params.get('system_pole_radius') or 0.0)
-    max_pole = {'lowpass1': r, 'resonator2': r, 'moving_avg': 0.0, 'notch': 0.85}[preset]
-    stability = 100.0 if max_pole < 1.0 else 15.0
-    fs = float(params.get('system_sampling_hz') or SYSTEM_ALIAS_FREE_FS)
-    return round(stability * (1.0 if fs >= SYSTEM_ALIAS_FREE_FS else 0.6), 2)
+    scale = delivery.hz_per_game_hz(recipe_id, reference, cooked.size)
+    used_oven = bool(params.get('oven_f0'))
+    dish = delivery.bake(cooked, recipe_id, scale, params if used_oven else None)
+    oven_score = cart_score = None
+    if used_oven:
+        oven_score = round(metrics.dish_metrics(reference, dish, common_scale=True)['score'], 2)
+        if params.get('system_preset'):
+            dish = delivery.deliver_on_cart(
+                dish, recipe_id, params['system_preset'],
+                float(params.get('system_pole_radius') or 0.0),
+                float(params.get('system_omega') or 0.0))
+            cart_score = round(metrics.dish_metrics(reference, dish, common_scale=True)['score'], 2)
+    return dish, oven_score, cart_score
 
 
 def stages_payload(stages: dict, session: GameSession) -> dict:
@@ -301,7 +307,14 @@ def judge(db: DbSession, session: GameSession) -> dict:
     target = pipeline.run_pipeline([s['clean'] for s in signals],
                                    pipeline.reference_params(recipe.as_dict()))
 
-    m = metrics.dish_metrics(target['final'], stages['final'])
+    # What was actually served: burnt overtone, then the oven and the cart.
+    p = session.params or {}
+    # Compared on the reference's scale (not each normalised on its own), so
+    # the seasoning level counts, not just the shape.
+    served, delivery_score, system_score = finish_dish(
+        recipe.id, stages['cooked'], target['cooked'], p)
+    stages['final'] = C.normalize(served, 0.9)          # for the returned plot/audio
+    m = metrics.dish_metrics(target['cooked'], served, common_scale=True)
 
     preps = []
     washable_preps = []
@@ -321,7 +334,8 @@ def judge(db: DbSession, session: GameSession) -> dict:
     # Sub-stage scores matching frontend breakdown
     filtering_score = round(prep_avg, 2)
     mixing_score = round(metrics.dish_metrics(target['mixed'], stages['mixed'])['score'], 2)
-    transform_score = round(metrics.dish_metrics(target['marinated'], stages['marinated'])['score'], 2)
+    transform_score = round(metrics.dish_metrics(
+        target['marinated'], stages['marinated'], common_scale=True)['score'], 2)
     # Cooking alone: the player's own pre-cooking signal through the recipe's
     # appliances vs. through the player's. (This used to be the whole-dish
     # score, so every earlier mistake also showed up as a "cooking" error.)
@@ -329,17 +343,6 @@ def judge(db: DbSession, session: GameSession) -> dict:
     cooking_score = round(metrics.dish_metrics(correctly_cooked, stages['cooked'])['score'], 2)
 
     raw = 0.72 * m['score'] + 0.28 * prep_avg
-
-    # Finishing stations (Precision Oven, System Delivery) are part of the
-    # dish score when played: 10% and 5%, taken proportionally from the rest.
-    p = session.params or {}
-    delivery_score = p.get('delivery_accuracy')
-    system_score = system_score_for(p)
-    extras = [(float(v), w) for v, w in ((delivery_score, 0.10), (system_score, 0.05))
-              if v is not None]
-    if extras:
-        w_total = sum(w for _, w in extras)
-        raw = raw * (1.0 - w_total) + sum(v * w for v, w in extras)
 
     gamma = 1.0 / max(0.3, recipe.tolerance or 1.0)
     score = float(np.clip(100.0 * (raw / 100.0) ** gamma, 0, 100))
@@ -404,7 +407,31 @@ def _diagnose(session: GameSession, recipe: Recipe, signals: list[dict]) -> list
             notes.append(f"{s['ingredient'].name}: over-filtered — you cut real ingredient frequencies.")
         elif prep['still_dirty']:
             notes.append(f"{s['ingredient'].name}: still noisy — contamination remains in the spectrum.")
+
+    # The finishing stations: burnt overtone and road vibration.
+    notes.extend(delivery.finishing_notes(recipe.id, p))
     return notes
+
+
+# Time limit (s) and score multiplier per difficulty — DIFFICULTY_CONFIGS in
+# frontend/src/lib/recipes.ts and DIFFICULTY_MULTIPLIERS in routes/score.tsx.
+DIFFICULTIES: dict[str, tuple[int, float]] = {
+    'easy': (300, 0.8), 'medium': (210, 1.0), 'hard': (120, 1.25), 'masterchef': (60, 1.5),
+}
+MAX_TIME_BONUS = 300    # before difficulty: 30 % of a perfect 1000-point base
+
+
+def run_total(score: float, difficulty: str | None, elapsed_s: float) -> tuple[int, int]:
+    """
+    (overall score, time bonus) of a run: the dish score (0-100) x 10 x the
+    difficulty multiplier, plus 2 points per second left (capped), also
+    scaled by difficulty. Timed on the server, from the session's start to
+    the dish being served, so the browser's clock can't inflate it.
+    """
+    limit, mult = DIFFICULTIES.get(difficulty or 'easy', DIFFICULTIES['easy'])
+    left = max(0.0, limit - max(0.0, elapsed_s))
+    bonus = round(min(2 * int(left), MAX_TIME_BONUS) * mult)
+    return round(score * 10 * mult) + bonus, bonus
 
 
 def award(db: DbSession, player: Player, recipe: Recipe, score: float,

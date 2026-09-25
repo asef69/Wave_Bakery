@@ -9,7 +9,7 @@ import {
 import { getStaticCookingKernel, type CookingMethodType } from "./cooking-audio";
 
 export type PipelineStage =
-  "raw" | "filtered" | "mixed" | "seasoned" | "marinated" | "cooked" | "delivered";
+  "raw" | "filtered" | "mixed" | "seasoned" | "marinated" | "cooked" | "delivered" | "served";
 
 export interface PipelineSignal {
   recipeId: string;
@@ -622,7 +622,9 @@ export function computeMarinatedSignal(
   return {
     recipeId: seasonedSignal.recipeId,
     stage: "marinated",
-    samples: normalizeSamples(samples, 0.95),
+    // No renormalisation: the seasoning amplitude must survive to the final
+    // comparison (rescaling here made an over-seasoned dish score 100%).
+    samples,
     sampleRate: seasonedSignal.sampleRate,
     duration: seasonedSignal.duration * effectiveScale,
     frequency: seasonedSignal.frequency / effectiveScale,
@@ -707,7 +709,9 @@ export function computeConvolvedSignal(
     outSamples[n] = s;
   }
 
-  const finalSamples = normalizeSamples(outSamples, 0.95);
+  // The kernels are normalised (sum |h| = 1), so the output cannot exceed the
+  // input's level; no rescaling, which would erase the seasoning amplitude.
+  const finalSamples = outSamples;
   const freqOffset = methodId === "fry" ? 2.5 : methodId === "grill" ? 1.5 : 0.8;
 
   return carryCurve(
@@ -891,6 +895,7 @@ export function invalidateDownstreamStages(
     "marinated",
     "cooked",
     "delivered",
+    "served",
   ];
 
   const changedIdx = stageOrder.indexOf(changedStage);
@@ -950,6 +955,10 @@ export function invalidateDownstreamStages(
       }
       if (stagesToInvalidate.includes("delivered")) {
         delete sess.deliveryAccuracy;
+        delete sess.ovenSettings;
+      }
+      if (stagesToInvalidate.includes("served")) {
+        delete sess.systemAccuracy;
       }
       window.localStorage.setItem(sessionKey, JSON.stringify(sess));
       window.dispatchEvent(new Event("wavebakery_session_changed"));
@@ -1004,7 +1013,10 @@ export function getDefaultPipelineSignal(
       );
   if (stage === "cooked") return cooked;
 
-  if (stage === "delivered") {
+  if (stage === "served" && hasPipelineStageSignal(recipe.id, "served")) {
+    return getPipelineStageSignal(recipe.id, "served", sampleCount);
+  }
+  if (stage === "delivered" || stage === "served") {
     if (hasPipelineStageSignal(recipe.id, "delivered")) {
       return getPipelineStageSignal(recipe.id, "delivered", sampleCount);
     }

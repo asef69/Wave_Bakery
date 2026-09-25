@@ -294,12 +294,18 @@ class CookParams(BaseModel):
     # recipe). Without this the server mixed every recipe ingredient no
     # matter what the Mixing lab did.
     bowl: Annotated[list[Annotated[str, Field(max_length=40)]], Field(max_length=32)] | None = None
-    # Precision Oven result reported by the client (0..100). The server cannot
-    # rebuild the oven's input dish, so this one is not recomputed.
-    delivery_accuracy: float | None = Field(None, ge=0, le=100)
-    # System Delivery (z-plane) SETTINGS; the server computes the score.
+    # Precision Oven SETTINGS (game Hz; oven_f0 is the dish fundamental they
+    # are relative to). The server applies them to its own dish (delivery.py).
+    oven_f0: float | None = Field(None, gt=0, le=64)
+    oven_gains: Annotated[list[Annotated[float, Field(ge=0, le=3)]], Field(min_length=3, max_length=3)] | None = None
+    oven_cutoff: float | None = Field(None, ge=0, le=1000)
+    oven_notch: float | None = Field(None, ge=0, le=64)
+    oven_notch_on: bool = False
+    oven_fs: float | None = Field(None, ge=2, le=64)   # the oven's sampling rate (game Hz)
+    # System Delivery (z-plane) SETTINGS; the server filters its dish with them.
     system_preset: Literal['lowpass1', 'resonator2', 'moving_avg', 'notch'] | None = None
     system_pole_radius: float | None = Field(None, ge=0, le=1.1)
+    system_omega: float | None = Field(None, ge=0, le=3.2)
     system_sampling_hz: float | None = Field(None, ge=100, le=96_000)
 
 
@@ -360,6 +366,8 @@ class SubmitResult(BaseModel):
     spectral_similarity: float
     points_awarded: int
     total_points: int
+    total_score: int            # overall score, as the score screen shows it
+    time_bonus: int
     unlocked_tier: int
     rank_title: str
     notes: list[str]
@@ -406,7 +414,8 @@ class LeaderboardRow(BaseModel):
     rank: int
     player_id: str
     handle: str
-    score: float
+    score: float                # dish score, 0-100
+    total_score: int            # overall score (ranked on), as the score screen shows it
     stars: int
     recipe_id: str
     recipe_name: str

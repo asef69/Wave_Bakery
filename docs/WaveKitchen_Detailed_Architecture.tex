@@ -352,6 +352,20 @@ Several appliances are one system: \fn{cascade} $h=h_1*h_2*\cdots$.
 % ====================================================================
 \section{Precision Oven (\file{frontend/src/lib/precision-oven-dsp.ts})}
 % ====================================================================
+\subsection{The problem: a burnt overtone (\file{frontend/src/lib/delivery.ts})}
+Cooking leaves a recipe-specific tone in the dish. With $f_0$ the fundamental of the
+reference dish (the strongest DFT bin, \fn{dishFundamental}) and the recipe's profile
+$(\rho,a_d)$ (\fn{DELIVERY_PROFILES}):
+\[
+f_d=\operatorname{clip}(\rho f_0,\,10,\,28),\qquad
+x_{\text{served}}[n]=x_{\text{cooked}}[n]+a_d\,\max|x_{\text{cooked}}|\,\sin\!\Bigl(2\pi f_d\frac{n}{N-1}\Bigr)
+\quad(\fn{servedDish}).
+\]
+$\rho$ is chosen so $f_d$ is an integer inside the notch slider's range and at least 1\,Hz
+from every harmonic of $f_0$ (e.g.\ burger $f_0=4$, $f_d=18$ between harmonics 16 and 20);
+$a_d$ rises with the tier (0.8, 0.9, 1.0, 1.1 for the Feast). Check Dish shows and plays
+$x_{\text{served}}$, the oven receives it, and serving without the oven keeps it.
+
 \subsection{Maximum frequency and the Nyquist rate}
 \fn{findMaxSignalFrequency}: resample the dish to 128 points, apply a Hann window
 $w[n]=\tfrac12(1-\cos\frac{2\pi n}{127})$, FFT, and take the first bin $k$ at which the
@@ -400,8 +414,11 @@ with the Dirichlet kernel back to 401 points:
 D_N(\tau)=\begin{cases}\dfrac{\sin(\pi N\tau)}{N\sin(\pi\tau)} & N\ \text{odd}\\[8pt]
 \dfrac{\sin(\pi N\tau)}{N\tan(\pi\tau)} & N\ \text{even}\end{cases}
 \]
-then normalised to $0.95$. With untouched controls and $f_s\ge2f_{\max}$ this reproduces the
-dish (verified $\ge98\,\%$ similarity by \file{frontend/tests/precision-oven-fft.test.ts}).
+keeping the dish's own amplitude (scaled down only if its peak would exceed $0.95$). With
+untouched controls and $f_s\ge2f_{\max}$ this reproduces the input dish (verified
+$\ge98\,\%$ by \file{frontend/tests/precision-oven-fft.test.ts}); with the notch on $f_d$ it
+reproduces the dish \emph{without} the overtone (about 50--70 $\rightarrow$ 90--98 similarity
+to the target, \file{frontend/tests/delivery.test.ts}).
 
 \subsection{Oven score}
 \begin{align*}
@@ -412,7 +429,14 @@ dish (verified $\ge98\,\%$ similarity by \file{frontend/tests/precision-oven-fft
 \text{oven}&=0.40\,\text{spectrum}+0.50\,\text{fidelity}+0.10\,\text{efficiency}.
 \end{align*}
 The unlock step rejects $f_s<2f_{\max}$ and $f_s>64$. \emph{Plate} saves the reconstruction as
-the \texttt{delivered} stage and records the oven score as the delivery accuracy.
+the \texttt{delivered} stage (the dish that goes on to the cart), records the oven score, and
+stores the equaliser \emph{settings} $(f_0, G_{\text{low}}, G_{\text{mid}}, G_{\text{high}}, f_c, f_n,
+\text{notch on})$ for the server.
+
+\textbf{Server} (\fn{apply_oven}, \file{backend/app/delivery.py}): the same overtone is added to
+the server's dish at $\rho f_0^{\text{srv}}$ (its own fundamental in real Hz), then the same
+$G\cdot C\cdot Q$ mask is applied with each FFT bin mapped to game Hz as
+$g=f/f_0^{\text{srv}}\cdot f_0$, so ``the notch sits on the overtone'' means the same on both sides.
 
 % ====================================================================
 \section{System Delivery --- the z-plane (\file{frontend/src/lib/z-system.ts})}
@@ -442,9 +466,28 @@ Notch & $\dfrac{(z-e^{j\omega_0})(z-e^{-j\omega_0})}{(z-0.85e^{j\omega_0})(z-0.8
 \end{itemize}
 \end{mathbox}
 
-\textbf{Score} (\fn{systemAccuracy}; server \fn{system_score_for} computes the same from the
-synced settings): $100$ if $\max_j|p_j|<1$ (BIBO stable) else $15$, multiplied by $0.6$ when
-the sensor rate is below $4000$\,Hz.
+\begin{mathbox}{The problem: road vibration (\fn{deliverOnCart}, \file{frontend/src/lib/delivery.ts})}
+The road adds a tone at $f_r$ (recipe profile, defined at the true rate $F_d=8000$\,Hz):
+\[
+\omega_r=\frac{2\pi f_r}{F_d},\qquad
+v[n]=x[n]+a_r\max|x|\cos(\omega_r n),\qquad
+y=H\{v\},\qquad
+\text{served}=\frac{0.95\,y}{\max|y|}.
+\]
+Score $=$ \fn{computeSignalSimilarity}(served, dish before the road). A zero on the unit
+circle at $\omega_r$ removes the tone and leaves the dish; a low-pass pole damps it but also
+dulls the dish; poles outside $|z|=1$ make $y$ grow without bound, which after
+normalisation leaves only ringing.
+
+\textbf{Aliased sensing} (\fn{sensedRoadOmega}): the sensor samples at $f_s$ and reports
+$f_a=|f_r \bmod f_s|$ folded into $[0,f_s/2]$, i.e.\ $\hat\omega=2\pi f_a/f_s$, drawn as the
+orange marker. At 8\,kHz $\hat\omega=\omega_r$; at 1.2\,kHz it is wrong (burger: $2.04\to1.05$),
+so a notch aimed at the marker misses the real vibration (score about 66 instead of 98).
+\end{mathbox}
+
+\textbf{Server} (\fn{deliver_on_cart}, \file{backend/app/delivery.py}): the same tone at the same
+$\omega_r$ (rad/sample), the cart's coefficients from the synced $(\text{preset}, r, \omega_0)$,
+and \fn{scipy.signal.lfilter} for the difference equation.
 
 % ====================================================================
 \section{Similarity metrics}\label{sec:similarity}
@@ -482,8 +525,10 @@ and stores it on the run session: filtering, mixing, seasoning, marinating, cook
 chop, caramelize, delivery (oven), system (cart). Dials are stored too and pushed to the
 server by \fn{syncSessionParamsToBackend}. The payload fields are
 \fn{seasoning}, \fn{frequency}, \fn{blend}, \fn{marinate}, \fn{appliances}, \fn{bowl},
-\fn{carrier}, \fn{depth}, \fn{chop_factor}, \fn{anti_alias}, \fn{delivery_accuracy},
-\fn{system_preset}, \fn{system_pole_radius} and \fn{system_sampling_hz}.
+\fn{carrier}, \fn{depth}, \fn{chop_factor}, \fn{anti_alias}, the oven settings
+\fn{oven_f0}, \fn{oven_gains}, \fn{oven_cutoff}, \fn{oven_notch}, \fn{oven_notch_on}, and the cart
+settings \fn{system_preset}, \fn{system_pole_radius}, \fn{system_omega} and
+\fn{system_sampling_hz}. No score is sent: the server computes every one.
 
 \subsection{The reference dish}
 \textbf{Frontend} \fn{getIdealDishSignal}: clean mix of all recipe ingredients
@@ -498,14 +543,17 @@ marinating with $s^\star$ $\rightarrow$ convolution with the recipe method at $p
   filters, keep only the bowl, run \fn{run_pipeline} with the stored params:
   mix $\rightarrow$ season ($A$) $\rightarrow$ blend ($\alpha$) $\rightarrow$ marinate ($s$) $\rightarrow$
   caramelize ($f_c,m$) $\rightarrow$ chop ($M$) $\rightarrow$ cook (appliances) $\rightarrow$ normalise $0.9$.
-\item $m=$ \fn{dish_metrics}(reference final, player final).
+\item Finish it (\fn{finish_dish}): add the burnt overtone; if the oven was used apply its
+  equaliser (oven sub-score $=$ dish score after the oven); if the cart was used add the road
+  vibration and filter with $H(z)$ (cart sub-score $=$ dish score after the cart). Serving
+  from Check Dish skips both, so the overtone stays.
+\item $m=$ \fn{dish_metrics}(reference final, served dish).
 \item Prep average $\bar P$ over washable/contaminated ingredients (all ingredients if none).
 \item Sub-scores: filtering $=\bar P$; mixing $=$ dish score of the two mixes; transformation
   $=$ dish score of the two marinated signals; cooking $=$ dish score of
   (player's pre-cooking signal through the recipe's appliances) vs (through the player's).
-\item $\text{raw}=0.72\,m_{\text{score}}+0.28\,\bar P$.
-\item Finishing stations, when present: $\text{raw}\leftarrow\text{raw}\,(1-W)+\sum w_i v_i$ with
-  $(v,w)=(\text{oven},0.10)$ and $(\text{cart},0.05)$, $W=\sum w_i$.
+\item $\text{raw}=0.72\,m_{\text{score}}+0.28\,\bar P$ (the finishing stations count through $m$,
+  because they change the served dish itself).
 \item Tolerance curve: $\text{score}=100\,(\text{raw}/100)^{\gamma}$,
   $\gamma=1/\max(0.3,\text{tolerance})$ (tolerance $0.75$ for the Feast up to $1.25$ for Toast:
   harder recipes are graded more strictly).
@@ -522,12 +570,13 @@ session atomically (\texttt{UPDATE \dots\ WHERE status != 'served'}); a second s
 judging fails the claim is released. A served session can no longer be edited.
 
 \subsection{What the score screen shows (\file{routes/score.tsx})}
-The player dish is the delivered dish if the oven was used, otherwise the cooked dish. The
-stage average is the mean of filtering, mixing, seasoning, marinating and cooking, plus chop
-and caramelize for recipes that include those stations.
+The player dish is the served dish: the cart's output (\texttt{served} stage), else the oven's
+output (\texttt{delivered}), else the cooked dish \emph{with} the burnt overtone. The stage
+average is the mean of filtering, mixing, seasoning, marinating and cooking, plus chop and
+caramelize for recipes that include those stations.
 \begin{align*}
 \text{similarity}&=\text{computeSignalSimilarity}(\text{player dish},\ \text{reference dish})\\
-\text{local}&=0.5\,\text{similarity}+0.5\,\text{stageAvg}\quad(\text{then the finishing-station blend})\\
+\text{local}&=0.5\,\text{similarity}+0.5\,\text{stageAvg}\\
 \text{score}_{100}&=\text{server score if available, otherwise local}\\
 \text{base}&=\operatorname{round}(10\cdot\text{score}_{100}\cdot\mu_{\text{diff}}),\qquad
 \mu\in\{0.8,1.0,1.25,1.5\}\\
@@ -584,7 +633,8 @@ a finished run that never reached the server (backend offline) and shows a retry
 \item The SPA file route only serves files inside \texttt{frontend/dist}; CORS allows only the
   frontend's origins.
 \item The server never trusts client audio: it regenerates ingredients from the seed and
-  rebuilds the dish. The one client-reported number is the Precision Oven score.
+  rebuilds the dish, including the finishing stations from their settings, so no score is
+  taken from the client.
 \end{itemize}
 
 % ====================================================================
@@ -618,7 +668,9 @@ Function & File & Mathematical role \\
 \fn{tuneOvenFrequencies} & \file{lib/precision-oven-dsp.ts} & Band gains, cutoff, notch \\
 \fn{computeSignalIFFT} & \file{lib/precision-oven-dsp.ts} & IFFT + Dirichlet reconstruction \\
 \fn{computeSpectrumSimilarity} & \file{lib/precision-oven-dsp.ts} & Spectral match \\
-\fn{systemPolesZeros}, \fn{applySystem}, \fn{systemAccuracy} & \file{lib/z-system.ts} & $H(z)$, difference equation, stability \\
+\fn{systemPolesZeros}, \fn{applySystem} & \file{lib/z-system.ts} & $H(z)$, difference equation \\
+\fn{servedDish}, \fn{dishFundamental}, \fn{ovenDefectHz} & \file{lib/delivery.ts} & Burnt overtone \\
+\fn{deliverOnCart}, \fn{withRoadVibration}, \fn{sensedRoadOmega} & \file{lib/delivery.ts} & Road vibration, aliased sensing, cart score \\
 \fn{SignalAudioPlayer} & \file{lib/audio.ts} & Sonification \\
 \fn{recordStageAccuracy}, \fn{syncSessionParamsToBackend}, \fn{submitRunToBackend} & \file{lib/recipes.ts} & Accuracies, sync, submission \\
 \fn{addLeaderboardEntry}, \fn{getLeaderboard} & \file{lib/leaderboard.ts} & Local leaderboard \\
@@ -635,7 +687,8 @@ Function & File & Mathematical role \\
 \fn{ir_comb}, \fn{ir_decay}, \fn{ir_resonator}, \fn{ir_moving_average}, \fn{ir_difference} & \file{dsp/systems.py} & Appliance $h[n]$ \\
 \fn{run_pipeline}, \fn{reference_params}, \fn{apply_filter_chain} & \file{dsp/pipeline.py} & The canonical dish pipeline \\
 \fn{prep_quality}, \fn{dish_metrics}, \fn{snr_db}, \fn{spectral_similarity}, \fn{stars} & \file{dsp/metrics.py} & Scores \\
-\fn{bowl_signals}, \fn{compute_stages}, \fn{judge}, \fn{award}, \fn{maybe_unlock}, \fn{system_score_for} & \file{gameplay.py} & Judging and progression \\
+\fn{bowl_signals}, \fn{compute_stages}, \fn{finish_dish}, \fn{judge}, \fn{award}, \fn{maybe_unlock} & \file{gameplay.py} & Judging and progression \\
+\fn{add_burnt_overtone}, \fn{apply_oven}, \fn{add_road_vibration}, \fn{deliver_on_cart} & \file{delivery.py} & Finishing stations on the server's dish \\
 \bottomrule
 \end{longtable}}
 

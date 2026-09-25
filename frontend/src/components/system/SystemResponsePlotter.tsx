@@ -15,6 +15,8 @@ interface SystemResponsePlotterProps {
   onFrequencyChange: (w: number) => void;
   onSamplingRateChange: (fs: number) => void;
   dishSignal?: number[];
+  /** Where the vibration sensor reports the road tone (rad/sample, 0..pi). */
+  vibrationOmega?: number;
 }
 
 const PRESET_INFO: Record<
@@ -67,6 +69,7 @@ export function SystemResponsePlotter({
   onFrequencyChange,
   onSamplingRateChange,
   dishSignal,
+  vibrationOmega,
 }: SystemResponsePlotterProps) {
   // Stable when every pole is inside the unit circle (the notch's poles sit
   // at 0.85 and the moving average's at 0, whatever the r slider says).
@@ -626,6 +629,30 @@ export function SystemResponsePlotter({
                 strokeDasharray="4 3"
                 opacity={0.85}
               />
+
+              {/* Road vibration where the sensor reports it (aliased if fs is too low) */}
+              {vibrationOmega != null && (
+                <g>
+                  <line
+                    x1={(vibrationOmega / Math.PI) * 200}
+                    y1="4"
+                    x2={(vibrationOmega / Math.PI) * 200}
+                    y2="136"
+                    stroke="#f59e0b"
+                    strokeWidth="1.5"
+                    strokeDasharray="3 2"
+                  />
+                  <text
+                    x={Math.min(150, (vibrationOmega / Math.PI) * 200 + 3)}
+                    y="12"
+                    fill="#f59e0b"
+                    fontSize="8"
+                    fontFamily="monospace"
+                  >
+                    road ω={vibrationOmega.toFixed(2)}
+                  </text>
+                </g>
+              )}
             </svg>
           </div>
 

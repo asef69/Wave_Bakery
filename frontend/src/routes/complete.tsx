@@ -6,10 +6,11 @@ import { ChefFourier } from "@/components/game/ChefFourier";
 import { DishGlyph } from "@/components/game/DishGlyph";
 import { GameButton } from "@/components/game/GameButton";
 import { SignalAudioPlayer } from "@/lib/audio";
+import { servedDish } from "@/lib/delivery";
+import { getPipelineStageSignal, hasPipelineStageSignal } from "@/lib/pipeline";
 import {
   completeRecipeRun,
-  getRecipeBestScore,
-  getRecipeRunSession,
+  submitRunToBackend,
   useActiveRecipe,
   useChefName,
   useCookedSignal,
@@ -36,25 +37,52 @@ export const Route = createFileRoute("/complete")({
 
 function CompleteScreen() {
   const [recipe] = useActiveRecipe();
-  const { difficultyConfig, formattedTime } = useRecipeTimer();
+  const { session, difficultyConfig, formattedTime } = useRecipeTimer();
   const [chefName] = useChefName();
   const [cookedSignal] = useCookedSignal(recipe.id);
   const [player, setPlayer] = useState<SignalAudioPlayer | null>(null);
 
-  // Score and stars were decided on the score screen and stored on the run
-  // session. This page used to use a different 3-star scale, read another
-  // chef's saved entry, and re-save the leaderboard entry on every audio play.
-  const session = getRecipeRunSession();
+  // The run's score is the server's verdict (stored on the session by
+  // submitRunToBackend), or the score screen's local total when there is no
+  // server run. This page read the session once, so arriving before the
+  // server replied showed "Final score: 0" (and saved 0 as the run's score).
   const thisRun = session?.recipeId === recipe.id ? session : null;
-  const finalScore = thisRun?.finalScore ?? getRecipeBestScore(recipe.id) ?? 0;
-  const stars = thisRun?.finalStars ?? null;
+  const [submitFailed, setSubmitFailed] = useState(false);
+  const awaitingServer =
+    !!thisRun?.backendSessionId && !thisRun.backendSubmitResult && !submitFailed;
+  const finalScore = thisRun?.backendSubmitResult?.total_score ?? thisRun?.finalScore ?? null;
+  const stars = thisRun?.backendSubmitResult?.stars ?? thisRun?.finalStars ?? null;
   const starsDisplay =
     stars == null ? "— — — — —" : "★ ".repeat(stars) + "☆ ".repeat(Math.max(0, 5 - stars));
 
+  // Join (or start) the submit; it is deduplicated, so this never serves twice.
   useEffect(() => {
-    if (thisRun && !thisRun.isCompleted) completeRecipeRun(recipe.id, finalScore);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recipe.id]);
+    if (!awaitingServer) return;
+    let live = true;
+    submitRunToBackend(recipe.id).then((result) => {
+      if (live && !result) setSubmitFailed(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, [awaitingServer, recipe.id]);
+
+  // Close the run once its score is settled (or the server is unreachable,
+  // so the leaderboard can offer a retry).
+  useEffect(() => {
+    if (thisRun && !thisRun.isCompleted && !awaitingServer) {
+      completeRecipeRun(recipe.id, finalScore ?? undefined);
+    }
+  }, [thisRun, awaitingServer, recipe.id, finalScore]);
+
+  // The dish that was actually served (cart, else oven, else with the burnt overtone).
+  const servedSamples = (() => {
+    if (hasPipelineStageSignal(recipe.id, "served"))
+      return getPipelineStageSignal(recipe.id, "served").samples;
+    if (hasPipelineStageSignal(recipe.id, "delivered"))
+      return getPipelineStageSignal(recipe.id, "delivered").samples;
+    return servedDish(recipe.id, cookedSignal.samples);
+  })();
 
   useEffect(() => {
     return () => {
@@ -65,7 +93,7 @@ function CompleteScreen() {
   const handlePlayAudio = () => {
     if (player) player.destroy();
     const p = new SignalAudioPlayer({
-      samples: cookedSignal.samples,
+      samples: servedSamples,
       frequency: cookedSignal.frequency,
       duration: 2.5,
     });
@@ -92,7 +120,7 @@ function CompleteScreen() {
               {recipe.name}
             </p>
             <p className="mt-3 font-display text-2xl font-extrabold text-foreground">
-              Final score: {finalScore}
+              Final score: {awaitingServer ? "verifying on server…" : (finalScore ?? "—")}
             </p>
             <p className="font-display text-2xl text-primary">{starsDisplay}</p>
 

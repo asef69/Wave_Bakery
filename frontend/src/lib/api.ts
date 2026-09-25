@@ -163,9 +163,15 @@ export interface CookParams {
   appliances?: string[];
   cooking_method?: string | null;
   bowl?: string[] | null;
-  delivery_accuracy?: number | null;
+  oven_f0?: number | null;
+  oven_gains?: [number, number, number] | null;
+  oven_cutoff?: number | null;
+  oven_notch?: number | null;
+  oven_notch_on?: boolean | null;
+  oven_fs?: number | null;
   system_preset?: "lowpass1" | "resonator2" | "moving_avg" | "notch" | null;
   system_pole_radius?: number | null;
+  system_omega?: number | null;
   system_sampling_hz?: number | null;
 }
 
@@ -214,6 +220,9 @@ export interface SubmitResult {
   spectral_similarity: number;
   points_awarded: number;
   total_points: number;
+  /** Overall score (dish x 10 x difficulty + time bonus), timed on the server. */
+  total_score?: number;
+  time_bonus?: number;
   unlocked_tier: number;
   rank_title: string;
   notes: string[];
@@ -227,7 +236,10 @@ export interface LeaderboardRow {
   rank: number;
   player_id: string;
   handle: string;
+  /** Dish score, 0-100. */
   score: number;
+  /** Overall score, as the score screen shows it (what the board ranks on). */
+  total_score?: number;
   stars: number;
   recipe_id: string;
   recipe_name: string;

@@ -320,6 +320,17 @@ export function normalizedRootMeanSquareError(x: number[], y: number[]): number 
 }
 
 /**
+ * True when a pipeline signal is one period of a looping dish: its last
+ * sample repeats the first (within 2 % of the peak — convolution leaves a
+ * rounding-level mismatch on some dishes).
+ */
+export function isOnePeriod(x: number[]): boolean {
+  if (x.length < 3) return false;
+  const peak = x.reduce((m, v) => Math.max(m, Math.abs(v)), 0) || 1;
+  return Math.abs(x[0]! - x[x.length - 1]!) <= 0.02 * peak;
+}
+
+/**
  * Computes composite match percentage between player signal and ideal target signal.
  * Combines Normalized Cross-Correlation (shape fidelity) and NRMSE (amplitude/offset fidelity).
  *

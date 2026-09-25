@@ -38,7 +38,7 @@ import {
   analyzeSamplingAndAliasing,
   computeBandMetrics,
   computeDiscreteSignalFFT,
-  computeSignalIFFT,
+  applyOvenToDish,
   computeSpectrumSimilarity,
   computeStandardFFT,
   findMaxSignalFrequency,
@@ -51,9 +51,11 @@ import {
   type SpectrumData,
 } from "@/lib/precision-oven-dsp";
 import { computeSignalSimilarity } from "@/lib/dsp";
+import { dishFundamental, servedDish } from "@/lib/delivery";
 import {
   recordStageAccuracy,
   syncSessionParamsToBackend,
+  updateRecipeRunSession,
   useActiveRecipe,
   useCookedSignal,
   useRecipeProgress,
@@ -107,13 +109,15 @@ function PrecisionOvenScreen() {
   const [pipelineCooked] = usePipelineStageSignal(recipe.id, "cooked");
 
   const dishSamples = useMemo(() => {
-    if (pipelineCooked.samples && pipelineCooked.samples.length > 0) {
-      return pipelineCooked.samples;
-    }
-    if (cookedSignal.samples && cookedSignal.samples.length > 0) {
-      return cookedSignal.samples;
-    }
-    return getDefaultPipelineSignal(recipe.id, "cooked").samples;
+    // The dish arrives with the burnt overtone cooking left in it (lib/delivery.ts);
+    // finding and removing it is this station's job.
+    const cooked =
+      pipelineCooked.samples && pipelineCooked.samples.length > 0
+        ? pipelineCooked.samples
+        : cookedSignal.samples && cookedSignal.samples.length > 0
+          ? cookedSignal.samples
+          : getDefaultPipelineSignal(recipe.id, "cooked").samples;
+    return servedDish(recipe.id, cooked);
   }, [pipelineCooked.samples, cookedSignal.samples, recipe.id]);
 
   // Target reference dish signal for recipe
@@ -254,14 +258,29 @@ function PrecisionOvenScreen() {
   // -------------------------------------------------------------
   // STAGE 4: IFFT RECONSTRUCTION & AUDIO PLAYBACK
   // -------------------------------------------------------------
+  // The oven's output: the same equaliser applied to the whole dish (see
+  // applyOvenToDish). fs is verified >= 2·fmax before this stage, so nothing
+  // but what the player removes may go missing.
   const reconstructedSamples = useMemo(() => {
-    return computeSignalIFFT(
-      tunedSpectrum.tunedReal,
-      tunedSpectrum.tunedImag,
-      dishSamples.length,
-      activeRate,
-    );
-  }, [tunedSpectrum.tunedReal, tunedSpectrum.tunedImag, dishSamples.length, activeRate]);
+    return applyOvenToDish(dishSamples, activeRate, {
+      lowGain,
+      midGain,
+      highGain: bandAvailability.top.status === "unavailable" ? 1.0 : highGain,
+      cutoffHz: browningCutoffHz,
+      notchActive,
+      notchHz,
+    });
+  }, [
+    dishSamples,
+    activeRate,
+    lowGain,
+    midGain,
+    highGain,
+    bandAvailability.top.status,
+    browningCutoffHz,
+    notchActive,
+    notchHz,
+  ]);
 
   const timeDomainSimilarity = useMemo(() => {
     return computeSignalSimilarity(reconstructedSamples, targetSignal.samples);
@@ -373,6 +392,16 @@ function PrecisionOvenScreen() {
       ),
     );
 
+    updateRecipeRunSession({
+      ovenSettings: {
+        f0: dishFundamental(targetSignal.samples),
+        gains: [lowGain, midGain, bandAvailability.top.status === "unavailable" ? 1.0 : highGain],
+        cutoffHz: browningCutoffHz,
+        notchHz,
+        notchOn: notchActive,
+        fs: activeRate,
+      },
+    });
     recordStageAccuracy("delivery", overallScore);
     syncSessionParamsToBackend(recipe.id).catch(() => {});
     unlock(8);
@@ -399,7 +428,7 @@ function PrecisionOvenScreen() {
     <LabShell
       eyebrow={`FINISHING STATION • RECIPE: ${recipe.name}`}
       title="🔥 Precision Oven"
-      chefLine="Discover the safe sampling rate, unlock the frequency domain, and reconstruct with IFFT!"
+      chefLine="Cooking left a burnt overtone in this dish. Sample it safely, find the spike the target doesn't have, remove it, and rebuild with the IFFT!"
       backTo="/check-dish"
       backLabel="← Back to Dish Inspection"
     >

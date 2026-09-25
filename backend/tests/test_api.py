@@ -318,7 +318,7 @@ def _play_perfectly(client, chef, recipe_id: str, **extra_params) -> dict:
 
 
 def test_a_careful_cook_scores_well(client, chef):
-    result = _play_perfectly(client, chef, 'burger')
+    result = _play_perfectly(client, chef, 'burger', **_finishing('burger'))
     assert result['score'] > 60
     assert result['stars'] >= 3
     assert result['target']['audio'] and result['player_dish']['audio']
@@ -330,21 +330,47 @@ def test_cooking_score_isolates_the_appliance_choice(client, chef):
     assert result['cooking_score'] == 100.0
 
 
-def test_finishing_stations_count_towards_the_score(client, chef):
-    stable = dict(system_preset='resonator2', system_pole_radius=0.85, system_sampling_hz=8000)
-    unstable = dict(system_preset='resonator2', system_pole_radius=1.05, system_sampling_hz=1200)
-    good = _play_perfectly(client, chef, 'burger', delivery_accuracy=100, **stable)
-    bad = _play_perfectly(client, chef, 'burger', delivery_accuracy=0, **unstable)
-    assert good['delivery_score'] == 100 and good['system_score'] == 100
-    # System score is computed on the server from the cart settings.
-    assert bad['delivery_score'] == 0 and bad['system_score'] == 9
-    assert good['score'] > bad['score']
+def _finishing(recipe_id: str, oven_notch_on: bool = True, cart_w0=None,
+               cart_preset: str = 'notch', cart_r: float = 0.85) -> dict:
+    """Finishing settings as the browser sends them (game Hz relative to oven_f0)."""
+    from app import delivery
+    prof = delivery.profile(recipe_id)
+    out = dict(oven_f0=4.0, oven_gains=[1.0, 1.0, 1.0], oven_cutoff=26.0,
+               oven_notch=prof['defect_hz'], oven_notch_on=oven_notch_on)
+    if cart_preset:
+        out.update(system_preset=cart_preset, system_pole_radius=cart_r,
+                   system_omega=delivery.road_omega(recipe_id) if cart_w0 is None else cart_w0,
+                   system_sampling_hz=8000)
+    return out
 
 
-def test_system_score_ignores_a_client_reported_value(client, chef):
-    r = _play_perfectly(client, chef, 'burger', system_accuracy=100,
-                        system_preset='lowpass1', system_pole_radius=1.1)
-    assert r['system_score'] == 15
+def test_the_burnt_overtone_costs_points_until_the_oven_removes_it(client, chef):
+    served_raw = _play_perfectly(client, chef, 'burger')          # straight from Check Dish
+    untouched = _play_perfectly(client, chef, 'burger',
+                                **_finishing('burger', oven_notch_on=False, cart_preset=''))
+    notched = _play_perfectly(client, chef, 'burger', **_finishing('burger', cart_preset=''))
+    assert served_raw['delivery_score'] is None
+    assert notched['delivery_score'] > untouched['delivery_score'] + 5
+    assert notched['score'] > served_raw['score']
+
+
+def test_the_cart_must_reject_the_road_vibration(client, chef):
+    from app import delivery
+    true_w = delivery.road_omega('burger')
+    # where a 1.2 kHz vibration sensor reports the 2.6 kHz road tone (aliased)
+    wrong_w = 2 * 3.141592653589793 * (2600 % 1200) / 1200
+    on_target = _play_perfectly(client, chef, 'burger', **_finishing('burger'))
+    off_target = _play_perfectly(client, chef, 'burger', **_finishing('burger', cart_w0=wrong_w))
+    unstable = _play_perfectly(client, chef, 'burger', **_finishing(
+        'burger', cart_preset='resonator2', cart_r=1.05, cart_w0=1.0))
+    assert on_target['system_score'] > off_target['system_score'] > unstable['system_score']
+    assert on_target['score'] > off_target['score'] > unstable['score']
+
+
+def test_finishing_scores_ignore_client_reported_numbers(client, chef):
+    r = _play_perfectly(client, chef, 'burger', delivery_accuracy=100, system_accuracy=100,
+                        **_finishing('burger', cart_preset='resonator2', cart_r=1.05, cart_w0=1.0))
+    assert r['system_score'] < 50
 
 
 def test_the_bowl_decides_what_gets_mixed(client, chef):
@@ -467,7 +493,7 @@ def test_frontend_master_recipes(client):
 
 
 def test_score_breakdown(client, chef):
-    result = _play_perfectly(client, chef, 'sandwich')
+    result = _play_perfectly(client, chef, 'sandwich', **_finishing('sandwich'))
     assert result['filtering_score'] is not None
     assert result['mixing_score'] is not None
     assert result['transform_score'] is not None
@@ -514,3 +540,25 @@ def test_beam_delivery_endpoint(client, chef):
     assert res2['is_aligned'] is True
     assert res2['accuracy'] >= 90.0
     assert 'Bullseye' in res2['message']
+
+
+def test_the_leaderboard_shows_the_same_overall_score_as_the_score_screen(client, chef):
+    """One number everywhere: dish x 10 x difficulty + time bonus, timed on the server."""
+    from app import gameplay
+    r = _play_perfectly(client, chef, 'burger')
+    # Served straight away: the full (capped) time bonus, x0.8 on easy.
+    assert r['time_bonus'] == round(gameplay.MAX_TIME_BONUS * 0.8)
+    assert r['total_score'] == round(r['score'] * 10 * 0.8) + r['time_bonus']
+    # The board shows each chef's best run by that same number.
+    rows = client.get('/api/leaderboard', params={'recipe_id': 'burger'}).json()
+    mine = next(row for row in rows if row['player_id'] == chef['id'])
+    assert mine['total_score'] >= r['total_score']
+    assert [row['total_score'] for row in rows] == sorted(
+        (row['total_score'] for row in rows), reverse=True)
+
+
+def test_run_total_scales_with_difficulty_and_time_left():
+    from app.gameplay import run_total
+    assert run_total(80, 'easy', 0) == (round(800 * 0.8) + 240, 240)
+    assert run_total(80, 'masterchef', 30) == (round(800 * 1.5) + 90, 90)   # 30 s left
+    assert run_total(80, 'hard', 500) == (1000, 0)                          # out of time

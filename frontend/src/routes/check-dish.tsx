@@ -1,12 +1,13 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { Play, Pause, RotateCcw, Volume2, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Play, Pause, RotateCcw, Volume2, Sparkles, Flame } from "lucide-react";
 
 import { ServeChoiceModal } from "@/components/beamforming/ServeChoiceModal";
 import { ChefFourier } from "@/components/game/ChefFourier";
 import { GameButton } from "@/components/game/GameButton";
 import { RecipeTimerBadge, TimeExpiredModal } from "@/components/game/RecipeTimer";
 import { WaveformDisplay } from "@/components/game/WaveformDisplay";
+import { ovenDefectHz, servedDish } from "@/lib/delivery";
 import { CookedSignalAudioPlayer, type PlaybackState } from "@/lib/audio";
 import {
   useActiveRecipe,
@@ -41,6 +42,15 @@ function CheckDishScreen() {
   const [unlockedStep] = useRecipeProgress();
   const { session } = useRecipeTimer();
   const [cookedSignal] = useCookedSignal(recipe.id);
+  // The dish as it leaves the kitchen: cooked + the burnt overtone cooking left
+  // in it (lib/delivery.ts). Serve now and it stays; the Precision Oven removes it.
+  // It gets its own panel: the main plot is the Cooking lab's (x ∗ h) output,
+  // exactly as cooked (it used to show this defect version under that label).
+  const servedSamples = useMemo(
+    () => servedDish(recipe.id, cookedSignal.samples),
+    [recipe.id, cookedSignal.samples],
+  );
+  const defectHz = Math.round(ovenDefectHz(recipe.id));
   // The Mixing curve (carried through marinating) the dish is drawn along.
   const [curveRef] = usePipelineStageSignal(recipe.id, "marinated");
 
@@ -65,6 +75,18 @@ function CheckDishScreen() {
       p.destroy();
     };
   }, [cookedSignal]);
+
+  const [defectPlayer, setDefectPlayer] = useState<CookedSignalAudioPlayer | null>(null);
+  const [defectPlaying, setDefectPlaying] = useState(false);
+  useEffect(() => {
+    const p = new CookedSignalAudioPlayer({ ...cookedSignal, samples: servedSamples }, (state) =>
+      setDefectPlaying(state.isPlaying),
+    );
+    setDefectPlayer(p);
+    return () => {
+      p.destroy();
+    };
+  }, [cookedSignal, servedSamples]);
 
   // Needs the Cooking lab done (it unlocks 7). This page used to unlock 7
   // itself on load — even while showing this lock — skipping Cooking.
@@ -349,6 +371,39 @@ function CheckDishScreen() {
               </div>
             </div>
           </div>
+        </div>
+
+        {/* The defect cooking left behind: what is served if you skip the oven */}
+        <div className="kitchen-card mt-6 border-2 border-amber-500/40 bg-card/95 p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Flame className="h-4 w-4 text-amber-500" />
+              <span className="font-mono text-[10px] font-extrabold tracking-wider text-amber-600 uppercase">
+                As it leaves the kitchen: dish + burnt overtone ({defectHz} Hz)
+              </span>
+            </div>
+            <GameButton
+              size="sm"
+              variant="secondary"
+              onClick={() => (defectPlaying ? defectPlayer?.pause() : defectPlayer?.replay())}
+              className="uppercase font-bold tracking-wider"
+            >
+              {defectPlaying ? "Pause" : "▶ Hear the defect"}
+            </GameButton>
+          </div>
+          <div className="mt-4">
+            <WaveformDisplay
+              height={140}
+              label={`Served now: (x ∗ h)(t) + burnt overtone at ${defectHz} Hz`}
+              samples={servedSamples}
+              curveRef={curveRef}
+              color="var(--primary)"
+            />
+          </div>
+          <p className="mt-3 text-sm text-muted-foreground">
+            Cooking left a tone at {defectHz} Hz, between two harmonics of the dish. Serve now and
+            it stays in the dish; the Precision Oven can find it in the spectrum and notch it out.
+          </p>
         </div>
 
         {/* Footer Navigation & Serving Actions */}

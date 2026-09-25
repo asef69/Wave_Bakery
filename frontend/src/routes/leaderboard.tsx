@@ -451,10 +451,10 @@ function LeaderboardScreen() {
                           <div className="flex items-center gap-6 text-right">
                             <div>
                               <p className="font-display text-xl font-extrabold text-gradient-warm">
-                                {entry.score}
+                                {entry.total_score ?? Math.round(entry.score * 10)}
                               </p>
                               <p className="font-mono text-[10px] text-muted-foreground">
-                                Authoritative Score
+                                Authoritative Score · dish {entry.score}%
                               </p>
                             </div>
                           </div>
@@ -675,7 +675,7 @@ function LeaderboardScreen() {
                         <p className="text-[10px] text-muted-foreground">Attempts</p>
                       </div>
                       <div>
-                        <p className="font-extrabold text-primary">{r.average_score} pts</p>
+                        <p className="font-extrabold text-primary">{r.average_score}/100</p>
                         <p className="text-[10px] text-muted-foreground">Avg Score</p>
                       </div>
                       <div>

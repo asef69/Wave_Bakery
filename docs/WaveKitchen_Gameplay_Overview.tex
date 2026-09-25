@@ -61,8 +61,8 @@ Marinating & Time shift (delay) $x(t-t_0)$ \\
 Caramelizing & Amplitude modulation $x(t)\,[1+m\cos(2\pi f_c t)]$ \\
 Chopping & Sampling / decimation and aliasing \\
 Cooking appliance & An LTI system with impulse response $h[n]$; cooking is convolution $y=x*h$ \\
-Precision Oven & Sampling theorem, DFT/FFT, frequency-domain equalisation, IDFT reconstruction \\
-Delivery cart & Discrete-time system $H(z)$: poles, zeros, stability, frequency response \\
+Precision Oven & Find and notch the burnt overtone: sampling theorem, DFT/FFT, IDFT reconstruction \\
+Delivery cart & Reject the road vibration with $H(z)$: poles, zeros, stability, aliased sensing \\
 Tasting table & Similarity metrics between the player's dish and the reference dish \\
 \bottomrule
 \end{tabularx}
@@ -444,68 +444,74 @@ right appliance scores 100 even if earlier stages were imperfect.
 \end{impactbox}
 
 % --------------------------------------------------------------------
-\subsection{Check Dish}
-\textbf{What the player does.} Inspects and listens to the cooked dish, then either
-serves it immediately or takes it to the Precision Oven
+\subsection{Check Dish --- hear the defect}
+\textbf{What the player does.} Inspects and listens to the dish \emph{as it leaves the
+kitchen}: the cooked dish plus the \textbf{burnt overtone} cooking left in it (a
+recipe-specific tone between two harmonics of the dish). Then either serves it now ---
+the overtone stays in the dish --- or takes it to the Precision Oven to remove it
 (\file{components/beamforming/ServeChoiceModal.tsx}).
-\begin{filesbox}\file{frontend/src/routes/check-dish.tsx}, \file{frontend/src/components/game/WaveformDisplay.tsx}.\end{filesbox}
+\begin{filesbox}\file{frontend/src/routes/check-dish.tsx}, \fn{servedDish} in \file{frontend/src/lib/delivery.ts}.\end{filesbox}
 \begin{impactbox}
-No computation of its own: it is a checkpoint that lets the player hear the result
-of convolution before the optional finishing stations.
+The decision point for the finishing stations: serving now keeps the defect, which lowers
+the similarity to the target on the score screen and on the server.
 \end{impactbox}
 
 % --------------------------------------------------------------------
-\subsection{Precision Oven --- sampling theorem and the DFT}
+\subsection{Precision Oven --- remove the burnt overtone}
 \textbf{What the player does.} Five steps:
 \begin{enumerate}
 \item \textbf{Sampling}: pick a sampling rate $f_s$ and watch the reconstruction; below
-  $2f_{\max}$ the dish aliases.
+  $2f_{\max}$ the dish aliases. The overtone is part of the dish, so it raises $f_{\max}$.
 \item \textbf{Unlock}: type the minimum safe rate; it must satisfy $f_s\geq 2f_{\max}$ and
   be at most 64\,Hz.
-\item \textbf{FFT lab}: see the dish's spectrum next to the target's and tune three
-  bands (Base Warmth 0--6\,Hz, Crumb 6--16\,Hz, Top Crisp 16--32\,Hz), a browning cutoff
-  and a charred-notch filter.
+\item \textbf{FFT lab}: compare the dish's spectrum with the target's. The target has no
+  overtone, so a spike stands out; remove it with the charred-notch filter (or the
+  browning cutoff, which also removes real harmonics) and balance the three bands.
 \item \textbf{IFFT}: rebuild the dish from the edited spectrum and listen.
-\item \textbf{Plate}: save the result as the delivered dish.
+\item \textbf{Plate}: the rebuilt dish becomes the delivered dish.
 \end{enumerate}
 \begin{filesbox}
 \file{frontend/src/routes/beam-delivery.tsx} (the Precision Oven screen; the file name
-is historical), \file{frontend/src/lib/precision-oven-dsp.ts}, \fn{computeSignalSimilarity}
-in \file{frontend/src/lib/dsp.ts}.
+is historical), \file{frontend/src/lib/precision-oven-dsp.ts},
+\file{frontend/src/lib/delivery.ts}; backend \fn{apply_oven} in \file{backend/app/delivery.py}.
 \end{filesbox}
 \begin{conceptbox}
-The Nyquist--Shannon sampling theorem, aliasing and frequency folding, the DFT and
-its frequency axis $f_k=k f_s/N$, zero padding, the radix-2 Cooley--Tukey FFT,
-frequency-domain filtering, Hermitian symmetry of real signals, the inverse DFT, and
-band-limited (sinc/Dirichlet) reconstruction.
+Spectral diagnosis (finding an unwanted component in the DFT), notch vs low-pass filtering
+and their side effects, the Nyquist--Shannon sampling theorem and aliasing, the DFT axis
+$f_k=kf_s/N$, zero padding, the radix-2 FFT, Hermitian symmetry, the inverse DFT and
+band-limited (Dirichlet) reconstruction.
 \end{conceptbox}
 \begin{impactbox}
-The oven score (spectrum match 40\,\%, waveform fidelity 50\,\%, sampling efficiency
-10\,\%) becomes the Precision Oven Finishing accuracy, which counts for 10\,\% of the
-dish score on both the score screen and the server.
+The rebuilt dish \emph{is} what gets served, so the oven changes the final similarity
+directly. Leaving the overtone scores about 50--70; notching it scores about 90--98. The
+server receives the oven \emph{settings} and applies the same filter to its own dish.
 \end{impactbox}
 
 % --------------------------------------------------------------------
-\subsection{System Delivery --- the z-plane}
-\textbf{What the player does.} Chooses the cart's ``suspension'' (a 1st-order
-low-pass, a 2nd-order resonator, a moving average or a notch), drags the pole on
-the z-plane (radius $r$, angle $\omega_0$) and picks the sensor sampling rate. The
-screen shows poles/zeros, $|H(e^{j\omega})|$, phase, the dish spectrum before and
-after the cart, and an impulse-response animation; ``Listen equalized dish'' plays
-the dish filtered by the cart.
+\subsection{System Delivery --- reject the road vibration}
+\textbf{What the player does.} The road adds a \textbf{vibration tone} (recipe-specific
+frequency) to the dish on the cart. The player chooses the cart's suspension (1st-order
+low-pass, 2nd-order resonator, moving average, notch), places the pole or zero on the
+z-plane (radius $r$, angle $\omega_0$) and picks the vibration sensor's sampling rate. An
+orange marker shows where the sensor reports the vibration on $|H(e^{j\omega})|$; the cart's
+filtered output is what gets served (``Listen equalized dish'').
 \begin{filesbox}
 \file{frontend/src/routes/system-delivery.tsx}, \file{frontend/src/components/system/SystemResponsePlotter.tsx},
-\file{frontend/src/lib/z-system.ts}; backend \fn{system_score_for} in \file{backend/app/gameplay.py}.
+\file{frontend/src/lib/z-system.ts}, \fn{deliverOnCart} in \file{frontend/src/lib/delivery.ts};
+backend \fn{deliver_on_cart} in \file{backend/app/delivery.py}.
 \end{filesbox}
 \begin{conceptbox}
-The z-transform, transfer functions $H(z)=g\,\prod(z-z_i)/\prod(z-p_j)$, difference
-equations, poles and zeros, BIBO stability (all poles inside $|z|=1$), frequency
-response on the unit circle, FIR (moving average) vs IIR (resonator, low-pass) systems.
+Filter design with poles and zeros: a zero on the unit circle at the disturbance
+frequency (notch) removes it; a low-pass pole trades vibration removal against dulling
+the dish; poles outside $|z|=1$ make the system unstable (BIBO). Aliasing: a sensor
+sampling below twice the vibration frequency reports a folded frequency, so a notch aimed
+at that reading misses the real tone.
 \end{conceptbox}
 \begin{impactbox}
-A stable, alias-free cart scores 100 (unstable 15, and $\times0.6$ below a 4\,kHz
-sensor). The server recomputes this from the settings and counts it for 5\,\% of
-the dish score.
+The cart's output is the final dish. A notch on the real vibration scores about 92--98, a
+tuned low-pass about 85--93, no filtering or the default about 50--80, a notch aimed at the
+aliased reading about 65, and an unstable cart below 50. The server rebuilds the same
+vibration and filter from the settings.
 \end{impactbox}
 
 % --------------------------------------------------------------------
@@ -603,8 +609,8 @@ Time shift & Marinating & Delay is the simplest system & Transformation score, s
 Amplitude modulation & Caramelize & Sidebands as ``browning'' & Server pipeline (2 recipes) \\
 Sampling, decimation, aliasing & Chop, Oven & Coarse chopping loses detail; Nyquist & Server pipeline (2 recipes); oven score \\
 LTI systems, impulse response, convolution & Cooking & Each appliance is a system $h$ & Central to the dish; Cooking score \\
-DFT/FFT, IDFT, zero padding, reconstruction & Precision Oven & Finishing in the frequency domain & 10\,\% of dish score \\
-z-transform, poles/zeros, stability & System Delivery & A stable cart delivers the dish & 5\,\% of dish score \\
+DFT/FFT, notch filtering, IDFT, reconstruction & Precision Oven & Cooking leaves a burnt overtone to find and remove & The oven's output is the served dish (about +30 similarity) \\
+z-transform, poles/zeros, stability, aliasing & System Delivery & The road shakes the dish; the cart must reject it & The cart's output is the served dish; unstable ruins it \\
 Correlation, MSE/SNR, spectral similarity & Score & Objective comparison with the target & The final score, stars, leaderboard \\
 \bottomrule
 \end{longtable}
@@ -636,9 +642,6 @@ Signals \& Systems content or to have no effect on the game's result.
 \item \textbf{WAV impulse-response loader} \fn{loadCookingImpulseAudio} in
   \file{frontend/src/lib/cooking-audio.ts}: never called; cooking always uses the static
   kernels.
-\item \textbf{Sensor sampling-rate toggle} on System Delivery: it changes the score
-  factor and colours, but the plotted spectrum does not change with it.
-\item \textbf{Check Dish}: a checkpoint with no computation or score of its own.
 \item \textbf{Chop Lab aliasing is simulated in the browser}: when anti-aliasing is off it
   adds a synthetic tone rather than genuinely folding frequencies (the server's
   \fn{decimate} does real aliasing).

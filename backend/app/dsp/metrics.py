@@ -88,10 +88,21 @@ def spectral_similarity(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.clip(float(np.dot(A, B)) / np.sqrt(na * nb), 0.0, 1.0))
 
 
-def dish_metrics(target: np.ndarray, player: np.ndarray) -> dict:
-    """Composite comparison of two dishes. `score` is 0..100."""
-    t = C.normalize(target, 0.9)
-    p = C.normalize(player, 0.9)
+def dish_metrics(target: np.ndarray, player: np.ndarray, common_scale: bool = False) -> dict:
+    """
+    Composite comparison of two dishes. `score` is 0..100.
+
+    common_scale=True scales BOTH by the same factor (target peak -> 0.9), so a
+    level difference (e.g. over-seasoning) counts; the default normalises each
+    dish on its own and compares shape only.
+    """
+    if common_scale:
+        s = 0.9 / max(C.peak(target), 1e-12)
+        t = C.gain(target, s)
+        p = C.gain(player, s)
+    else:
+        t = C.normalize(target, 0.9)
+        p = C.normalize(player, 0.9)
 
     snr = snr_db(t, p)
     corr = normalized_correlation(t, p)

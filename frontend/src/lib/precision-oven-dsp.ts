@@ -822,6 +822,86 @@ export function computeStandardFFT(samples: number[], fs = 64, N_FFT = 64): Spec
  */
 export const computeSignalFFT = computeStandardFFT;
 
+import { isOnePeriod } from "./dsp";
+
+export interface OvenSettings {
+  lowGain: number; // 0.2 to 2.5
+  midGain: number; // 0.2 to 2.5
+  highGain: number; // 0.2 to 2.5
+  cutoffHz: number; // 10 to 32 Hz
+  notchHz?: number; // 14 to 28 Hz
+  notchActive?: boolean;
+}
+
+function ovenBandOf(freq: number): SpectrumBin["band"] {
+  if (freq < 0) return "none";
+  return freq < 6.0 ? "low" : freq < 16.0 ? "mid" : freq <= 32.0 ? "high" : "none";
+}
+
+/**
+ * The oven's gain at `freq` Hz: band gain (by physical frequency fk),
+ * browning low-pass (smooth Gaussian roll-off above cutoffHz) and the charred
+ * notch (98 % rejection at its centre; 0.88 left 12 % of a burnt overtone).
+ * Mirrored by oven_gain in backend/app/delivery.py.
+ */
+export function ovenGainAt(freq: number, options: OvenSettings): number {
+  const { lowGain, midGain, highGain, cutoffHz, notchHz = 22, notchActive = false } = options;
+  const band = ovenBandOf(freq);
+  const bandGain =
+    band === "low" ? lowGain : band === "mid" ? midGain : band === "high" ? highGain : 1.0;
+  const cutoffAtten =
+    freq > cutoffHz ? Math.max(0.01, Math.exp(-Math.pow((freq - cutoffHz) / 4.0, 2))) : 1.0;
+  const df = Math.abs(freq - notchHz);
+  const notchAtten = notchActive && df <= 3.0 ? 1.0 - 0.98 / (1.0 + Math.pow(df / 1.5, 2)) : 1.0;
+  return bandGain * cutoffAtten * notchAtten;
+}
+
+/**
+ * The oven's output dish: its equaliser applied to the full-resolution dish
+ * (one period, bin k = k Hz), for every frequency the oven can see (up to
+ * fs/2); what lies above passes unchanged. The station only lets the player
+ * through with fs >= 2·fmax, and then sampling is lossless by Nyquist — so
+ * the dish must not lose anything but what the equaliser removes. (Rebuilding
+ * it from the fs samples dropped everything above fs/2, and fmax only holds
+ * 95 % of the energy, so even a perfect run came out audibly different.)
+ */
+export function applyOvenToDish(samples: number[], fs: number, options: OvenSettings): number[] {
+  const n = samples.length;
+  if (n < 3) return [...samples];
+  // The pipeline's dishes repeat their first sample at the end (one period).
+  const periodic = isOnePeriod(samples);
+  const period = periodic ? n - 1 : n;
+  const nyq = fs / 2;
+  const out = new Array<number>(period).fill(0);
+  // Direct DFT (period is 400, not a power of two); cheap at this size.
+  const half = Math.floor(period / 2);
+  const re = new Array<number>(half + 1).fill(0);
+  const im = new Array<number>(half + 1).fill(0);
+  for (let k = 0; k <= half; k++) {
+    let r = 0;
+    let i = 0;
+    for (let m = 0; m < period; m++) {
+      const a = (2 * Math.PI * k * m) / period;
+      r += samples[m]! * Math.cos(a);
+      i -= samples[m]! * Math.sin(a);
+    }
+    const g = k <= nyq ? ovenGainAt(k, options) : 1.0;
+    re[k] = r * g;
+    im[k] = i * g;
+  }
+  for (let m = 0; m < period; m++) {
+    let acc = re[0]!;
+    for (let k = 1; k <= half; k++) {
+      const a = (2 * Math.PI * k * m) / period;
+      const w = period % 2 === 0 && k === half ? 1 : 2;
+      acc += w * (re[k]! * Math.cos(a) - im[k]! * Math.sin(a));
+    }
+    out[m] = acc / period;
+  }
+  if (periodic) out.push(out[0]!);
+  return out;
+}
+
 /**
  * Modifies the frequency-domain spectrum according to oven heat element tuning:
  * X'[k] = H[k] * X[k]
@@ -838,14 +918,7 @@ export const computeSignalFFT = computeStandardFFT;
  */
 export function tuneOvenFrequencies(
   originalFFT: SpectrumData,
-  options: {
-    lowGain: number; // 0.2 to 2.5
-    midGain: number; // 0.2 to 2.5
-    highGain: number; // 0.2 to 2.5
-    cutoffHz: number; // 10 to 32 Hz
-    notchHz?: number; // 14 to 28 Hz
-    notchActive?: boolean;
-  },
+  options: OvenSettings,
 ): {
   tunedReal: number[];
   tunedImag: number[];
@@ -853,7 +926,6 @@ export function tuneOvenFrequencies(
   tunedBins: SpectrumBin[];
   spectrumSimilarity: number;
 } {
-  const { lowGain, midGain, highGain, cutoffHz, notchHz = 22, notchActive = false } = options;
   const n = originalFFT.real.length;
   const half = n / 2;
 
@@ -867,38 +939,8 @@ export function tuneOvenFrequencies(
   for (let k = 0; k <= half; k++) {
     const freq = originalFFT.frequencies[k] ?? 0;
 
-    // 1. Strict Band Gain based on exact physical frequency fk
-    let bandGain = 1.0;
-    let band: SpectrumBin["band"] = "none";
-    if (freq >= 0 && freq < 6.0) {
-      bandGain = lowGain;
-      band = "low";
-    } else if (freq >= 6.0 && freq < 16.0) {
-      bandGain = midGain;
-      band = "mid";
-    } else if (freq >= 16.0 && freq <= 32.0) {
-      bandGain = highGain;
-      band = "high";
-    } else {
-      bandGain = 1.0;
-      band = "none";
-    }
-
-    // 2. Browning Low-Pass Cutoff (smooth Gaussian roll-off above cutoffHz)
-    let cutoffAtten = 1.0;
-    if (freq > cutoffHz) {
-      const excess = freq - cutoffHz;
-      cutoffAtten = Math.max(0.01, Math.exp(-Math.pow(excess / 4.0, 2)));
-    }
-
-    // 3. Charred Notch Rejection (narrow notch Q ~= 5 around notchHz)
-    let notchAtten = 1.0;
-    if (notchActive && Math.abs(freq - notchHz) <= 3.0) {
-      const df = Math.abs(freq - notchHz);
-      notchAtten = 1.0 - 0.88 / (1.0 + Math.pow(df / 1.5, 2));
-    }
-
-    const totalScale = bandGain * cutoffAtten * notchAtten;
+    const band = ovenBandOf(freq);
+    const totalScale = ovenGainAt(freq, options);
 
     // Positive frequency bin
     tunedReal[k] = (originalFFT.real[k] ?? 0) * totalScale;
@@ -967,7 +1009,11 @@ export function computeSignalIFFT(
     }
     reconstructed[i] = acc;
   }
-  return normalizeOvenSamples(reconstructed, 0.95);
+  // Keep the dish's real amplitude. Rescaling to a 0.95 peak made quiet
+  // dishes come back ~3x louder and loud (over-seasoned) ones quieter, both of
+  // which the comparison with the target then misjudged. Playback normalises
+  // loudness on its own.
+  return reconstructed;
 }
 
 /** Dirichlet kernel: the band-limited interpolator for N samples per period 1. */

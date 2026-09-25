@@ -1,5 +1,5 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, CheckCircle2, Play, Radio, RotateCcw, Sliders, Volume2 } from "lucide-react";
 
 import { ChefFourier } from "@/components/game/ChefFourier";
@@ -12,7 +12,8 @@ import {
   type SystemPresetType,
 } from "@/components/system/SystemResponsePlotter";
 import { CookedSignalAudioPlayer, type PlaybackState } from "@/lib/audio";
-import { hasPipelineStageSignal } from "@/lib/pipeline";
+import { deliverOnCart, roadOmega, sensedRoadOmega } from "@/lib/delivery";
+import { hasPipelineStageSignal, savePipelineStageSignal } from "@/lib/pipeline";
 import {
   recordStageAccuracy,
   updateRecipeRunSession,
@@ -22,12 +23,7 @@ import {
   useRecipeProgress,
   useRecipeTimer,
 } from "@/lib/recipes";
-import {
-  SYSTEM_ALIAS_FREE_FS,
-  applySystem,
-  systemAccuracy,
-  systemPolesZeros,
-} from "@/lib/z-system";
+import { SYSTEM_ALIAS_FREE_FS, gainAt, systemPolesZeros } from "@/lib/z-system";
 
 export const Route = createFileRoute("/system-delivery")({
   head: () => ({
@@ -95,28 +91,59 @@ function SystemDeliveryLab() {
   );
   const isStable = system.poles.every((p) => Math.hypot(p.re, p.im) < 1);
 
-  // The dish really goes through the cart's H(z). An unstable system blows
-  // up; normalizing keeps it audible as the runaway ringing it is.
-  const equalizedSamples = useMemo(() => {
-    const y = applySystem(dishSamples, system);
-    const peak = y.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
-    return peak > 1e-9 ? y.map((v) => (v / peak) * 0.95) : y;
-  }, [dishSamples, system]);
+  // The road shakes the dish: a vibration tone at the recipe's road frequency
+  // (lib/delivery.ts). The cart's H(z) must reject it without dulling the dish.
+  // The dish really goes through the cart's H(z) and the output is what gets
+  // served; the score is how close it is to the dish before the road shook it.
+  const delivery = useMemo(
+    () => deliverOnCart(recipe.id, dishSamples, system),
+    [recipe.id, dishSamples, system],
+  );
+  const cartInput = delivery.input;
+  const equalizedSamples = delivery.served;
+  const accuracy = delivery.accuracy;
+  // The vibration sensor samples at `samplingRateHz`; a slow sensor reports an
+  // aliased frequency, so a notch aimed at that reading misses the real tone.
+  const sensedOmega = sensedRoadOmega(recipe.id, samplingRateHz);
+  // What the cart does to the two things that matter: the road tone (at its
+  // TRUE frequency) and the dish (low frequencies, ≈ DC). A resonator aimed
+  // at the road boosts it — the served dish is then mostly vibration.
+  const roadGain = gainAt(system, roadOmega(recipe.id));
+  const dishGain = gainAt(system, 0);
 
-  const accuracy = systemAccuracy(system, samplingRateHz);
+  // Record the result once per settings change (saving the served stage
+  // re-renders this page; keying on the settings keeps that from looping).
+  const lastSavedRef = useRef<string | null>(null);
   useEffect(() => {
+    const key = `${recipe.id}|${preset}|${poleRadius}|${frequency}|${samplingRateHz}|${accuracy}`;
+    if (lastSavedRef.current === key) return;
+    lastSavedRef.current = key;
     recordStageAccuracy("system", accuracy);
-  }, [accuracy]);
-
-  // The server scores this station from the settings themselves (sent with
-  // the next params sync, e.g. right before the dish is submitted).
-  useEffect(() => {
+    // The server rebuilds this from the settings (sent with the next params
+    // sync, e.g. right before the dish is submitted).
     updateRecipeRunSession({
       systemPreset: preset,
       systemPoleRadius: poleRadius,
+      systemOmega: frequency,
       systemSamplingHz: samplingRateHz,
     });
-  }, [preset, poleRadius, samplingRateHz]);
+    savePipelineStageSignal(recipe.id, "served", {
+      ...(deliveredSignal ?? {}),
+      recipeId: recipe.id,
+      stage: "served",
+      samples: equalizedSamples,
+      timestamp: Date.now(),
+    });
+  }, [
+    recipe.id,
+    preset,
+    poleRadius,
+    frequency,
+    samplingRateHz,
+    accuracy,
+    equalizedSamples,
+    deliveredSignal,
+  ]);
 
   // A new system means a new signal: drop the old player (the cleanup effect
   // above destroys it) so the next play uses the current filter.
@@ -148,7 +175,11 @@ function SystemDeliveryLab() {
     ? "⚠️ Careful! The delivery cart's wheel wobble r ≥ 1.0 is past the safe limit — it'll shake the dish right off the tray!"
     : samplingRateHz < SYSTEM_ALIAS_FREE_FS
       ? "⚠️ The wobble sensor is sampling too slowly (fs < 2·f_max) — it's misreading fast shakes as slow ones!"
-      : "Cart's rolling smooth! Wobble stays inside the safe limit and the sensor keeps up with every shake.";
+      : roadGain > 1
+        ? `⚠️ Your cart is AMPLIFYING the road vibration ×${roadGain.toFixed(1)}! A resonator's peak boosts whatever it sits on — put zeros (a notch) on the road ω instead.`
+        : accuracy >= 90
+          ? "Smooth delivery! The road vibration is gone and the dish arrives intact."
+          : "The road is shaking the dish — see the orange road ω marker? Put a zero (notch) on it, or damp it without dulling the dish.";
 
   // Reached from the Precision Oven, which unlocks 8. This page used to
   // unlock 7 on load, so opening its URL skipped straight to the score.
@@ -198,6 +229,35 @@ function SystemDeliveryLab() {
               {isStable ? "Rolling Smooth" : "Shaking Apart!"}
             </span>
           </div>
+
+          {isStable && (
+            <div className="flex items-center gap-2 font-mono text-xs">
+              <span className="text-muted-foreground uppercase text-[10px]">Road vibration:</span>
+              <span
+                className={
+                  roadGain > 1
+                    ? "font-bold text-rose-400"
+                    : roadGain > 0.3
+                      ? "font-bold text-amber-500"
+                      : "font-bold text-emerald-400"
+                }
+              >
+                ×{roadGain.toFixed(2)}{" "}
+                {roadGain > 1 ? "(amplified!)" : roadGain > 0.3 ? "(gets through)" : "(removed)"}
+              </span>
+              <span className="text-muted-foreground">·</span>
+              <span className="text-muted-foreground uppercase text-[10px]">Dish:</span>
+              <span
+                className={
+                  Math.abs(dishGain - 1) > 0.3
+                    ? "font-bold text-amber-500"
+                    : "font-bold text-emerald-400"
+                }
+              >
+                ×{dishGain.toFixed(2)}
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-3">
@@ -234,7 +294,8 @@ function SystemDeliveryLab() {
           onPoleRadiusChange={setPoleRadius}
           onFrequencyChange={setFrequency}
           onSamplingRateChange={setSamplingRateHz}
-          dishSignal={dishSamples}
+          dishSignal={cartInput}
+          vibrationOmega={sensedOmega}
         />
       </section>
 

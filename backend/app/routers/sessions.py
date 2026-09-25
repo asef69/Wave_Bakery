@@ -8,6 +8,7 @@ filter chain, re-runs the pipeline and computes the score itself.
 from __future__ import annotations
 
 import random
+from datetime import datetime
 
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -289,16 +290,21 @@ def submit(session: GameSession = Depends(owned_session),
                   if tier_unlocked else 0)
 
         m = verdict['metrics']
+        served_at = datetime.utcnow()
+        total, bonus = gameplay.run_total(
+            verdict['score'], session.difficulty,
+            (served_at - session.created_at).total_seconds())
         attempt = Attempt(
             session_id=session.id, player_id=player.id, recipe_id=recipe.id,
             score=verdict['score'], stars=verdict['stars'],
             prep_score=verdict['prep_score'], snr_db=m['snr_db'], mse=m['mse'],
             correlation=m['correlation'], spectral_similarity=m['spectral_similarity'],
             points_awarded=points, difficulty=session.difficulty,
+            total_score=total, time_bonus=bonus,
             notes=verdict['notes'], params=session.params or {})
         db.add(attempt)
 
-        session.served_at = func.now()
+        session.served_at = served_at
         db.flush()
         if tier_unlocked:
             gameplay.maybe_unlock(db, player)   # after the attempt exists, so it counts
@@ -329,6 +335,7 @@ def submit(session: GameSession = Depends(owned_session),
         snr_db=m['snr_db'], mse=m['mse'],
         correlation=m['correlation'], spectral_similarity=m['spectral_similarity'],
         points_awarded=points, total_points=player.points,
+        total_score=attempt.total_score, time_bonus=attempt.time_bonus,
         unlocked_tier=player.unlocked_tier, rank_title=title,
         notes=verdict['notes'],
         target=schemas.SignalPayload(**gameplay.signal_payload(target_final)),

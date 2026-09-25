@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applySystem, systemAccuracy, systemPolesZeros } from "@/lib/z-system";
+import { applySystem, gainAt, systemPolesZeros } from "@/lib/z-system";
 
 const step = new Array(200).fill(1);
 
@@ -41,14 +41,19 @@ describe("System Delivery z-plane systems", () => {
     const y = applySystem(x, systemPolesZeros("notch", 0.5, w));
     expect(Math.max(...y.slice(300).map(Math.abs))).toBeLessThan(0.01);
   });
+});
 
-  it("accuracy rewards a stable, alias-free cart", () => {
-    const stable = systemPolesZeros("resonator2", 0.85, 1);
-    const unstable = systemPolesZeros("resonator2", 1.05, 1);
-    expect(systemAccuracy(stable, 8000)).toBe(100);
-    expect(systemAccuracy(stable, 1200)).toBe(60);
-    expect(systemAccuracy(unstable, 8000)).toBeLessThan(20);
-    // Notch poles sit at 0.85 regardless of the r slider.
-    expect(systemAccuracy(systemPolesZeros("notch", 1.1, 1), 8000)).toBe(100);
+describe("gainAt", () => {
+  const w0 = (2 * Math.PI * 2300) / 8000; // cake's road tone
+  it("a notch removes the tone and leaves the dish at unity", () => {
+    const sys = systemPolesZeros("notch", 0.85, w0);
+    expect(gainAt(sys, w0)).toBeLessThan(1e-9);
+    expect(gainAt(sys, 0)).toBeCloseTo(1, 6);
+  });
+  it("a resonator aimed at the road amplifies it and dulls the dish", () => {
+    // The settings of a real run: resonator2, r = 0.9, ω = 1.85.
+    const sys = systemPolesZeros("resonator2", 0.9, 1.85);
+    expect(gainAt(sys, w0)).toBeGreaterThan(4);
+    expect(gainAt(sys, 0)).toBeLessThan(0.5);
   });
 });

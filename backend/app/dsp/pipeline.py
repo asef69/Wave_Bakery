@@ -110,9 +110,11 @@ def stage_chop(x: np.ndarray, factor: int | None,
 
 
 def stage_cook(x: np.ndarray, appliance_ids: Sequence[str]) -> np.ndarray:
+    # Plain convolution, no clip-guard rescaling (apply_system rescales loud
+    # outputs to 0.95, which erased the seasoning level from the dish).
     y = x.astype(np.float32, copy=True)
     for aid in appliance_ids:
-        y = C.apply_system(y, systems.ir(aid), keep_length=True)
+        y = C.convolve(y, systems.ir(aid))[: x.size].astype(np.float32)
     return y
 
 

@@ -11,6 +11,15 @@ from ..models import Attempt, GameSession, Player, Recipe
 
 router = APIRouter(tags=['leaderboard'])
 
+# A run's overall score (what the score screen shows). Runs from before it
+# was stored fall back to dish x 10 (no difficulty or time bonus known).
+_TOTAL = func.coalesce(Attempt.total_score, func.round(Attempt.score * 10))
+
+
+def _total_of(attempt: Attempt) -> int:
+    return (attempt.total_score if attempt.total_score is not None
+            else round(attempt.score * 10))
+
 
 @router.get('/leaderboard', response_model=list[schemas.LeaderboardRow])
 def leaderboard(recipe_id: str | None = Query(None),
@@ -32,7 +41,7 @@ def leaderboard(recipe_id: str | None = Query(None),
 
     # No row cap before de-duplicating: `limit * 4` let one chef's many runs
     # fill the window and push other chefs off the board.
-    rows = q.order_by(desc(Attempt.score), Attempt.created_at).all()
+    rows = q.order_by(desc(_TOTAL), Attempt.created_at).all()
 
     seen: set[str] = set()
     out: list[schemas.LeaderboardRow] = []
@@ -43,7 +52,8 @@ def leaderboard(recipe_id: str | None = Query(None),
         seen.add(key)
         out.append(schemas.LeaderboardRow(
             rank=len(out) + 1, player_id=attempt.player_id, handle=handle,
-            score=round(attempt.score, 2), stars=attempt.stars,
+            score=round(attempt.score, 2), total_score=_total_of(attempt),
+            stars=attempt.stars,
             recipe_id=attempt.recipe_id, recipe_name=recipe_name,
             difficulty=attempt.difficulty, created_at=attempt.created_at))
         if len(out) >= limit:
@@ -57,7 +67,7 @@ def global_ranking(limit: int = Query(20, ge=1, le=100),
     """Career table: cumulative points, chef rank, dishes served."""
     rows = (db.query(Player,
                      func.count(Attempt.id).label('served'),
-                     func.coalesce(func.max(Attempt.score), 0.0).label('best'))
+                     func.coalesce(func.max(_TOTAL), 0).label('best'))
             .outerjoin(Attempt, Attempt.player_id == Player.id)
             .group_by(Player.id)
             .order_by(desc(Player.points), desc('best'))
@@ -68,7 +78,7 @@ def global_ranking(limit: int = Query(20, ge=1, le=100),
         out.append(schemas.GlobalRankRow(
             rank=i, player_id=player.id, handle=player.handle,
             points=player.points, rank_title=title,
-            dishes_served=int(served), best_score=round(float(best), 2)))
+            dishes_served=int(served), best_score=int(best)))
     return out
 
 

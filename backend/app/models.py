@@ -184,6 +184,10 @@ class Attempt(Base):
     correlation: Mapped[float] = mapped_column(Float, default=0.0)
     spectral_similarity: Mapped[float] = mapped_column(Float, default=0.0)
     points_awarded: Mapped[int] = mapped_column(Integer, default=0)
+    # The run's overall score, as the score screen shows it: dish x 10 x
+    # difficulty + time bonus (server clock). NULL for runs from before it.
+    total_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    time_bonus: Mapped[int | None] = mapped_column(Integer, nullable=True)
     difficulty: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
     notes: Mapped[list] = mapped_column(JSON, default=list)
     params: Mapped[dict] = mapped_column(JSON, default=dict)

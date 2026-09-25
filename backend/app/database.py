@@ -35,6 +35,8 @@ _LATER_COLUMNS = [
     ('players', 'password_hash', 'VARCHAR(200)'),
     ('game_sessions', 'difficulty', 'VARCHAR(16)'),
     ('attempts', 'difficulty', 'VARCHAR(16)'),
+    ('attempts', 'total_score', 'INTEGER'),
+    ('attempts', 'time_bonus', 'INTEGER'),
 ]
 
 
