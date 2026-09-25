@@ -46,10 +46,13 @@ def client():
 
 @pytest.fixture(scope='module')
 def chef(client):
-    r = client.post('/api/players', json={'handle': 'Test Chef'})
+    r = client.post('/api/players', json={'handle': 'Test Chef', 'password': PW})
     assert r.status_code == 201
     body = r.json()
     return {'token': body['token'], 'id': body['id']}
+
+
+PW = 'correct horse'
 
 
 def auth(chef):
@@ -77,11 +80,12 @@ def test_appliance_detail_exposes_its_system(client):
 
 # ------------------------------------------------------------------ players
 def test_duplicate_handles_are_rejected(client, chef):
-    assert client.post('/api/players', json={'handle': 'Test Chef'}).status_code == 409
+    assert client.post('/api/players',
+                       json={'handle': 'Test Chef', 'password': PW}).status_code == 409
 
 
 def test_login_existing_chef(client, chef):
-    r = client.post('/api/players/login', json={'handle': 'Test Chef'})
+    r = client.post('/api/players/login', json={'handle': 'Test Chef', 'password': PW})
     assert r.status_code == 200
     body = r.json()
     assert body['handle'] == 'Test Chef'
@@ -89,18 +93,41 @@ def test_login_existing_chef(client, chef):
 
 
 def test_login_unknown_chef_fails(client):
-    r = client.post('/api/players/login', json={'handle': 'Nonexistent Chef'})
+    r = client.post('/api/players/login', json={'handle': 'Nonexistent Chef', 'password': PW})
     assert r.status_code == 404
+
+
+def test_login_needs_the_right_password(client, chef):
+    """Knowing a chef's name is no longer enough to get their token."""
+    for path in ('/api/players/login', '/api/players/auth-or-register'):
+        r = client.post(path, json={'handle': 'Test Chef', 'password': 'wrong-pass'})
+        assert r.status_code == 401
+        assert 'token' not in r.json()
+    assert client.post('/api/players/login', json={'handle': 'Test Chef'}).status_code == 422
+
+
+def test_legacy_chef_without_password_sets_it_on_first_login(client):
+    from app.database import get_db
+    from app.models import Player
+    db = next(app.dependency_overrides[get_db]())   # the API's test database
+    db.add(Player(handle='Legacy Chef'))            # no password_hash, like old rows
+    db.commit()
+    db.close()
+    first = client.post('/api/players/login', json={'handle': 'Legacy Chef', 'password': 'first-pw'})
+    assert first.status_code == 200
+    again = client.post('/api/players/login', json={'handle': 'Legacy Chef', 'password': 'other-pw'})
+    assert again.status_code == 401
 
 
 def test_auth_or_register_existing_and_new(client, chef):
     # Existing chef
-    r1 = client.post('/api/players/auth-or-register', json={'handle': 'Test Chef'})
+    r1 = client.post('/api/players/auth-or-register', json={'handle': 'Test Chef', 'password': PW})
     assert r1.status_code == 200
     assert r1.json()['token'] == chef['token']
 
     # New chef
-    r2 = client.post('/api/players/auth-or-register', json={'handle': 'Brand New Chef'})
+    r2 = client.post('/api/players/auth-or-register',
+                     json={'handle': 'Brand New Chef', 'password': PW})
     assert r2.status_code == 200
     assert r2.json()['handle'] == 'Brand New Chef'
 
@@ -123,9 +150,55 @@ def test_profile(client, chef):
 
 
 # ------------------------------------------------------------------ locking
-def test_locked_tiers_cannot_be_started(client, chef):
-    r = client.post('/api/sessions', json={'recipe_id': 'feast'}, headers=auth(chef))
-    assert r.status_code == 403
+def test_locked_tiers_are_ranked_but_earn_no_points(client, chef):
+    """Locked-tier runs used to 403 at start, silently leaving them off the board."""
+    before = client.get('/api/players/me', headers=auth(chef)).json()
+    r = client.post('/api/sessions', json={'recipe_id': 'feast', 'difficulty': 'hard'},
+                    headers=auth(chef))
+    assert r.status_code == 201
+    result = client.post(f"/api/sessions/{r.json()['id']}/submit", headers=auth(chef)).json()
+    assert result['points_awarded'] == 0
+    after = client.get('/api/players/me', headers=auth(chef)).json()
+    assert after['points'] == before['points']
+    assert after['unlocked_tier'] == before['unlocked_tier']
+    rows = client.get('/api/leaderboard', params={'recipe_id': 'feast'}).json()
+    assert any(row['handle'] == 'Test Chef' for row in rows)
+
+
+def test_a_served_dish_cannot_be_edited(client, chef):
+    sid = client.post('/api/sessions', json={'recipe_id': 'toast'},
+                      headers=auth(chef)).json()['id']
+    assert client.post(f'/api/sessions/{sid}/submit', headers=auth(chef)).status_code == 200
+    h = auth(chef)
+    assert client.put(f'/api/sessions/{sid}/params', headers=h,
+                      json={'seasoning': 1.0}).status_code == 409
+    assert client.post(f'/api/sessions/{sid}/ingredients/0/filter', headers=h,
+                       json={'bands': [], 'tools': []}).status_code == 409
+    assert client.delete(f'/api/sessions/{sid}', headers=h).status_code == 409
+
+
+def test_leaderboard_filters_by_difficulty(client, chef):
+    for diff in ('easy', 'masterchef'):
+        sid = client.post('/api/sessions', json={'recipe_id': 'sandwich', 'difficulty': diff},
+                          headers=auth(chef)).json()['id']
+        client.post(f'/api/sessions/{sid}/submit', headers=auth(chef))
+    rows = client.get('/api/leaderboard',
+                      params={'recipe_id': 'sandwich', 'difficulty': 'masterchef'}).json()
+    assert rows and all(r['difficulty'] in ('masterchef', None) for r in rows)
+    assert any(r['difficulty'] == 'masterchef' for r in rows)
+
+
+def test_one_chef_with_many_runs_does_not_crowd_out_others(client, chef):
+    rival = client.post('/api/players', json={'handle': 'Rival', 'password': PW}).json()
+    for _ in range(6):
+        sid = client.post('/api/sessions', json={'recipe_id': 'toast'},
+                          headers=auth(chef)).json()['id']
+        client.post(f'/api/sessions/{sid}/submit', headers=auth(chef))
+    sid = client.post('/api/sessions', json={'recipe_id': 'toast'},
+                      headers={'X-Player-Token': rival['token']}).json()['id']
+    client.post(f'/api/sessions/{sid}/submit', headers={'X-Player-Token': rival['token']})
+    rows = client.get('/api/leaderboard', params={'recipe_id': 'toast', 'limit': 2}).json()
+    assert {r['handle'] for r in rows} == {'Test Chef', 'Rival'}
 
 
 # ----------------------------------------------------------------- sessions
@@ -207,14 +280,14 @@ def test_unknown_appliance_is_rejected(client, chef):
 def test_another_player_cannot_touch_the_session(client, chef):
     sid = client.post('/api/sessions', json={'recipe_id': 'toast'},
                       headers=auth(chef)).json()['id']
-    other = client.post('/api/players', json={'handle': 'Intruder'}).json()
+    other = client.post('/api/players', json={'handle': 'Intruder', 'password': PW}).json()
     r = client.get(f'/api/sessions/{sid}',
                    headers={'X-Player-Token': other['token']})
     assert r.status_code == 403
 
 
 # ------------------------------------------------------------------ scoring
-def _play_perfectly(client, chef, recipe_id: str) -> dict:
+def _play_perfectly(client, chef, recipe_id: str, **extra_params) -> dict:
     """Clean every ingredient fully and use the recipe's exact parameters."""
     db = SessionLocal()
     recipe: Recipe = db.get(Recipe, recipe_id)
@@ -238,6 +311,7 @@ def _play_perfectly(client, chef, recipe_id: str) -> dict:
         'carrier': spec['caramelize_carrier'], 'depth': spec['caramelize_depth'],
         'chop_factor': spec['chop_factor'], 'anti_alias': True,
         'appliances': spec['appliances'],
+        **extra_params,
     }
     client.put(f'/api/sessions/{sid}/params', headers=auth(chef), json=params)
     return client.post(f'/api/sessions/{sid}/submit', headers=auth(chef)).json()
@@ -248,6 +322,40 @@ def test_a_careful_cook_scores_well(client, chef):
     assert result['score'] > 60
     assert result['stars'] >= 3
     assert result['target']['audio'] and result['player_dish']['audio']
+
+
+def test_cooking_score_isolates_the_appliance_choice(client, chef):
+    """Right appliances = perfect cooking, even though the whole dish isn't."""
+    result = _play_perfectly(client, chef, 'burger')
+    assert result['cooking_score'] == 100.0
+
+
+def test_finishing_stations_count_towards_the_score(client, chef):
+    stable = dict(system_preset='resonator2', system_pole_radius=0.85, system_sampling_hz=8000)
+    unstable = dict(system_preset='resonator2', system_pole_radius=1.05, system_sampling_hz=1200)
+    good = _play_perfectly(client, chef, 'burger', delivery_accuracy=100, **stable)
+    bad = _play_perfectly(client, chef, 'burger', delivery_accuracy=0, **unstable)
+    assert good['delivery_score'] == 100 and good['system_score'] == 100
+    # System score is computed on the server from the cart settings.
+    assert bad['delivery_score'] == 0 and bad['system_score'] == 9
+    assert good['score'] > bad['score']
+
+
+def test_system_score_ignores_a_client_reported_value(client, chef):
+    r = _play_perfectly(client, chef, 'burger', system_accuracy=100,
+                        system_preset='lowpass1', system_pole_radius=1.1)
+    assert r['system_score'] == 15
+
+
+def test_the_bowl_decides_what_gets_mixed(client, chef):
+    full = _play_perfectly(client, chef, 'burger',
+                           bowl=['Bun', 'Beef Patty', 'Cheese', 'Lettuce', 'Tomato', 'Salt'])
+    missing = _play_perfectly(client, chef, 'burger', bowl=['Bun', 'Beef Patty'])
+    extra = _play_perfectly(client, chef, 'burger',
+                            bowl=['Bun', 'Beef Patty', 'Cheese', 'Lettuce', 'Tomato', 'Salt',
+                                  'Garlic', 'Mushroom'])
+    assert full['mixing_score'] > missing['mixing_score']
+    assert full['mixing_score'] > extra['mixing_score']
 
 
 def test_an_untouched_pipeline_scores_badly_with_useful_notes(client, chef):

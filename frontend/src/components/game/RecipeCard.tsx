@@ -48,7 +48,9 @@ export function RecipeCard({ recipe, onCook }: { recipe: Recipe; onCook: () => v
 
       <header className="flex items-start justify-between gap-2 pl-3">
         <div>
-          <h3 className="font-display text-2xl font-extrabold text-foreground">{effectiveRecipe.name}</h3>
+          <h3 className="font-display text-2xl font-extrabold text-foreground">
+            {effectiveRecipe.name}
+          </h3>
           <p className="text-xs font-semibold text-muted-foreground">{effectiveRecipe.tagline}</p>
         </div>
         <span

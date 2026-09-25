@@ -7,14 +7,14 @@ import { GameButton } from "@/components/game/GameButton";
 import { IngredientGlyph, type IngredientKind } from "@/components/game/IngredientGlyph";
 import { SignalAudioPlayer } from "@/lib/audio";
 import {
-  api,
   computeMixedSignal,
   getMathematicalSignal,
-  getRecipeRunSession,
   type IngredientDetail,
   recipes,
   recordStageAccuracy,
   savePipelineStageSignal,
+  syncSessionParamsToBackend,
+  updateRecipeRunSession,
   useActiveRecipe,
   useRecipeProgress,
   useSelectedIngredients,
@@ -84,7 +84,7 @@ function buildTrayIngredients(
       name: s.name,
       kind: (s.kind ?? "generic") as IngredientKind,
       freq: s.freq ?? 2 + (resolvedIdx % 4) * 1.5,
-      amp: math?.defaultAmplitude ?? (0.5 + (resolvedIdx % 3) * 0.25),
+      amp: math?.defaultAmplitude ?? 0.5 + (resolvedIdx % 3) * 0.25,
       // Must match Signal Generation's phase (seed: 0) exactly — see the
       // identical note in filtering.tsx's activeQueue. A per-index phase
       // here made every ingredient's individual trace in the Mixing bowl a
@@ -98,7 +98,6 @@ function buildTrayIngredients(
 const W = 1000;
 const H = 320;
 const MID = H / 2;
-
 
 /** Oscilloscope frame: grid, axes and tick labels. */
 function Scope({ children }: { children: React.ReactNode }) {
@@ -205,7 +204,7 @@ function MixingLab() {
       }
     }
     return map;
-  }, [recipe.id, trayIngredients]);
+  }, [recipe.id, recipe.ingredientDetails, trayIngredients]);
 
   const storedMixed = useMemo(() => {
     if (typeof window !== "undefined") {
@@ -244,7 +243,10 @@ function MixingLab() {
 
   const mixedSignal = useMemo(() => {
     if (inBowl.length === 0) return null;
-    return computeMixedSignal(recipe.id, inBowl.map((i) => i.name));
+    return computeMixedSignal(
+      recipe.id,
+      inBowl.map((i) => i.name),
+    );
   }, [recipe.id, inBowl]);
 
   // Once handleMix confirms the backend's real superposition, this holds
@@ -331,17 +333,15 @@ function MixingLab() {
     // Invalidate downstream stages since mixing output has changed
     invalidateDownstreamStages(recipe.id, "mixed");
 
+    // computeMixedSignal carries the 2D mixing curve for parametric bowls,
+    // so Seasoning gets this shape.
     savePipelineStageSignal(recipe.id, "mixed", mixedSignal);
+    setCommittedMixedSamples(mixedSignal.samples);
 
-    const session = getRecipeRunSession();
-    const isFullRecipeBowl = bowlSet.size === recipeSet.size && matchCount === recipeSet.size;
-    if (session?.backendSessionId && isFullRecipeBowl) {
-      api
-        .getStages(session.backendSessionId)
-        .catch((err) => {
-          console.warn("Backend mix sync error:", err);
-        });
-    }
+    // The server mixes exactly this bowl (it used to always mix the whole
+    // recipe, so missing or extra ingredients never affected its score).
+    updateRecipeRunSession({ bowl: inBowl.map((i) => i.name) });
+    syncSessionParamsToBackend(recipe.id).catch(() => {});
 
     setMixed(true);
     setPlaying(false);

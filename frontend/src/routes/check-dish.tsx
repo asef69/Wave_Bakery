@@ -8,7 +8,13 @@ import { GameButton } from "@/components/game/GameButton";
 import { RecipeTimerBadge, TimeExpiredModal } from "@/components/game/RecipeTimer";
 import { WaveformDisplay } from "@/components/game/WaveformDisplay";
 import { CookedSignalAudioPlayer, type PlaybackState } from "@/lib/audio";
-import { useActiveRecipe, useCookedSignal, useRecipeProgress, useRecipeTimer } from "@/lib/recipes";
+import {
+  useActiveRecipe,
+  useCookedSignal,
+  usePipelineStageSignal,
+  useRecipeProgress,
+  useRecipeTimer,
+} from "@/lib/recipes";
 
 export const Route = createFileRoute("/check-dish")({
   head: () => ({
@@ -32,9 +38,11 @@ export const Route = createFileRoute("/check-dish")({
 
 function CheckDishScreen() {
   const [recipe] = useActiveRecipe();
-  const [unlockedStep, unlock] = useRecipeProgress();
+  const [unlockedStep] = useRecipeProgress();
   const { session } = useRecipeTimer();
   const [cookedSignal] = useCookedSignal(recipe.id);
+  // The Mixing curve (carried through marinating) the dish is drawn along.
+  const [curveRef] = usePipelineStageSignal(recipe.id, "marinated");
 
   const [isServeModalOpen, setIsServeModalOpen] = useState(false);
   const [player, setPlayer] = useState<CookedSignalAudioPlayer | null>(null);
@@ -48,10 +56,6 @@ function CheckDishScreen() {
   });
 
   useEffect(() => {
-    unlock(7);
-  }, [unlock]);
-
-  useEffect(() => {
     const p = new CookedSignalAudioPlayer(cookedSignal, (state) => {
       setPlaybackState(state);
     });
@@ -62,7 +66,9 @@ function CheckDishScreen() {
     };
   }, [cookedSignal]);
 
-  if (unlockedStep < 6) {
+  // Needs the Cooking lab done (it unlocks 7). This page used to unlock 7
+  // itself on load — even while showing this lock — skipping Cooking.
+  if (unlockedStep < 7) {
     return (
       <main className="relative min-h-screen bg-background">
         <TimeExpiredModal />
@@ -227,6 +233,7 @@ function CheckDishScreen() {
               label={`Output Signal: (Input ∗ ${cookedSignal.methodName})(t)`}
               cursorProgress={playbackState.progress}
               samples={cookedSignal.samples}
+              curveRef={curveRef}
               color="var(--signal)"
             />
           </div>

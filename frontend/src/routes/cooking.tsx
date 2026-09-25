@@ -65,7 +65,10 @@ function CookingLab() {
         const key = `wavebakery_pipeline_${recipe.id}_cooked`;
         const stored = window.localStorage.getItem(key);
         if (stored) {
-          const parsed = JSON.parse(stored) as { metadata?: { methodId?: string; pos?: number }; samples?: number[] };
+          const parsed = JSON.parse(stored) as {
+            metadata?: { methodId?: string; pos?: number };
+            samples?: number[];
+          };
           if (Array.isArray(parsed?.samples) && parsed.samples.length > 0) {
             return parsed;
           }
@@ -449,6 +452,7 @@ function CookingLab() {
               className="border-0 p-0"
               label="input signal · marinated"
               samples={marinatedSignal.samples}
+              curveRef={marinatedSignal}
             />
             <span
               className="pointer-events-none absolute top-4 h-20 w-16 rounded-xl border-2 border-primary bg-primary/20 shadow-[0_0_12px_var(--primary)] transition-all duration-75"
@@ -499,7 +503,11 @@ function CookingLab() {
           </div>
 
           <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <MiniWave label="Input Signal x(t)" samples={marinatedSignal.samples} />
+            <MiniWave
+              label="Input Signal x(t)"
+              samples={marinatedSignal.samples}
+              curveRef={marinatedSignal}
+            />
             <MiniWave
               label={method ? `Impulse Response h(t) · ${method.name}` : "Impulse Response h(t)"}
               frequency={method?.freq ?? 6}
@@ -509,11 +517,13 @@ function CookingLab() {
             <MiniWave
               label="Convolved Output (x * h)(t)"
               samples={convolvedSignal.samples}
+              curveRef={marinatedSignal}
               color={isTargetSelected ? "var(--signal)" : "var(--signal-alt)"}
             />
             <MiniWave
               label="Target Cooked Signal"
               samples={targetCookedSignal.samples}
+              curveRef={marinatedSignal}
               color="var(--primary)"
             />
           </div>

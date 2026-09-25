@@ -8,7 +8,6 @@ import { GameButton } from "@/components/game/GameButton";
 import { LabShell } from "@/components/game/LabShell";
 import { SignalAudioPlayer, type PlaybackState } from "@/lib/audio";
 import {
-  api,
   computeMarinatedSignal,
   getNextStationPath,
   getRecipeRunSession,
@@ -22,7 +21,7 @@ import {
   usePipelineStageSignal,
   useRecipeProgress,
 } from "@/lib/recipes";
-import { invalidateDownstreamStages } from "@/lib/pipeline";
+import { invalidateDownstreamStages, pipelineSignalToPath } from "@/lib/pipeline";
 
 export const Route = createFileRoute("/marinate")({
   head: () => ({
@@ -51,20 +50,6 @@ const MAX_TIME = 2.0;
 const STEP_TIME = 0.05;
 const TOL = 0.08;
 
-function marinatedSamplesToPath(samples: number[], width: number, height: number): string {
-  const mid = height / 2;
-  const len = samples.length;
-  if (len === 0) return "";
-  const pts: string[] = [];
-  for (let i = 0; i < len; i++) {
-    const x = (i / (len - 1)) * width;
-    const s = samples[i] ?? 0;
-    const y = mid - s * height * 0.35;
-    pts.push(`${i === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`);
-  }
-  return pts.join(" ");
-}
-
 function MarinatingLab() {
   const [recipe] = useActiveRecipe();
   const [unlockedStep, unlock] = useRecipeProgress();
@@ -77,7 +62,10 @@ function MarinatingLab() {
         const key = `wavebakery_pipeline_${recipe.id}_marinated`;
         const stored = window.localStorage.getItem(key);
         if (stored) {
-          const parsed = JSON.parse(stored) as { metadata?: { timeScale?: number }; samples?: number[] };
+          const parsed = JSON.parse(stored) as {
+            metadata?: { timeScale?: number };
+            samples?: number[];
+          };
           if (Array.isArray(parsed?.samples) && parsed.samples.length > 0) {
             return parsed;
           }
@@ -194,7 +182,7 @@ function MarinatingLab() {
   useEffect(() => {
     if (done || unlockedStep >= 6) {
       if (done) unlock(6);
-      
+
       if (userModifiedRef.current) {
         invalidateDownstreamStages(recipe.id, "marinated");
       }
@@ -207,21 +195,11 @@ function MarinatingLab() {
 
       savePipelineStageSignal(recipe.id, "marinated", playerMarinated);
 
-      const session = getRecipeRunSession();
-      if (session?.backendSessionId) {
-        const payload = {
-          seasoning: session.seasonGain ?? recipe.seasoningTarget.amplitude,
-          frequency: session.seasonFreq ?? recipe.seasoningTarget.frequency,
-          blend: session.seasonFreq ?? recipe.seasoningTarget.frequency,
-          marinate: timeScale,
-          appliances: [session.cookingAppliance || recipe.cookingMethod.id],
-        };
-        api.setParams(session.backendSessionId, payload).catch((err) => {
-          console.warn("Backend setParams sync error:", err);
-        });
-      }
+      // Shared sync reads the dials just saved to the session and keeps the
+      // other stations' values (a hand-built payload here reset them).
+      syncSessionParamsToBackend(recipe.id).catch(() => {});
     }
-  }, [done, unlockedStep, playerMarinated, recipe.id, unlock, accuracy, timeScale, recipe.cookingMethod.id, recipe.seasoningTarget]);
+  }, [done, unlockedStep, playerMarinated, recipe.id, unlock, accuracy, timeScale]);
 
   const chefLine = done
     ? "That feels properly marinated! The waveform aligns with the target timing."
@@ -358,7 +336,7 @@ function MarinatingLab() {
               ))}
               {/* target reference waveform (hidden numerical target) */}
               <path
-                d={marinatedSamplesToPath(targetMarinated.samples, width, height)}
+                d={pipelineSignalToPath(targetMarinated, width, height, 0.35)}
                 fill="none"
                 stroke="var(--primary)"
                 strokeWidth="2.4"
@@ -368,7 +346,7 @@ function MarinatingLab() {
               />
               {/* player marinated waveform */}
               <path
-                d={marinatedSamplesToPath(playerMarinated.samples, width, height)}
+                d={pipelineSignalToPath(playerMarinated, width, height, 0.35)}
                 fill="none"
                 stroke="var(--signal)"
                 strokeWidth="3.4"

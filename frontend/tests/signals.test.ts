@@ -111,13 +111,25 @@ describe("T2: Mathematical Signal Ingredients", () => {
       // Closed parametric signal: Egg
       const pathEgg = computeSuperpositionPath([{ name: "Egg" }], mock1DSamples, W, H);
       const eggMath = getMathematicalSignal("Egg")!;
-      const expectedEgg = parametricPath(W, H, eggMath.parametricCurve!.generatePoints(601), 24, true);
+      const expectedEgg = parametricPath(
+        W,
+        H,
+        eggMath.parametricCurve!.generatePoints(601),
+        24,
+        true,
+      );
       expect(pathEgg).toBe(expectedEgg);
 
       // Open parametric signal: Noodles
       const pathNoodles = computeSuperpositionPath([{ name: "Noodles" }], mock1DSamples, W, H);
       const noodleMath = getMathematicalSignal("Noodles")!;
-      const expectedNoodles = parametricPath(W, H, noodleMath.parametricCurve!.generatePoints(601), 24, false);
+      const expectedNoodles = parametricPath(
+        W,
+        H,
+        noodleMath.parametricCurve!.generatePoints(601),
+        24,
+        false,
+      );
       expect(pathNoodles).toBe(expectedNoodles);
     });
 
@@ -169,11 +181,22 @@ describe("T2: Mathematical Signal Ingredients", () => {
       // Step 1: Add Egg
       const path1 = computeSuperpositionPath([{ name: "Egg" }], mock1DSamples, W, H);
       const eggMath = getMathematicalSignal("Egg")!;
-      const expectedEgg = parametricPath(W, H, eggMath.parametricCurve!.generatePoints(601), 24, true);
+      const expectedEgg = parametricPath(
+        W,
+        H,
+        eggMath.parametricCurve!.generatePoints(601),
+        24,
+        true,
+      );
       expect(path1).toBe(expectedEgg);
 
       // Step 2: Add Tomato
-      const path2 = computeSuperpositionPath([{ name: "Egg" }, { name: "Tomato" }], mock1DSamples, W, H);
+      const path2 = computeSuperpositionPath(
+        [{ name: "Egg" }, { name: "Tomato" }],
+        mock1DSamples,
+        W,
+        H,
+      );
       expect(path2).not.toBe(path1);
 
       // Step 3: Remove Tomato (back to Egg)

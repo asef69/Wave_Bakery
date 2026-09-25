@@ -51,6 +51,19 @@ app.include_router(leaderboard.router, prefix=config.API_PREFIX)
 app.include_router(dsp.router, prefix=config.API_PREFIX)
 
 
+def spa_file(dist_root, full_path: str):
+    """
+    The file to serve for a client path: a real file inside dist, else
+    index.html (client-side routing). The path is resolved and must stay
+    inside dist — without that, '/..%2F..%2Fbackend%2Fwavekitchen.db'
+    served any file the server could read.
+    """
+    candidate = (dist_root / full_path).resolve()
+    if full_path and candidate.is_relative_to(dist_root) and candidate.is_file():
+        return candidate
+    return dist_root / 'index.html'
+
+
 def _mount_frontend() -> None:
     """
     In production the built React bundle is served by the same origin as the
@@ -68,12 +81,11 @@ def _mount_frontend() -> None:
 
     app.mount('/assets', StaticFiles(directory=dist / 'assets'), name='assets')
 
+    dist_root = dist.resolve()
+
     @app.get('/{full_path:path}', include_in_schema=False)
     def spa(full_path: str):
-        candidate = dist / full_path
-        if full_path and candidate.is_file():
-            return FileResponse(candidate)
-        return FileResponse(dist / 'index.html')     # client-side routing
+        return FileResponse(spa_file(dist_root, full_path))
 
 
 @app.get('/api/health', tags=['meta'])

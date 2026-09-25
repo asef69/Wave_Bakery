@@ -7,10 +7,12 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 DATABASE_URL = os.getenv('WK_DATABASE_URL', f'sqlite:///{BASE_DIR / "wavekitchen.db"}')
-CORS_ORIGINS = os.getenv(
+# Explicit origins only: '*' (with credentials allowed) let any website call
+# the API from a visitor's browser. Add more via WK_CORS_ORIGINS if needed.
+CORS_ORIGINS = [o.strip() for o in os.getenv(
     'WK_CORS_ORIGINS',
-    'http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,*'
-).split(',')
+    'http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000'
+).split(',') if o.strip() and o.strip() != '*']
 
 API_PREFIX = '/api'
 APP_NAME = 'WaveKitchen API'

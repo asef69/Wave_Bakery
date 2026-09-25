@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { samplesAlongCurvePath, type PipelineSignal } from "@/lib/pipeline";
 import { cn } from "@/lib/utils";
 
 type WaveformDisplayProps = {
@@ -11,6 +12,8 @@ type WaveformDisplayProps = {
   square?: boolean | undefined;
   cursorProgress?: number | null | undefined;
   samples?: number[] | undefined;
+  /** Pipeline signal whose Mixing curve `samples` should be drawn along. */
+  curveRef?: PipelineSignal | null | undefined;
   parametricPoints?: Array<{ x: number; y: number }> | undefined;
   color?: string | undefined;
   signalParams?:
@@ -186,6 +189,7 @@ export function WaveformDisplay({
   square = false,
   cursorProgress,
   samples,
+  curveRef,
   parametricPoints,
   color = "var(--signal)",
   signalParams,
@@ -198,6 +202,11 @@ export function WaveformDisplay({
     parametricPoints && parametricPoints.length > 0 ? parametricPoints : null;
   const activeSamples = samples && samples.length > 0 ? samples : null;
   const strokeColor = signalParams?.color ?? color;
+  const samplesD = activeSamples
+    ? curveRef
+      ? samplesAlongCurvePath(activeSamples, curveRef, plotWidth, plotHeight, 0.33)
+      : samplePath(plotWidth, plotHeight, activeSamples, square ? 24 : 0)
+    : "";
 
   const currentParametricPoint = useMemo(() => {
     if (!activeParametric || !isCursorActive || activeParametric.length === 0) return null;
@@ -436,7 +445,7 @@ export function WaveformDisplay({
 
               {/* Underlying glow shadow from actual samples */}
               <path
-                d={samplePath(plotWidth, plotHeight, activeSamples, square ? 24 : 0)}
+                d={samplesD}
                 fill="none"
                 stroke={strokeColor}
                 strokeWidth="5"
@@ -445,7 +454,7 @@ export function WaveformDisplay({
               />
               {/* Primary sharp waveform trace from actual samples */}
               <path
-                d={samplePath(plotWidth, plotHeight, activeSamples, square ? 24 : 0)}
+                d={samplesD}
                 fill="none"
                 stroke={strokeColor}
                 strokeWidth="2.5"

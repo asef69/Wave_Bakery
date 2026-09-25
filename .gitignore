@@ -27,3 +27,6 @@ frontend/.wrangler/
 .idea/
 .vscode/
 Thumbs.db
+
+# Windows / OneDrive folder metadata
+desktop.ini

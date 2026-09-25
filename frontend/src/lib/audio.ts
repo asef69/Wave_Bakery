@@ -25,6 +25,33 @@ export interface SignalAudioSource {
 }
 
 /**
+ * Playback loops the sample window, jumping from the last sample straight
+ * back to the first. When a signal does not complete whole cycles in the
+ * window (carrot, milk, a delayed/marinated dish, ...) that jump is a
+ * discontinuity heard as a click on every loop — a buzz at the loop rate.
+ * If the seam jump is sharper than any step inside the signal, blend the last
+ * 5% of the window towards the first sample (raised-cosine ramp) so the loop
+ * is continuous. Genuine edges (square waves) are left alone: their seam is
+ * no sharper than their own edges.
+ */
+export function smoothLoopSeam(samples: number[]): number[] {
+  const n = samples.length;
+  if (n < 8) return samples;
+  let maxStep = 0;
+  for (let i = 1; i < n; i++) {
+    maxStep = Math.max(maxStep, Math.abs((samples[i] ?? 0) - (samples[i - 1] ?? 0)));
+  }
+  const seam = (samples[0] ?? 0) - (samples[n - 1] ?? 0);
+  if (Math.abs(seam) <= 1.5 * maxStep) return samples;
+  const rampStart = Math.floor(n * 0.95);
+  return samples.map((v, i) => {
+    if (i < rampStart) return v;
+    const u = (i - rampStart) / (n - 1 - rampStart);
+    return v + seam * (0.5 - 0.5 * Math.cos(Math.PI * u));
+  });
+}
+
+/**
  * Universal Web Audio synthesis and cursor playback controller for any signal
  * (raw ingredients, cooked dishes, etc.). Synthesizes the actual discrete signal
  * samples into an AudioBuffer and provides frame-accurate synchronization with
@@ -114,7 +141,7 @@ export class SignalAudioPlayer {
       this.buffer = this.ctx.createBuffer(1, numSamples, sampleRate);
       const data = this.buffer.getChannelData(0);
 
-      const samples = source.samples;
+      const samples = smoothLoopSeam(source.samples);
       const numCooked = samples.length;
       if (numCooked === 0) return;
 

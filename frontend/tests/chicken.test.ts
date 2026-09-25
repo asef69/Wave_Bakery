@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  CHICKEN_AUDIO_METADATA,
-  getChickenStaticSamples,
-} from "@/lib/chicken-audio";
+import { CHICKEN_AUDIO_METADATA, getChickenStaticSamples } from "@/lib/chicken-audio";
 import { CHICKEN_STATIC_PCM_SAMPLES } from "@/lib/chicken-samples";
 import { CHICKEN_SIGNAL_DEFINITION } from "@/lib/signals";
 

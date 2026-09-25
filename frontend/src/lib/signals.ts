@@ -1534,12 +1534,7 @@ export function parametricPath(
 /**
  * Maps 1D discrete time-domain samples to an SVG path string ('M ... L ...').
  */
-export function samplesToPath(
-  samples: number[],
-  width = 1000,
-  height = 320,
-  scale = 0.35,
-): string {
+export function samplesToPath(samples: number[], width = 1000, height = 320, scale = 0.35): string {
   const len = samples.length;
   if (len === 0) return "";
   const mid = height / 2;
@@ -1564,42 +1559,43 @@ export function samplesToPath(
  *      x_mix(t) = sum(x_k(t)), y_mix(t) = sum(y_k(t))
  *    preserving the 2D parametric geometry without collapsing into generic 1D waveforms.
  */
-export function computeSuperpositionPath(
+export interface SuperpositionCurve {
+  points: Array<{ x: number; y: number }>;
+  equalScale: boolean;
+}
+
+/**
+ * The 2D geometric superposition drawn by the Mixing lab when any parametric
+ * ingredient is in the bowl (x_mix = Σx_k, y_mix = Σy_k). Returns null when
+ * the bowl is purely 1D, in which case the mix is an ordinary sample sum.
+ */
+export function computeSuperpositionCurve(
   inBowlIngredients: Array<{ name: string }>,
   ingredientSamplesMap: Record<string, number[]>,
-  width = 1000,
-  height = 320,
-  backendMixedSamples: number[] | null = null,
-): string {
-  if (!inBowlIngredients || inBowlIngredients.length === 0) return "";
+): SuperpositionCurve | null {
+  if (!inBowlIngredients || inBowlIngredients.length === 0) return null;
 
   const parametricIngredients = inBowlIngredients.filter((ing) => {
     const math = getMathematicalSignal(ing.name);
     return Boolean(math?.parametricCurve);
   });
+  if (parametricIngredients.length === 0) return null;
 
-  // CASE 1: Exactly ONE ingredient in the bowl
   if (inBowlIngredients.length === 1) {
     const ing = inBowlIngredients[0]!;
-    const math = getMathematicalSignal(ing.name);
-    if (math?.parametricCurve) {
-      const isClosed = !["patty", "lettuce", "noodle"].some((k) =>
-        ing.name.toLowerCase().includes(k),
-      );
-      const pts = math.parametricCurve.generatePoints(601);
-      return parametricPath(width, height, pts, 24, isClosed);
-    }
-    const samples = ingredientSamplesMap[ing.name] ?? (backendMixedSamples?.length ? backendMixedSamples : []);
-    return samplesToPath(samples, width, height, 0.35);
+    const equalScale = !["patty", "lettuce", "noodle"].some((k) =>
+      ing.name.toLowerCase().includes(k),
+    );
+    return {
+      points: getMathematicalSignal(ing.name)!.parametricCurve!.generatePoints(601),
+      equalScale,
+    };
   }
 
-  // CASE 2: At least one parametric ingredient in the bowl
-  if (parametricIngredients.length > 0) {
+  {
     const sampleCount = 601;
     const hasOpen = inBowlIngredients.some((ing) =>
-      ["patty", "lettuce", "noodle"].some((k) =>
-        ing.name.toLowerCase().includes(k),
-      ),
+      ["patty", "lettuce", "noodle"].some((k) => ing.name.toLowerCase().includes(k)),
     );
     const oneDList = inBowlIngredients.filter(
       (ing) => !getMathematicalSignal(ing.name)?.parametricCurve,
@@ -1637,7 +1633,29 @@ export function computeSuperpositionPath(
       pts.push({ x: sumX, y: sumY });
     }
 
-    return parametricPath(width, height, pts, 24, isClosed);
+    return { points: pts, equalScale: isClosed };
+  }
+}
+
+export function computeSuperpositionPath(
+  inBowlIngredients: Array<{ name: string }>,
+  ingredientSamplesMap: Record<string, number[]>,
+  width = 1000,
+  height = 320,
+  backendMixedSamples: number[] | null = null,
+): string {
+  if (!inBowlIngredients || inBowlIngredients.length === 0) return "";
+
+  // Parametric bowls (CASE 1 parametric / CASE 2): 2D geometric superposition.
+  const curve = computeSuperpositionCurve(inBowlIngredients, ingredientSamplesMap);
+  if (curve) return parametricPath(width, height, curve.points, 24, curve.equalScale);
+
+  // CASE 1: exactly one 1D ingredient
+  if (inBowlIngredients.length === 1) {
+    const ing = inBowlIngredients[0]!;
+    const samples =
+      ingredientSamplesMap[ing.name] ?? (backendMixedSamples?.length ? backendMixedSamples : []);
+    return samplesToPath(samples, width, height, 0.35);
   }
 
   // CASE 3: Multiple ordinary 1D ingredients (NO parametric ingredients)

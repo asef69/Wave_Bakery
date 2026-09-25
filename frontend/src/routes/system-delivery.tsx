@@ -1,17 +1,33 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Activity, CheckCircle2, Play, Radio, RotateCcw, Sliders, Volume2 } from "lucide-react";
 
 import { ChefFourier } from "@/components/game/ChefFourier";
 import { GameButton } from "@/components/game/GameButton";
 import { LabShell } from "@/components/game/LabShell";
+import { StationLocked } from "@/components/game/StationLocked";
 import { RecipeTimerBadge, TimeExpiredModal } from "@/components/game/RecipeTimer";
 import {
   SystemResponsePlotter,
   type SystemPresetType,
 } from "@/components/system/SystemResponsePlotter";
 import { CookedSignalAudioPlayer, type PlaybackState } from "@/lib/audio";
-import { useActiveRecipe, useCookedSignal, useRecipeProgress, useRecipeTimer } from "@/lib/recipes";
+import { hasPipelineStageSignal } from "@/lib/pipeline";
+import {
+  recordStageAccuracy,
+  updateRecipeRunSession,
+  useActiveRecipe,
+  useCookedSignal,
+  usePipelineStageSignal,
+  useRecipeProgress,
+  useRecipeTimer,
+} from "@/lib/recipes";
+import {
+  SYSTEM_ALIAS_FREE_FS,
+  applySystem,
+  systemAccuracy,
+  systemPolesZeros,
+} from "@/lib/z-system";
 
 export const Route = createFileRoute("/system-delivery")({
   head: () => ({
@@ -35,11 +51,21 @@ export const Route = createFileRoute("/system-delivery")({
   component: SystemDeliveryLab,
 });
 
-export function SystemDeliveryLab() {
+function SystemDeliveryLab() {
   const [recipe] = useActiveRecipe();
-  const [unlockedStep, unlock] = useRecipeProgress();
+  const [unlockedStep] = useRecipeProgress();
   const { session } = useRecipeTimer();
   const [cookedSignal] = useCookedSignal(recipe.id);
+  // The dish arriving here is the Precision Oven's output (the delivered
+  // stage); fall back to the cooked dish if the oven was skipped.
+  const [deliveredSignal] = usePipelineStageSignal(recipe.id, "delivered");
+  const dishSamples = useMemo(
+    () =>
+      hasPipelineStageSignal(recipe.id, "delivered") && deliveredSignal.samples.length > 0
+        ? deliveredSignal.samples
+        : cookedSignal.samples,
+    [recipe.id, deliveredSignal.samples, cookedSignal.samples],
+  );
 
   // System controls state (No Dragging!)
   const [preset, setPreset] = useState<SystemPresetType>("resonator2");
@@ -58,20 +84,53 @@ export function SystemDeliveryLab() {
   });
 
   useEffect(() => {
-    unlock(7);
-  }, [unlock]);
-
-  useEffect(() => {
     return () => {
       if (audioPlayer) audioPlayer.destroy();
     };
   }, [audioPlayer]);
 
-  const isStable = poleRadius < 1.0;
+  const system = useMemo(
+    () => systemPolesZeros(preset, poleRadius, frequency),
+    [preset, poleRadius, frequency],
+  );
+  const isStable = system.poles.every((p) => Math.hypot(p.re, p.im) < 1);
+
+  // The dish really goes through the cart's H(z). An unstable system blows
+  // up; normalizing keeps it audible as the runaway ringing it is.
+  const equalizedSamples = useMemo(() => {
+    const y = applySystem(dishSamples, system);
+    const peak = y.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+    return peak > 1e-9 ? y.map((v) => (v / peak) * 0.95) : y;
+  }, [dishSamples, system]);
+
+  const accuracy = systemAccuracy(system, samplingRateHz);
+  useEffect(() => {
+    recordStageAccuracy("system", accuracy);
+  }, [accuracy]);
+
+  // The server scores this station from the settings themselves (sent with
+  // the next params sync, e.g. right before the dish is submitted).
+  useEffect(() => {
+    updateRecipeRunSession({
+      systemPreset: preset,
+      systemPoleRadius: poleRadius,
+      systemSamplingHz: samplingRateHz,
+    });
+  }, [preset, poleRadius, samplingRateHz]);
+
+  // A new system means a new signal: drop the old player (the cleanup effect
+  // above destroys it) so the next play uses the current filter.
+  useEffect(() => {
+    setAudioPlayer(null);
+    setPlaybackState((prev) => ({ ...prev, isPlaying: false, isPaused: false, progress: 0 }));
+  }, [equalizedSamples]);
 
   const handleToggleAudio = () => {
     if (!audioPlayer) {
-      const p = new CookedSignalAudioPlayer(cookedSignal, (state) => setPlaybackState(state));
+      const p = new CookedSignalAudioPlayer(
+        { ...cookedSignal, samples: equalizedSamples },
+        (state) => setPlaybackState(state),
+      );
       setAudioPlayer(p);
       p.play();
     } else {
@@ -87,9 +146,23 @@ export function SystemDeliveryLab() {
 
   const chefLine = !isStable
     ? "⚠️ Careful! The delivery cart's wheel wobble r ≥ 1.0 is past the safe limit — it'll shake the dish right off the tray!"
-    : samplingRateHz < 4000
+    : samplingRateHz < SYSTEM_ALIAS_FREE_FS
       ? "⚠️ The wobble sensor is sampling too slowly (fs < 2·f_max) — it's misreading fast shakes as slow ones!"
       : "Cart's rolling smooth! Wobble stays inside the safe limit and the sensor keeps up with every shake.";
+
+  // Reached from the Precision Oven, which unlocks 8. This page used to
+  // unlock 7 on load, so opening its URL skipped straight to the score.
+  if (unlockedStep < 8) {
+    return (
+      <StationLocked
+        station="System Delivery"
+        reason="Finish the dish in the Precision Oven before loading it onto the delivery cart."
+        chefLine="The cart only carries dishes that have been through the Precision Oven!"
+        goTo="/beam-delivery"
+        goLabel="Go to Precision Oven →"
+      />
+    );
+  }
 
   return (
     <LabShell
@@ -161,7 +234,7 @@ export function SystemDeliveryLab() {
           onPoleRadiusChange={setPoleRadius}
           onFrequencyChange={setFrequency}
           onSamplingRateChange={setSamplingRateHz}
-          dishSignal={cookedSignal.samples}
+          dishSignal={dishSamples}
         />
       </section>
 

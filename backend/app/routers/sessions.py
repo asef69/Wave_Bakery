@@ -93,6 +93,13 @@ def _filter_response(db: Session, session: GameSession, item: SessionIngredient,
         accepted=item.accepted)
 
 
+def _require_active(session: GameSession) -> None:
+    """A served or abandoned dish is final: no more edits to it."""
+    if session.status != 'active':
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f'This dish is already {session.status}; start a new one.')
+
+
 def _get_item(session: GameSession, slot: int) -> SessionIngredient:
     for i in session.items:
         if i.slot == slot:
@@ -111,12 +118,13 @@ def start_session(payload: schemas.SessionCreate,
     recipe = db.get(Recipe, payload.recipe_id)
     if recipe is None or not recipe.is_active:
         raise HTTPException(status.HTTP_404_NOT_FOUND, 'No such recipe.')
-    if recipe.tier > player.unlocked_tier:
-        raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            f'Tier {recipe.tier} is locked. Clear earlier tiers first.')
+    # Locked tiers can be played (the client offers every recipe, and a 403
+    # here silently kept those runs off the leaderboard); they just earn no
+    # career points and don't count towards unlocking — see submit().
 
     seed = random.randrange(1, 2 ** 31 - 1)
     session = GameSession(player_id=player.id, recipe_id=recipe.id, seed=seed,
+                          difficulty=payload.difficulty,
                           params=gameplay.default_params(recipe))
     db.add(session)
     db.flush()
@@ -148,6 +156,7 @@ def get_session(session: GameSession = Depends(owned_session),
 @router.delete('/{session_id}', status_code=status.HTTP_204_NO_CONTENT)
 def abandon(session: GameSession = Depends(owned_session),
             db: Session = Depends(get_db)):
+    _require_active(session)
     session.status = 'abandoned'
     db.commit()
 
@@ -161,6 +170,7 @@ def apply_filters(slot: int, payload: schemas.FilterRequest,
                   session: GameSession = Depends(owned_session),
                   db: Session = Depends(get_db)):
     """FFT -> spectral mask -> IFFT, scored for removal and preservation."""
+    _require_active(session)
     item = _get_item(session, slot)
     item.bands = [b.model_dump() for b in payload.bands] or item.bands
     item.tools = [t.model_dump(exclude_none=True) for t in payload.tools]
@@ -174,6 +184,7 @@ def accept_ingredient(slot: int,
                       session: GameSession = Depends(owned_session),
                       db: Session = Depends(get_db)):
     """An ingredient below the cleanliness threshold cannot enter the bowl."""
+    _require_active(session)
     item = _get_item(session, slot)
     resp = _filter_response(db, session, item, False)
     # Rejected for being too dirty OR for being scrubbed to death — the two
@@ -217,6 +228,7 @@ def set_params(payload: schemas.CookParams,
                session: GameSession = Depends(owned_session),
                db: Session = Depends(get_db)):
     """Update the cooking parameters and get every recomputed stage back."""
+    _require_active(session)
     from ..dsp import systems
     for a in payload.appliances:
         if a not in systems.BUILDERS:
@@ -254,31 +266,50 @@ def submit(session: GameSession = Depends(owned_session),
            db: Session = Depends(get_db),
            player: Player = Depends(current_player)):
     """Serve the dish. Everything is recomputed server-side before scoring."""
-    if session.status == 'served':
-        raise HTTPException(status.HTTP_409_CONFLICT, 'This dish has already been served.')
-
-    verdict = gameplay.judge(db, session)
-    recipe: Recipe = session.recipe
-
-    previous_best = (db.query(func.max(Attempt.score))
-                     .filter(Attempt.player_id == player.id,
-                             Attempt.recipe_id == recipe.id).scalar())
-    points = gameplay.award(db, player, recipe, verdict['score'], previous_best)
-
-    m = verdict['metrics']
-    attempt = Attempt(
-        session_id=session.id, player_id=player.id, recipe_id=recipe.id,
-        score=verdict['score'], stars=verdict['stars'],
-        prep_score=verdict['prep_score'], snr_db=m['snr_db'], mse=m['mse'],
-        correlation=m['correlation'], spectral_similarity=m['spectral_similarity'],
-        points_awarded=points, notes=verdict['notes'], params=session.params or {})
-    db.add(attempt)
-
-    session.status = 'served'
-    session.served_at = func.now()
-    db.flush()
-    gameplay.maybe_unlock(db, player)   # after the attempt exists, so it counts
+    # Claim the session atomically: two near-simultaneous submits used to both
+    # pass a plain status check and each write an Attempt (duplicate rows).
+    claimed = (db.query(GameSession)
+               .filter(GameSession.id == session.id, GameSession.status != 'served')
+               .update({GameSession.status: 'served'}, synchronize_session=False))
     db.commit()
+    if not claimed:
+        raise HTTPException(status.HTTP_409_CONFLICT, 'This dish has already been served.')
+    db.refresh(session)
+
+    try:
+        verdict = gameplay.judge(db, session)
+        recipe: Recipe = session.recipe
+
+        previous_best = (db.query(func.max(Attempt.score))
+                         .filter(Attempt.player_id == player.id,
+                                 Attempt.recipe_id == recipe.id).scalar())
+        # Runs on a tier the chef hasn't unlocked are ranked but earn nothing.
+        tier_unlocked = recipe.tier <= player.unlocked_tier
+        points = (gameplay.award(db, player, recipe, verdict['score'], previous_best)
+                  if tier_unlocked else 0)
+
+        m = verdict['metrics']
+        attempt = Attempt(
+            session_id=session.id, player_id=player.id, recipe_id=recipe.id,
+            score=verdict['score'], stars=verdict['stars'],
+            prep_score=verdict['prep_score'], snr_db=m['snr_db'], mse=m['mse'],
+            correlation=m['correlation'], spectral_similarity=m['spectral_similarity'],
+            points_awarded=points, difficulty=session.difficulty,
+            notes=verdict['notes'], params=session.params or {})
+        db.add(attempt)
+
+        session.served_at = func.now()
+        db.flush()
+        if tier_unlocked:
+            gameplay.maybe_unlock(db, player)   # after the attempt exists, so it counts
+        db.commit()
+    except Exception:
+        # Release the claim so the dish can be served again once fixed.
+        db.rollback()
+        db.query(GameSession).filter(GameSession.id == session.id).update(
+            {GameSession.status: 'active'}, synchronize_session=False)
+        db.commit()
+        raise
     db.refresh(attempt)
     db.refresh(player)
 
@@ -293,6 +324,8 @@ def submit(session: GameSession = Depends(owned_session),
         mixing_score=verdict.get('mixing_score'),
         transform_score=verdict.get('transform_score'),
         cooking_score=verdict.get('cooking_score'),
+        delivery_score=verdict.get('delivery_score'),
+        system_score=verdict.get('system_score'),
         snr_db=m['snr_db'], mse=m['mse'],
         correlation=m['correlation'], spectral_similarity=m['spectral_similarity'],
         points_awarded=points, total_points=player.points,

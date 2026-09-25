@@ -47,7 +47,8 @@ if (typeof (globalThis as unknown as { window?: unknown }).window === "undefined
     removeEventListener: () => {},
   };
 } else if (!(globalThis as unknown as { window: { localStorage?: unknown } }).window.localStorage) {
-  (globalThis as unknown as { window: { localStorage: unknown } }).window.localStorage = localStorageStub;
+  (globalThis as unknown as { window: { localStorage: unknown } }).window.localStorage =
+    localStorageStub;
 }
 
 function computeSignalFingerprint(samples: number[]) {
@@ -134,7 +135,10 @@ describe("Signal Continuity & Canonical Fingerprint Suite", () => {
     it("Noodles, Patty, and Lettuce generate valid 401 sample signals", () => {
       const noodleSamples = NOODLE_SIGNAL_DEFINITION.generateSamples({ freq: 5, sampleCount: 401 });
       const pattySamples = PATTY_SIGNAL_DEFINITION.generateSamples({ freq: 2, sampleCount: 401 });
-      const lettuceSamples = LETTUCE_SIGNAL_DEFINITION.generateSamples({ freq: 3, sampleCount: 401 });
+      const lettuceSamples = LETTUCE_SIGNAL_DEFINITION.generateSamples({
+        freq: 3,
+        sampleCount: 401,
+      });
 
       expect(noodleSamples.length).toBe(401);
       expect(pattySamples.length).toBe(401);
@@ -153,7 +157,8 @@ describe("Signal Continuity & Canonical Fingerprint Suite", () => {
       expect(resampled.length).toBe(401);
       expect(resampled.every((s) => Number.isFinite(s))).toBe(true);
       const rmsOrig = Math.sqrt(
-        CHICKEN_STATIC_PCM_SAMPLES.reduce((acc, v) => acc + v * v, 0) / CHICKEN_STATIC_PCM_SAMPLES.length,
+        CHICKEN_STATIC_PCM_SAMPLES.reduce((acc, v) => acc + v * v, 0) /
+          CHICKEN_STATIC_PCM_SAMPLES.length,
       );
       const rmsResampled = Math.sqrt(
         resampled.reduce((acc, v) => acc + v * v, 0) / resampled.length,
@@ -173,7 +178,9 @@ describe("Signal Continuity & Canonical Fingerprint Suite", () => {
 
     pairs.forEach(([ing1, ing2]) => {
       it(`Superposition of ${ing1} + ${ing2} maintains 401 samples and bounds`, () => {
-        const recipe = recipes.find((r) => r.ingredients.includes(ing1) && r.ingredients.includes(ing2)) || recipes[0]!;
+        const recipe =
+          recipes.find((r) => r.ingredients.includes(ing1) && r.ingredients.includes(ing2)) ||
+          recipes[0]!;
         const mixed = computeMixedSignal(recipe.id, [ing1, ing2], 401);
         expect(mixed.samples.length).toBe(401);
         expect(mixed.samples.every((s) => Number.isFinite(s))).toBe(true);
@@ -196,7 +203,10 @@ describe("Signal Continuity & Canonical Fingerprint Suite", () => {
   describe("Exact Numerical Signal Continuity & Stage Hand-offs", () => {
     it("Single ingredient mixing preserves EXACT numerical equality with source", () => {
       const toastRecipe = recipes.find((r) => r.id === "toast")!;
-      const rawCheese = getRecipeIngredientSamples(toastRecipe.id, "Cheese", { sampleCount: 401, seed: 0.85 });
+      const rawCheese = getRecipeIngredientSamples(toastRecipe.id, "Cheese", {
+        sampleCount: 401,
+        seed: 0, // phase 0, as Generate/Filtering/Mixing display it
+      });
       const mixedOne = computeMixedSignal(toastRecipe.id, ["Cheese"], 401);
 
       expect(mixedOne.samples.length).toBe(rawCheese.length);
@@ -231,7 +241,9 @@ describe("Signal Continuity & Canonical Fingerprint Suite", () => {
     it("Delivery to Scoring transition: reconstructedSamples pass intact to getCookedSignal", () => {
       const recipeId = "sandwich";
       // Simulate Precision Oven IFFT reconstructed signal
-      const dummyReconstructed = new Array(401).fill(0).map((_, i) => Math.sin((i / 400) * 2 * Math.PI * 5) * 0.85);
+      const dummyReconstructed = new Array(401)
+        .fill(0)
+        .map((_, i) => Math.sin((i / 400) * 2 * Math.PI * 5) * 0.85);
 
       saveCookedSignal({
         recipeId,

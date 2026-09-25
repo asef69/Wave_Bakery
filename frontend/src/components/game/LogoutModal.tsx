@@ -2,6 +2,7 @@ import { useState } from "react";
 import { LogOut, X, AlertTriangle, ChefHat } from "lucide-react";
 import { ChefFourier } from "@/components/game/ChefFourier";
 import { GameButton } from "@/components/game/GameButton";
+import { api } from "@/lib/api";
 import { logoutChef, useChefName } from "@/lib/recipes";
 
 interface LogoutModalProps {
@@ -30,6 +31,9 @@ export function LogoutModal({
   };
 
   const handleConfirmLogout = () => {
+    // Drop the server token too; keeping it credited the next person's runs
+    // to this chef.
+    api.logoutPlayer();
     logoutChef();
     handleClose();
     if (onLoggedOut) {

@@ -1,6 +1,6 @@
 /**
  * Core Digital Signal Processing (DSP) Engine for the Precision Oven station.
- * 
+ *
  * Implements rigorous CSE220 concepts:
  * 1. Discrete time sampling at selectable rate fs
  * 2. Real-time Nyquist-Shannon Sampling Theorem analysis (fs >= 2 * fmax)
@@ -301,7 +301,8 @@ export function findMaxSignalFrequency(samples: number[]): number {
     const b = ref.bins[k]!;
     running += b.rawMagnitude * b.rawMagnitude;
     if (running / totalEnergy >= 0.95) {
-      return Math.max(8, Math.min(24, Math.round(b.frequency)));
+      // Oven ADC tops out at 64 Hz, so the minimum safe rate 2·fmax must fit.
+      return Math.max(2, Math.min(32, Math.round(b.frequency)));
     }
   }
   return 12;
@@ -310,7 +311,7 @@ export function findMaxSignalFrequency(samples: number[]): number {
 /**
  * Computes the Discrete Fourier Transform (DFT) of the actual discrete sampled points
  * at sampling rate fs.
- * 
+ *
  * Frequency axis is rigorously fk = k * fs / N, spanning [0, fs / 2].
  * Harmonics with f > fs / 2 fold back into |f - k * fs| <= fs / 2.
  */
@@ -319,19 +320,19 @@ export function computeSampledSignalFFT(
   fs: number,
   referenceHarmonics: FoldedHarmonic[],
 ): SpectrumData {
-  const N_FFT = 64;
   const numSamples = samplePoints.length;
+  const N_FFT = fftSizeFor(numSamples);
   const halfSize = N_FFT / 2;
 
   const real = new Array<number>(N_FFT).fill(0);
   const imag = new Array<number>(N_FFT).fill(0);
 
-  // Load discrete samples into array with Hann windowing
+  // The fs samples span 1 s; they go into x[0..fs-1] and the rest is zero
+  // padding, so bin k really is k·fs/N Hz. (Spreading them across all N
+  // slots instead inserted zeros between samples and mislabelled every bin.)
   for (let m = 0; m < numSamples; m++) {
     const w = 0.5 * (1 - Math.cos((2 * Math.PI * m) / Math.max(1, numSamples - 1)));
-    const yVal = samplePoints[m]?.y ?? 0;
-    const idx = Math.min(N_FFT - 1, Math.round((m / (numSamples - 1)) * (N_FFT - 1)));
-    real[idx] = yVal * w;
+    real[m] = (samplePoints[m]?.y ?? 0) * w;
   }
 
   cooleyTukeyRadix2(real, imag, false);
@@ -501,7 +502,7 @@ export function analyzeSamplingAndAliasing(
 /**
  * Computes discrete signal FFT using actual sampling rate fs and power-of-two length N_FFT (default 64).
  * Frequency bin fk = k * fs / N_FFT, covering [0, fs / 2].
- * 
+ *
  * Crucially, band membership is strictly determined by physical frequency fk:
  * - Base Warmth:   0 <= fk < 6.0 Hz
  * - Crumb Texture: 6.0 <= fk < 16.0 Hz
@@ -510,21 +511,20 @@ export function analyzeSamplingAndAliasing(
 export function computeDiscreteSignalFFT(
   samples: number[],
   fs: number,
-  N_FFT = 64,
+  minFftSize = 64,
 ): SpectrumData {
   const numSamples = Math.max(3, Math.round(fs));
+  const N_FFT = fftSizeFor(numSamples, minFftSize);
   const halfSize = N_FFT / 2;
 
   const real = new Array<number>(N_FFT).fill(0);
   const imag = new Array<number>(N_FFT).fill(0);
 
-  // Sample continuous signal at rate fs with Hann windowing
+  // Sample the 1-second signal at rate fs into x[0..fs-1], zero-padded to N,
+  // so bin k is exactly k·fs/N Hz. No window: this spectrum is edited and
+  // inverted back to the dish, and a window would taper the reconstruction.
   for (let m = 0; m < numSamples; m++) {
-    const t = m / fs;
-    const yVal = evaluateContinuousSignal(samples, t);
-    const w = 0.5 * (1 - Math.cos((2 * Math.PI * m) / Math.max(1, numSamples - 1)));
-    const idx = Math.min(N_FFT - 1, Math.round((m / (numSamples - 1)) * (N_FFT - 1)));
-    real[idx] = yVal * w;
+    real[m] = evaluateContinuousSignal(samples, m / fs);
   }
 
   cooleyTukeyRadix2(real, imag, false);
@@ -626,9 +626,27 @@ export function getBandAvailability(fs: number, N_FFT = 64): BandAvailability {
   }
 
   return {
-    base: { status: baseStatus, minHz: 0, maxHz: Math.min(6, nyquistLimit), binCount: baseCount, description: baseDesc },
-    crumb: { status: crumbStatus, minHz: 6, maxHz: Math.min(16, nyquistLimit), binCount: crumbCount, description: crumbDesc },
-    top: { status: topStatus, minHz: 16, maxHz: Math.min(32, nyquistLimit), binCount: topCount, description: topDesc },
+    base: {
+      status: baseStatus,
+      minHz: 0,
+      maxHz: Math.min(6, nyquistLimit),
+      binCount: baseCount,
+      description: baseDesc,
+    },
+    crumb: {
+      status: crumbStatus,
+      minHz: 6,
+      maxHz: Math.min(16, nyquistLimit),
+      binCount: crumbCount,
+      description: crumbDesc,
+    },
+    top: {
+      status: topStatus,
+      minHz: 16,
+      maxHz: Math.min(32, nyquistLimit),
+      binCount: topCount,
+      description: topDesc,
+    },
     nyquistLimit,
   };
 }
@@ -678,9 +696,30 @@ export function computeBandMetrics(
     nominalMaxHz: number;
     sliderKey: "lowGain" | "midGain" | "highGain";
   }> = [
-    { band: "low", name: "Base Warmth", rangeLabel: "0–6 Hz", minHz: 0, nominalMaxHz: 6, sliderKey: "lowGain" },
-    { band: "mid", name: "Crumb Body", rangeLabel: "6–16 Hz", minHz: 6, nominalMaxHz: 16, sliderKey: "midGain" },
-    { band: "high", name: "Top Crisp", rangeLabel: "16–32 Hz", minHz: 16, nominalMaxHz: 32, sliderKey: "highGain" },
+    {
+      band: "low",
+      name: "Base Warmth",
+      rangeLabel: "0–6 Hz",
+      minHz: 0,
+      nominalMaxHz: 6,
+      sliderKey: "lowGain",
+    },
+    {
+      band: "mid",
+      name: "Crumb Body",
+      rangeLabel: "6–16 Hz",
+      minHz: 6,
+      nominalMaxHz: 16,
+      sliderKey: "midGain",
+    },
+    {
+      band: "high",
+      name: "Top Crisp",
+      rangeLabel: "16–32 Hz",
+      minHz: 16,
+      nominalMaxHz: 32,
+      sliderKey: "highGain",
+    },
   ];
 
   return defs.map((def) => {
@@ -728,7 +767,8 @@ export function computeBandMetrics(
       }
     }
 
-    const targetEnergyPct = totalTargetEnergy > 0 ? Math.round((tEnergy / totalTargetEnergy) * 100) : 0;
+    const targetEnergyPct =
+      totalTargetEnergy > 0 ? Math.round((tEnergy / totalTargetEnergy) * 100) : 0;
     const liveEnergyPct = totalLiveEnergy > 0 ? Math.round((lEnergy / totalLiveEnergy) * 100) : 0;
     const ratio = tMagSum > 1e-4 ? lMagSum / tMagSum : 1.0;
 
@@ -785,14 +825,14 @@ export const computeSignalFFT = computeStandardFFT;
 /**
  * Modifies the frequency-domain spectrum according to oven heat element tuning:
  * X'[k] = H[k] * X[k]
- * 
+ *
  * Each slider operates strictly and solely on bins whose actual frequency lies inside its range:
  * - Base Warmth:   0 <= f < 6.0 Hz
  * - Crumb Texture: 6.0 <= f < 16.0 Hz
  * - Top Crisp:     16.0 <= f <= 32.0 Hz
  * - Browning Cutoff: Separate low-pass roll-off H_lp(f) for f > cutoffHz
  * - Charred Notch:   Separate narrow notch H_notch(f) around notchHz
- * 
+ *
  * Crucially, display magnitudes are normalized using the FIXED reference peak from originalFFT,
  * ensuring that modifying one band slider NEVER causes bars in another band to change!
  */
@@ -899,23 +939,50 @@ export function tuneOvenFrequencies(
 
 /**
  * Computes Inverse Fast Fourier Transform (IFFT) to reconstruct time-domain signal.
- * Synthesizes back to pipeline sample count (401 points) with normalized headroom.
+ * The first fs values of the IFFT are the (edited) samples taken at t = m/fs;
+ * they are interpolated back over the 1-second window at the pipeline sample
+ * count (401 points) with normalized headroom. The zero-padding tail is ignored.
  */
 export function computeSignalIFFT(
   real: number[],
   imag: number[],
   targetSampleCount = 401,
+  fs?: number,
 ): number[] {
-  const n = real.length;
   const rCopy = [...real];
   const iCopy = [...imag];
 
   // In-place inverse Cooley-Tukey FFT
   cooleyTukeyRadix2(rCopy, iCopy, true);
 
-  // Resample real part back to pipeline sample count
-  const reconstructed = resampleArray(rCopy, targetSampleCount);
+  const numSamples = fs ? Math.min(rCopy.length, Math.max(3, Math.round(fs))) : rCopy.length;
+  const reconstructed = new Array<number>(targetSampleCount);
+  for (let i = 0; i < targetSampleCount; i++) {
+    // Whittaker–Shannon reconstruction for a periodic (1 s) signal: the
+    // periodic sinc (Dirichlet) kernel over the samples taken at t = m / N.
+    const t = i / (targetSampleCount - 1);
+    let acc = 0;
+    for (let m = 0; m < numSamples; m++) {
+      acc += (rCopy[m] ?? 0) * periodicSinc(t - m / numSamples, numSamples);
+    }
+    reconstructed[i] = acc;
+  }
   return normalizeOvenSamples(reconstructed, 0.95);
+}
+
+/** Dirichlet kernel: the band-limited interpolator for N samples per period 1. */
+function periodicSinc(tau: number, n: number): number {
+  const s = Math.sin(Math.PI * tau);
+  if (Math.abs(s) < 1e-9) return 1;
+  const num = Math.sin(Math.PI * n * tau);
+  return n % 2 === 1 ? num / (n * s) : num / (n * Math.tan(Math.PI * tau));
+}
+
+/** Power-of-two FFT length that holds all fs samples (at least minSize). */
+function fftSizeFor(numSamples: number, minSize = 64): number {
+  let n = minSize;
+  while (n < numSamples) n <<= 1;
+  return n;
 }
 
 /**
@@ -944,29 +1011,8 @@ export function computeSpectrumSimilarity(
 }
 
 /**
- * Computes normalized mathematical similarity (0% - 100%) between reconstructed and target signal.
+ * Waveform similarity is the same metric the final score uses (lib/dsp):
+ * one definition, so the oven's "time-domain match" and the tasting table
+ * agree. (This file used to carry its own 1 − 0.55·NRMSE formula.)
  */
-export function computeSignalSimilarity(
-  candidateSamples: number[],
-  targetSamples: number[],
-): number {
-  if (candidateSamples.length === 0 || targetSamples.length === 0) return 0;
-
-  const len = Math.min(candidateSamples.length, targetSamples.length);
-  let sumSqErr = 0;
-  let targetEnergy = 0;
-
-  for (let i = 0; i < len; i++) {
-    const c = candidateSamples[i] ?? 0;
-    const t = targetSamples[i] ?? 0;
-    const diff = c - t;
-    sumSqErr += diff * diff;
-    targetEnergy += t * t;
-  }
-
-  if (targetEnergy === 0) return 85;
-
-  const nrmse = Math.sqrt(sumSqErr / targetEnergy);
-  const similarity = Math.max(0, Math.min(100, Math.round(100 * (1 - nrmse * 0.55))));
-  return similarity;
-}
+export { computeSignalSimilarity } from "./dsp";

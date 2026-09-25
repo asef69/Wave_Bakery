@@ -9,7 +9,9 @@ describe("T9: Signal Comparison & Scoring Metrics", () => {
   it("yields 1.0 cross-correlation and 100% match for identical signals", () => {
     const sig: number[] = [];
     for (let i = 0; i < 200; i++) {
-      sig.push(Math.sin((2 * Math.PI * 4 * i) / 200) + 0.3 * Math.cos((2 * Math.PI * 12 * i) / 200));
+      sig.push(
+        Math.sin((2 * Math.PI * 4 * i) / 200) + 0.3 * Math.cos((2 * Math.PI * 12 * i) / 200),
+      );
     }
 
     const rXy = normalizedCrossCorrelation(sig, sig);

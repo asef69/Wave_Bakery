@@ -27,6 +27,7 @@ import {
   DIFFICULTY_CONFIGS,
   getRecipeRunSession,
   recipes,
+  submitRunToBackend,
   useChefName,
   type RecipeDifficulty,
 } from "@/lib/recipes";
@@ -91,7 +92,11 @@ function RankBadge({ rank }: { rank: number }) {
 
 function LeaderboardScreen() {
   const [viewMode, setViewMode] = useState<"recipe" | "global" | "analytics">("recipe");
-  const [selectedRecipeId, setSelectedRecipeId] = useState<string>(recipes[0]?.id ?? "burger");
+  // Open on the recipe just played, not always the first one.
+  const [selectedRecipeId, setSelectedRecipeId] = useState<string>(() => {
+    const played = getRecipeRunSession()?.recipeId;
+    return recipes.some((r) => r.id === played) ? played! : (recipes[0]?.id ?? "burger");
+  });
   const [selectedDifficulty, setSelectedDifficulty] = useState<RecipeDifficulty>(
     () => getRecipeRunSession()?.difficulty ?? "easy",
   );
@@ -113,7 +118,7 @@ function LeaderboardScreen() {
     setIsLoading(true);
     try {
       if (viewMode === "recipe") {
-        const rows = await api.getLeaderboard(selectedRecipeId, 30);
+        const rows = await api.getLeaderboard(selectedRecipeId, 30, selectedDifficulty);
         setBackendRows(rows);
         setBackendConnected(true);
       } else if (viewMode === "global") {
@@ -132,10 +137,36 @@ function LeaderboardScreen() {
     }
   };
 
+  // A finished run whose submit never reached the server (backend was down
+  // at the score screen) is still an active session there: serve it now.
+  const [pendingRun, setPendingRun] = useState<{
+    recipeId: string;
+    score?: number | undefined;
+  } | null>(null);
+  const retryPendingSubmit = async () => {
+    const session = getRecipeRunSession();
+    if (!session?.isCompleted || !session.backendSessionId || session.backendSubmitResult) {
+      setPendingRun(null);
+      return;
+    }
+    setPendingRun({ recipeId: session.recipeId, score: session.finalScore });
+    const result = await submitRunToBackend(session.recipeId);
+    if (result) {
+      setPendingRun(null);
+      fetchBackendData();
+    }
+  };
+
   useEffect(() => {
+    retryPendingSubmit();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     fetchBackendData();
-  }, [viewMode, selectedRecipeId]);
+    // fetchBackendData is recreated every render; these are its real inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, selectedRecipeId, selectedDifficulty]);
 
   const currentDiffConfig = DIFFICULTY_CONFIGS[selectedDifficulty];
   const DiffIcon = difficultyIcons[selectedDifficulty];
@@ -364,13 +395,27 @@ function LeaderboardScreen() {
                   </p>
                 </div>
 
+                {pendingRun && pendingRun.recipeId === selectedRecipeId && (
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-500/40 bg-amber-500/10 px-6 py-3 font-mono text-xs text-amber-500">
+                    <span>
+                      Your latest run{pendingRun.score != null ? ` (${pendingRun.score} pts)` : ""}{" "}
+                      hasn&apos;t reached the server yet — the backend was offline when you
+                      finished.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={retryPendingSubmit}
+                      className="rounded-lg border border-amber-500/50 px-2.5 py-1 font-bold uppercase hover:bg-amber-500/20 cursor-pointer"
+                    >
+                      Retry submit
+                    </button>
+                  </div>
+                )}
+
                 {backendRows && backendRows.length > 0 ? (
                   <div className="divide-y divide-border/60">
                     {backendRows.map((entry) => {
-                      const isCurrentPlayer = isChefMatch(
-                        entry.handle,
-                        chefName || "Chef Anonymous",
-                      );
+                      const isCurrentPlayer = isChefMatch(entry.handle, chefName);
 
                       return (
                         <div
@@ -398,6 +443,7 @@ function LeaderboardScreen() {
                               <p className="font-mono text-[10px] text-muted-foreground">
                                 {"⭐".repeat(entry.stars)} ·{" "}
                                 {new Date(entry.created_at).toLocaleDateString()}
+                                {entry.difficulty ? "" : " · difficulty not recorded"}
                               </p>
                             </div>
                           </div>
@@ -419,7 +465,7 @@ function LeaderboardScreen() {
                 ) : fallbackEntries.length > 0 ? (
                   <div className="divide-y divide-border/60">
                     {fallbackEntries.map((entry) => {
-                      const isCurrentPlayer = isChefMatch(entry.chefName, chefName || "Asef");
+                      const isCurrentPlayer = isChefMatch(entry.chefName, chefName);
 
                       return (
                         <div
@@ -507,7 +553,7 @@ function LeaderboardScreen() {
               {globalRows && globalRows.length > 0 ? (
                 <div className="divide-y divide-border/60">
                   {globalRows.map((chef) => {
-                    const isCurrent = isChefMatch(chef.handle, chefName || "Chef Anonymous");
+                    const isCurrent = isChefMatch(chef.handle, chefName);
                     return (
                       <div
                         key={chef.player_id}

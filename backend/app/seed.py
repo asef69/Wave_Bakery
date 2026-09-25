@@ -180,6 +180,8 @@ RECIPES = [
          ingredients=['lettuce', 'tomato', 'cucumber'], washable_ingredients=['lettuce', 'tomato', 'cucumber'],
          appliances=['grill'], cooking_method='grill',
          seasoning=0.9, blend=1.0, marinate=1.02,
+         # Chop station target — must match frontend recipes.ts (chopTarget).
+         chop_factor=3,
          noise_difficulty=1.2, tolerance=1.0,
          teaches=['Sampling & decimation', 'Aliasing / Nyquist', 'High-pass differencing']),
     dict(id='stirfry', name='Sizzling Stir-Fry', emoji='🍜', tier=3, difficulty='Hard',
@@ -190,7 +192,9 @@ RECIPES = [
          appliances=['fry', 'smoke'], cooking_method='fry',
          seasoning=1.15, blend=1.4, marinate=0.12,
          noise_difficulty=1.5, tolerance=0.9,
-         teaches=['Time compression', 'Multi-ingredient superposition', 'Diffuse comb systems']),
+         teaches=['Time compression', 'Multi-ingredient superposition', 'Diffuse comb systems'],
+         # Not in the frontend's recipe book, so it can't be played or ranked.
+         is_active=False),
     dict(id='creme', name='Crème Brûlée', emoji='🍮', tier=3, difficulty='Hard',
          tagline='Steam the custard, then caramelise with AM.', page_number=10,
          prep_time='15 mins', servings='1 ramekin',
@@ -198,6 +202,8 @@ RECIPES = [
          ingredients=['egg', 'sugar', 'milk', 'butter'], washable_ingredients=['egg'],
          appliances=['bake'], cooking_method='bake',
          seasoning=0.75, blend=0.85, marinate=1.16,
+         # Caramelize station target — must match frontend recipes.ts.
+         caramelize_carrier=180.0, caramelize_depth=0.55,
          noise_difficulty=1.6, tolerance=0.85,
          teaches=['Amplitude modulation', 'Sideband generation', 'Dual-resonance systems']),
     dict(id='feast', name="Chef's Grand Feast", emoji='👑', tier=4, difficulty='Masterchef',
@@ -207,6 +213,7 @@ RECIPES = [
          ingredients=['patty', 'cheese', 'tomato', 'lettuce', 'bun'], washable_ingredients=['lettuce', 'tomato'],
          appliances=['grill'], cooking_method='grill',
          seasoning=0.95, blend=1.25, marinate=1.2,
+         chop_factor=2, caramelize_carrier=240.0, caramelize_depth=0.4,
          noise_difficulty=1.9, tolerance=0.75,
          teaches=['Full pipeline', 'System cascading', 'Modulation + sampling combined']),
 ]

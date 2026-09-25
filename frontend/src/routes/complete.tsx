@@ -6,12 +6,10 @@ import { ChefFourier } from "@/components/game/ChefFourier";
 import { DishGlyph } from "@/components/game/DishGlyph";
 import { GameButton } from "@/components/game/GameButton";
 import { SignalAudioPlayer } from "@/lib/audio";
-import { getSavedLeaderboardEntries, saveCurrentDishScoreToLeaderboard } from "@/lib/leaderboard";
 import {
   completeRecipeRun,
   getRecipeBestScore,
   getRecipeRunSession,
-  saveRecipeBestScore,
   useActiveRecipe,
   useChefName,
   useCookedSignal,
@@ -43,27 +41,26 @@ function CompleteScreen() {
   const [cookedSignal] = useCookedSignal(recipe.id);
   const [player, setPlayer] = useState<SignalAudioPlayer | null>(null);
 
+  // Score and stars were decided on the score screen and stored on the run
+  // session. This page used to use a different 3-star scale, read another
+  // chef's saved entry, and re-save the leaderboard entry on every audio play.
   const session = getRecipeRunSession();
-  const bestScore = getRecipeBestScore(recipe.id);
-  const latestEntry = getSavedLeaderboardEntries().find((e) => e.recipeId === recipe.id);
-  const finalScore =
-    session?.recipeId === recipe.id && session?.finalScore != null
-      ? session.finalScore
-      : (latestEntry?.score ?? bestScore ?? 0);
-  const accuracy = latestEntry?.accuracy ?? (session?.cookingAccuracy ?? 94);
+  const thisRun = session?.recipeId === recipe.id ? session : null;
+  const finalScore = thisRun?.finalScore ?? getRecipeBestScore(recipe.id) ?? 0;
+  const stars = thisRun?.finalStars ?? null;
   const starsDisplay =
-    finalScore >= 900 ? "★ ★ ★" : finalScore >= 700 ? "★ ★ ☆" : finalScore > 0 ? "★ ☆ ☆" : "— — —";
+    stars == null ? "— — — — —" : "★ ".repeat(stars) + "☆ ".repeat(Math.max(0, 5 - stars));
 
   useEffect(() => {
-    completeRecipeRun(recipe.id, finalScore);
-    if (finalScore > 0) {
-      saveRecipeBestScore(recipe.id, finalScore);
-    }
-    saveCurrentDishScoreToLeaderboard({ recipeId: recipe.id, score: finalScore });
+    if (thisRun && !thisRun.isCompleted) completeRecipeRun(recipe.id, finalScore);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recipe.id]);
+
+  useEffect(() => {
     return () => {
       if (player) player.destroy();
     };
-  }, [player, recipe.id, finalScore]);
+  }, [player]);
 
   const handlePlayAudio = () => {
     if (player) player.destroy();

@@ -1,0 +1,64 @@
+
+=== INGREDIENTS ===
+Lettuce     f=3    finite=true peak=1.00 cycles=8   intendedHz=165  heardHz=440   seam=0.00xP95 pathNaN=false | curve ok=true corr(y,1D)=0.999
+Tomato      f=5    finite=true peak=1.00 cycles=3   intendedHz=275  heardHz=165   seam=0.00xP95 pathNaN=false | curve ok=true corr(y,1D)=1.000
+Onion       f=6    finite=true peak=0.97 cycles=9   intendedHz=330  heardHz=495   seam=0.00xP95 pathNaN=false | curve ok=true corr(y,1D)=0.999
+Cucumber    f=7    finite=true peak=1.00 cycles=7   intendedHz=385  heardHz=385   seam=0.00xP95 pathNaN=false
+Carrot      f=4.5  finite=true peak=1.00 cycles=5   intendedHz=248  heardHz=275   seam=16.16xP95 pathNaN=false
+Bun         f=3    finite=true peak=1.01 cycles=3   intendedHz=165  heardHz=165   seam=0.00xP95 pathNaN=false
+Bread       f=3    finite=true peak=1.04 cycles=3   intendedHz=165  heardHz=165   seam=0.00xP95 pathNaN=false
+Noodles     f=3    finite=true peak=1.00 cycles=12  intendedHz=165  heardHz=660   seam=0.00xP95 pathNaN=false | curve ok=true corr(y,1D)=0.999
+Flour       f=2    finite=true peak=1.00 cycles=2   intendedHz=110  heardHz=110   seam=0.00xP95 pathNaN=false
+Beef Patty  f=2    finite=true peak=1.00 cycles=3   intendedHz=110  heardHz=165   seam=0.00xP95 pathNaN=false | curve ok=true corr(y,1D)=1.000
+Chicken     f=2.5  finite=true peak=0.79 cycles=1   intendedHz=138  heardHz=55    seam=0.97xP95 pathNaN=false
+Cheese      f=6    finite=true peak=1.00 cycles=6   intendedHz=330  heardHz=330   seam=0.00xP95 pathNaN=false
+Egg         f=4    finite=true peak=1.00 cycles=3   intendedHz=220  heardHz=165   seam=0.00xP95 pathNaN=false | curve ok=true corr(y,1D)=1.000
+Milk        f=5    finite=true peak=0.87 cycles=3   intendedHz=275  heardHz=165   seam=2.74xP95 pathNaN=false
+Butter      f=3    finite=true peak=0.60 cycles=3   intendedHz=165  heardHz=165   seam=0.00xP95 pathNaN=false
+Sugar       f=5    finite=true peak=1.00 cycles=5   intendedHz=275  heardHz=275   seam=2000000000.00xP95 pathNaN=false
+Salt        f=12   finite=true peak=0.40 cycles=12  intendedHz=660  heardHz=660   seam=1.00xP95 pathNaN=false
+Sauce       f=4    finite=true peak=1.00 cycles=3   intendedHz=220  heardHz=165   seam=0.00xP95 pathNaN=false | curve ok=true corr(y,1D)=1.000
+
+=== MIXING ===
+burger       K=6 finite=true peak=0.95 curve=true/true corr(preview1D,saved)=1.000
+sandwich     K=7 finite=true peak=0.95 curve=true/true corr(preview1D,saved)=1.000
+cake         K=5 finite=true peak=0.95 curve=true/true corr(preview1D,saved)=1.000
+noodles      K=5 finite=true peak=0.95 curve=true/true corr(preview1D,saved)=1.000
+chicken-fry  K=5 finite=true peak=0.95 curve=true/true corr(preview1D,saved)=1.000
+toast        K=1 finite=true peak=1.00 curve=false/false corr(preview1D,saved)=1.000
+soup         K=3 finite=true peak=0.95 curve=true/true corr(preview1D,saved)=1.000
+salad        K=3 finite=true peak=0.95 curve=true/true corr(preview1D,saved)=1.000
+creme        K=4 finite=true peak=0.95 curve=true/true corr(preview1D,saved)=1.000
+feast        K=5 finite=true peak=0.95 curve=true/true corr(preview1D,saved)=1.000
+
+=== INGREDIENTS ===
+Lettuce     f=3    finite=true peak=1.00 cycles=8   intendedHz=165  heardHz=440   seam=0.00xP95 pathNaN=false | curve ok=true corr(y,1D)=0.999
+Tomato      f=5    finite=true peak=1.00 cycles=3   intendedHz=275  heardHz=165   seam=0.00xP95 pathNaN=false | curve ok=true corr(y,1D)=1.000
+Onion       f=6    finite=true peak=0.97 cycles=9   intendedHz=330  heardHz=495   seam=0.00xP95 pathNaN=false | curve ok=true corr(y,1D)=0.999
+Cucumber    f=7    finite=true peak=1.00 cycles=7   intendedHz=385  heardHz=385   seam=0.00xP95 pathNaN=false
+Carrot      f=4.5  finite=true peak=1.00 cycles=5   intendedHz=248  heardHz=275   seam=16.16xP95 pathNaN=false
+Bun         f=3    finite=true peak=1.01 cycles=3   intendedHz=165  heardHz=165   seam=0.00xP95 pathNaN=false
+Bread       f=3    finite=true peak=1.04 cycles=3   intendedHz=165  heardHz=165   seam=0.00xP95 pathNaN=false
+Noodles     f=3    finite=true peak=1.00 cycles=12  intendedHz=165  heardHz=660   seam=0.00xP95 pathNaN=false | curve ok=true corr(y,1D)=0.999
+Flour       f=2    finite=true peak=1.00 cycles=2   intendedHz=110  heardHz=110   seam=0.00xP95 pathNaN=false
+Beef Patty  f=2    finite=true peak=1.00 cycles=3   intendedHz=110  heardHz=165   seam=0.00xP95 pathNaN=false | curve ok=true corr(y,1D)=1.000
+Chicken     f=2.5  finite=true peak=0.79 cycles=1   intendedHz=138  heardHz=55    seam=0.97xP95 pathNaN=false
+Cheese      f=6    finite=true peak=1.00 cycles=6   intendedHz=330  heardHz=330   seam=0.00xP95 pathNaN=false
+Egg         f=4    finite=true peak=1.00 cycles=3   intendedHz=220  heardHz=165   seam=0.00xP95 pathNaN=false | curve ok=true corr(y,1D)=1.000
+Milk        f=5    finite=true peak=0.87 cycles=3   intendedHz=275  heardHz=165   seam=2.74xP95 pathNaN=false
+Butter      f=3    finite=true peak=0.60 cycles=3   intendedHz=165  heardHz=165   seam=0.00xP95 pathNaN=false
+Sugar       f=5    finite=true peak=1.00 cycles=5   intendedHz=275  heardHz=275   seam=2000000000.00xP95 pathNaN=false
+Salt        f=12   finite=true peak=0.40 cycles=12  intendedHz=660  heardHz=660   seam=1.00xP95 pathNaN=false
+Sauce       f=4    finite=true peak=1.00 cycles=3   intendedHz=220  heardHz=165   seam=0.00xP95 pathNaN=false | curve ok=true corr(y,1D)=1.000
+
+=== MIXING ===
+burger       K=6 finite=true peak=0.95 curve=true/true corr(preview1D,saved)=1.000
+sandwich     K=7 finite=true peak=0.95 curve=true/true corr(preview1D,saved)=1.000
+cake         K=5 finite=true peak=0.95 curve=true/true corr(preview1D,saved)=1.000
+noodles      K=5 finite=true peak=0.95 curve=true/true corr(preview1D,saved)=1.000
+chicken-fry  K=5 finite=true peak=0.95 curve=true/true corr(preview1D,saved)=1.000
+toast        K=1 finite=true peak=1.00 curve=false/false corr(preview1D,saved)=1.000
+soup         K=3 finite=true peak=0.95 curve=true/true corr(preview1D,saved)=1.000
+salad        K=3 finite=true peak=0.95 curve=true/true corr(preview1D,saved)=1.000
+creme        K=4 finite=true peak=0.95 curve=true/true corr(preview1D,saved)=1.000
+feast        K=5 finite=true peak=0.95 curve=true/true corr(preview1D,saved)=1.000

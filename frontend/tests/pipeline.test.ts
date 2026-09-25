@@ -98,7 +98,7 @@ describe("T7: Recipe Pipeline Dataflow", () => {
     const singleIngredient = "Bun";
     const rawBun = getRecipeIngredientSamples(burgerRecipe.id, singleIngredient, {
       sampleCount: 401,
-      seed: 0.85,
+      seed: 0, // phase 0, as Generate/Filtering/Mixing display it
       noise: 0,
       amplitude: 1.0,
     });

@@ -5,6 +5,7 @@ import { Flame, Sparkles, Volume2, Waves, Activity } from "lucide-react";
 import { ChefFourier } from "@/components/game/ChefFourier";
 import { GameButton } from "@/components/game/GameButton";
 import { LabShell } from "@/components/game/LabShell";
+import { StationLocked } from "@/components/game/StationLocked";
 import { WaveformDisplay } from "@/components/game/WaveformDisplay";
 import { SignalAudioPlayer } from "@/lib/audio";
 import {
@@ -13,6 +14,7 @@ import {
   updateRecipeRunSession,
   useActiveRecipe,
   usePipelineStageSignal,
+  useRecipeProgress,
 } from "@/lib/recipes";
 import { cn } from "@/lib/utils";
 
@@ -38,6 +40,7 @@ export const Route = createFileRoute("/caramelize")({
 });
 
 function CaramelizeLabScreen() {
+  const [unlockedStep] = useRecipeProgress();
   const [recipe] = useActiveRecipe();
   const [marinatedSignal] = usePipelineStageSignal(recipe.id, "marinated");
   const navigate = useNavigate();
@@ -97,11 +100,16 @@ function CaramelizeLabScreen() {
   };
 
   const handleProceed = () => {
+    // No cookingAppliance here: the Cooking lab pre-selects whatever is
+    // stored, so setting the recipe's method handed the player the answer.
     updateRecipeRunSession({
-      cookingAppliance: recipe.cookingMethod.id,
+      caramelizeCarrier: carrierFreq,
+      caramelizeDepth: depth,
     });
+    // Its own accuracy (it was saved as "cooking" and then overwritten by the
+    // Cooking lab), and its settings reach the server's pipeline.
+    recordStageAccuracy("caramelize", accuracy);
     syncSessionParamsToBackend(recipe.id).catch(() => {});
-    recordStageAccuracy("cooking", accuracy);
     navigate({ to: "/cooking" });
   };
 
@@ -109,6 +117,19 @@ function CaramelizeLabScreen() {
     accuracy >= 90
       ? "🔥 Gorgeous caramelization! The AM envelope and carrier sidebands match the master recipe."
       : "Adjust the torch carrier frequency and modulation depth dials until the golden harmonic crust forms.";
+
+  // Comes after Marinating (which unlocks 6).
+  if (unlockedStep < 6) {
+    return (
+      <StationLocked
+        station="Caramelize Lab"
+        reason="Marinate the signal first; this station works on the marinated dish."
+        chefLine="Let's finish marinating before we move on to this station!"
+        goTo="/marinate"
+        goLabel="Go to Marinating Lab →"
+      />
+    );
+  }
 
   return (
     <LabShell
@@ -184,6 +205,7 @@ function CaramelizeLabScreen() {
               <WaveformDisplay
                 label={`AM Modulated Signal (f_c = ${carrierFreq} Hz, m = ${(depth * 100).toFixed(0)}%)`}
                 samples={modulatedSamples}
+                curveRef={marinatedSignal}
                 color="var(--primary)"
               />
             </div>

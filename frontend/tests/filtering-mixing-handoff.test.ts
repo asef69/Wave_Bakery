@@ -33,8 +33,12 @@ describe("Filtering -> Mixing signal handoff contract", () => {
   });
 
   it("mixing uses the exact saved filtered samples for a washable ingredient, not a regenerated clean signal", async () => {
-    const { saveFilteredIngredient, getFilteredIngredient, computeMixedSignal, getRecipeIngredientSamples } =
-      await import("@/lib/pipeline");
+    const {
+      saveFilteredIngredient,
+      getFilteredIngredient,
+      computeMixedSignal,
+      getRecipeIngredientSamples,
+    } = await import("@/lib/pipeline");
     const { recipes } = await import("@/lib/recipes");
 
     const burger = recipes.find((r) => r.id === "burger")!;

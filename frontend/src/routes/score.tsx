@@ -1,6 +1,13 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { MessageSquare, CheckCircle2, AlertTriangle, XCircle, Sparkles, Trophy } from "lucide-react";
+import {
+  MessageSquare,
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  Sparkles,
+  Trophy,
+} from "lucide-react";
 import { ChefFourier } from "@/components/game/ChefFourier";
 import { GameButton } from "@/components/game/GameButton";
 import { MiniWave } from "@/components/game/MiniWave";
@@ -9,9 +16,8 @@ import { RecipeTimerBadge, TimeExpiredModal } from "@/components/game/RecipeTime
 import { SignalAudioPlayer } from "@/lib/audio";
 import { generateCustomerCritique } from "@/lib/critiques";
 import { computeSignalSimilarity } from "@/lib/dsp";
-import { addLeaderboardEntry } from "@/lib/leaderboard";
+import { ANONYMOUS_CHEF, addLeaderboardEntry } from "@/lib/leaderboard";
 import {
-  api,
   completeRecipeRun,
   getIdealDishSignal,
   saveRecipeBestScore,
@@ -20,8 +26,10 @@ import {
   useActiveRecipe,
   useChefName,
   useCookedSignal,
+  usePipelineStageSignal,
   useRecipeProgress,
   useRecipeTimer,
+  submitRunToBackend,
 } from "@/lib/recipes";
 import { cn } from "@/lib/utils";
 import { getPipelineStageSignal, hasPipelineStageSignal } from "@/lib/pipeline";
@@ -51,12 +59,17 @@ const DIFFICULTY_MULTIPLIERS = {
   masterchef: 1.5,
 };
 
+/** Cap on the time bonus, before difficulty: 30% of a perfect 1000-pt base. */
+const MAX_TIME_BONUS = 300;
+
 function ScoreScreen() {
   const [recipe] = useActiveRecipe();
   const [unlockedStep, unlock] = useRecipeProgress();
   const { session, formattedTime, difficultyConfig } = useRecipeTimer();
   const [chefName] = useChefName();
   const [cookedSignal] = useCookedSignal(recipe.id);
+  // The Mixing curve (carried through marinating) both dishes are drawn along.
+  const [curveRef] = usePipelineStageSignal(recipe.id, "marinated");
   const targetSignal = useMemo(() => getIdealDishSignal(recipe.id), [recipe.id]);
   const [audioPlayer, setAudioPlayer] = useState<SignalAudioPlayer | null>(null);
 
@@ -85,17 +98,14 @@ function ScoreScreen() {
   useEffect(() => {
     unlock(8);
 
-    // Submit to server-authoritative backend
+    // Submit to server-authoritative backend. submitRunToBackend dedupes
+    // in-flight requests: this effect re-runs on every session change, and
+    // each re-run used to fire another submit (2–4 duplicate attempts).
     if (session?.backendSessionId && !backendSubmitResult) {
       setIsSubmitting(true);
-      api
-        .submitSession(session.backendSessionId)
+      submitRunToBackend(recipe.id)
         .then((result) => {
-          setBackendSubmitResult(result);
-          updateRecipeRunSession({ backendSubmitResult: result });
-        })
-        .catch((err) => {
-          console.warn("Backend session submit error (falling back to client scoring):", err);
+          if (result) setBackendSubmitResult(result);
         })
         .finally(() => {
           setIsSubmitting(false);
@@ -108,11 +118,6 @@ function ScoreScreen() {
     () => getPipelineStageSignal(recipe.id, "delivered"),
     [recipe.id],
   );
-
-  const isDelivered =
-    cookedSignal.metadata?.["ovenSamplingRate"] != null ||
-    deliveredSignal.metadata?.["ovenSamplingRate"] != null ||
-    session?.deliveryAccuracy != null;
 
   const playerSamples = useMemo(() => {
     if (hasPipelineStageSignal(recipe.id, "delivered") && deliveredSignal.samples.length > 0) {
@@ -133,34 +138,53 @@ function ScoreScreen() {
 
   const similarity = Math.max(0, Math.min(100, Math.round(rawSimilarity)));
 
-  // Dynamic stage accuracies recorded from session
+  // Stage accuracies recorded from session. A stage with no recorded
+  // accuracy earns nothing (it used to default to 90–95%, i.e. free points),
+  // except filtering when the recipe has nothing to wash.
   const filteringVal =
-    session?.filteringAccuracy ?? (recipe.washableIngredients.length === 0 ? 100 : similarity);
-  const mixingVal = session?.mixingAccuracy ?? 95;
-  const seasoningVal = session?.seasoningAccuracy ?? 92;
-  const marinatingVal = session?.marinatingAccuracy ?? 90;
-  const cookingVal = session?.cookingAccuracy ?? 94;
+    session?.filteringAccuracy ?? (recipe.washableIngredients.length === 0 ? 100 : 0);
+  const mixingVal = session?.mixingAccuracy ?? 0;
+  const seasoningVal = session?.seasoningAccuracy ?? 0;
+  const marinatingVal = session?.marinatingAccuracy ?? 0;
+  const cookingVal = session?.cookingAccuracy ?? 0;
   const transformVal = Math.round((seasoningVal + marinatingVal) / 2);
-  const deliveryVal = session?.deliveryAccuracy ?? null;
-  const deliveryBonus = deliveryVal !== null ? Math.round((deliveryVal / 100) * 150) : 0;
+  const deliveryVal = backendSubmitResult?.delivery_score ?? session?.deliveryAccuracy ?? null;
+  const systemVal = backendSubmitResult?.system_score ?? session?.systemAccuracy ?? null;
 
-  // Authoritative server values vs fallback
+  // Chop / Caramelize count only for recipes that include those stations.
+  const stageVals = [filteringVal, mixingVal, seasoningVal, marinatingVal, cookingVal];
+  if (recipe.requiresChop) stageVals.push(session?.chopAccuracy ?? 0);
+  if (recipe.requiresCaramelize) stageVals.push(session?.caramelizeAccuracy ?? 0);
+  const stageAvg = stageVals.reduce((sum, v) => sum + v, 0) / stageVals.length;
+
+  // Local score on the backend's scale and weights: the core dish, then the
+  // finishing stations (Precision Oven 10%, System Delivery 5%) when played,
+  // taken proportionally from the rest — mirrors gameplay.judge.
+  const localScore = useMemo(() => {
+    let raw = similarity * 0.5 + stageAvg * 0.5;
+    const extras = [
+      [deliveryVal, 0.1],
+      [systemVal, 0.05],
+    ].filter((e): e is [number, number] => e[0] != null);
+    const wTotal = extras.reduce((sum, [, w]) => sum + w, 0);
+    raw = raw * (1 - wTotal) + extras.reduce((sum, [v, w]) => sum + v * w, 0);
+    return Math.round(raw);
+  }, [similarity, stageAvg, deliveryVal, systemVal]);
+
+  // Authoritative server score (0–100) when available, else the local one on
+  // the same 0–100 scale — both then go through the same stars and points.
   const displayScore = backendSubmitResult ? Math.round(backendSubmitResult.score) : null;
-  const displayStars = backendSubmitResult
-    ? "★ ".repeat(backendSubmitResult.stars) +
-      "☆ ".repeat(Math.max(0, 5 - backendSubmitResult.stars))
-    : similarity >= 90
-      ? "★ ★ ★"
-      : similarity >= 75
-        ? "★ ★ ☆"
-        : "★ ☆ ☆";
+  const score100 = displayScore ?? localScore;
+  // Same thresholds as the backend's metrics.stars(), so stars always mean
+  // the same thing (the local fallback used to be a different 3-star scale).
+  const starCount =
+    backendSubmitResult?.stars ?? [32, 50, 66, 80, 92].filter((t) => score100 >= t).length;
+  const displayStars = "★ ".repeat(starCount) + "☆ ".repeat(Math.max(0, 5 - starCount));
 
-  const displaySimilarity =
-    isDelivered
-      ? similarity
-      : (backendSubmitResult?.spectral_similarity != null
-          ? Math.max(0, Math.min(100, Math.round(backendSubmitResult.spectral_similarity * 100)))
-          : similarity);
+  // One metric everywhere (panel, critique, leaderboard): the time-domain
+  // match of the dish shown on screen against the target. It used to switch
+  // to the backend's spectral similarity when the Precision Oven was skipped.
+  const displaySimilarity = similarity;
 
   // Generate dynamic customer critique
   const customerCritique = useMemo(() => {
@@ -194,7 +218,10 @@ function ScoreScreen() {
       { label: "Cooking / Convolution", value: backendSubmitResult?.cooking_score ?? cookingVal },
     ];
     if (deliveryVal !== null) {
-      list.push({ label: `Precision Oven Finishing (+${deliveryBonus} pts)`, value: deliveryVal });
+      list.push({ label: "Precision Oven Finishing", value: deliveryVal });
+    }
+    if (systemVal !== null) {
+      list.push({ label: "System Delivery (Z-Plane)", value: systemVal });
     }
     return list;
   }, [
@@ -204,33 +231,27 @@ function ScoreScreen() {
     transformVal,
     cookingVal,
     deliveryVal,
-    deliveryBonus,
+    systemVal,
   ]);
 
-  const stageAvg = (filteringVal + mixingVal + seasoningVal + marinatingVal + cookingVal) / 5;
   const diffMultiplier = session ? (DIFFICULTY_MULTIPLIERS[session.difficulty] ?? 1.0) : 1.0;
 
   // Remaining time calculation
   const remainingSec = useMemo(() => {
     if (!session) return 0;
-    if (session.endTime) {
-      const elapsed = Math.floor((session.endTime - session.startTime) / 1000);
-      return Math.max(0, session.totalSeconds - elapsed);
-    }
-    return 0;
+    // Before completeRecipeRun stamps endTime, measure up to now; returning 0
+    // here made the first render (and first save) miss the time bonus.
+    const end = session.endTime ?? Date.now();
+    const elapsed = Math.floor((end - session.startTime) / 1000);
+    return Math.max(0, session.totalSeconds - elapsed);
   }, [session]);
 
-  const timeBonus = remainingSec * 2;
-  // Time and Precision Oven/System Delivery bonuses must apply on top of
-  // whichever base score is available — previously they were scoped inside
-  // only the local-fallback branch of this ternary, so whenever the backend
-  // submit succeeded (the normal path), both bonuses were silently dropped
-  // and Precision Oven work had zero effect on the final score.
-  const baseScore =
-    displayScore !== null
-      ? Math.round(displayScore * 10 * diffMultiplier)
-      : Math.round((similarity * 0.5 + stageAvg * 0.5) * 10 * diffMultiplier);
-  const totalScore = baseScore + timeBonus + deliveryBonus;
+  // Time bonus: 2 pts per second left, capped at 30% of a perfect base score
+  // (it was uncapped and could outweigh the cooking), and scaled by
+  // difficulty like the base. The finishing stations are inside score100.
+  const timeBonus = Math.round(Math.min(remainingSec * 2, MAX_TIME_BONUS) * diffMultiplier);
+  const baseScore = Math.round(score100 * 10 * diffMultiplier);
+  const totalScore = baseScore + timeBonus;
 
   // Dynamic feedback from Chef Fourier based on lowest score
   const chefFeedback = useMemo(() => {
@@ -272,25 +293,32 @@ function ScoreScreen() {
     if (totalScore > 0) {
       saveRecipeBestScore(recipe.id, totalScore);
       completeRecipeRun(recipe.id, totalScore);
-      updateRecipeRunSession({ finalScore: totalScore });
+      // The Complete page shows exactly these (it used its own 3-star
+      // rating and re-saved the leaderboard entry).
+      updateRecipeRunSession({
+        finalScore: totalScore,
+        finalStars: starCount,
+      });
 
       const diff = session?.difficulty ?? "easy";
       const startTime = session?.startTime ?? Date.now();
       const entryId = `run-${recipe.id}-${diff}-${startTime}`;
       addLeaderboardEntry({
         id: entryId,
-        chefName: chefName || "Asef",
+        // No fallback to a real chef's name for anonymous runs.
+        chefName: chefName || ANONYMOUS_CHEF,
         recipeId: recipe.id,
         difficulty: diff,
         score: totalScore,
         accuracy: displaySimilarity,
         timeRemaining: formattedTime || "0:00",
-        date: "Today",
+        date: new Date(startTime).toLocaleDateString(),
       });
     }
   }, [
     recipe.id,
     totalScore,
+    starCount,
     session?.difficulty,
     session?.startTime,
     chefName,
@@ -373,6 +401,7 @@ function ScoreScreen() {
               className="mt-3 border-0 p-0"
               height={140}
               samples={playerSamples}
+              curveRef={curveRef}
               color="var(--signal-alt)"
             />
           </div>
@@ -392,6 +421,7 @@ function ScoreScreen() {
               className="mt-3 border-0 p-0"
               height={140}
               samples={targetSamples}
+              curveRef={curveRef}
               color="var(--primary)"
             />
           </div>

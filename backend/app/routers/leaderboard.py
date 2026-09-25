@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import case, desc, func
+from sqlalchemy import case, desc, func, or_
 from sqlalchemy.orm import Session
 
 from .. import gameplay, schemas
@@ -14,9 +14,10 @@ router = APIRouter(tags=['leaderboard'])
 
 @router.get('/leaderboard', response_model=list[schemas.LeaderboardRow])
 def leaderboard(recipe_id: str | None = Query(None),
+                difficulty: schemas.Difficulty | None = Query(None),
                 limit: int = Query(20, ge=1, le=100),
                 db: Session = Depends(get_db)):
-    """Best single dish per player, globally or for one recipe."""
+    """Best single dish per player, globally or for one recipe (and difficulty)."""
     q = (db.query(Attempt, Player.handle, Recipe.name)
          .join(Player, Player.id == Attempt.player_id)
          .join(Recipe, Recipe.id == Attempt.recipe_id))
@@ -24,8 +25,14 @@ def leaderboard(recipe_id: str | None = Query(None),
         if db.get(Recipe, recipe_id) is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, 'No such recipe.')
         q = q.filter(Attempt.recipe_id == recipe_id)
+    if difficulty:
+        # Runs from before difficulty was recorded (NULL) stay visible in
+        # every difficulty view rather than vanishing from the board.
+        q = q.filter(or_(Attempt.difficulty == difficulty, Attempt.difficulty.is_(None)))
 
-    rows = q.order_by(desc(Attempt.score), Attempt.created_at).limit(limit * 4).all()
+    # No row cap before de-duplicating: `limit * 4` let one chef's many runs
+    # fill the window and push other chefs off the board.
+    rows = q.order_by(desc(Attempt.score), Attempt.created_at).all()
 
     seen: set[str] = set()
     out: list[schemas.LeaderboardRow] = []
@@ -38,7 +45,7 @@ def leaderboard(recipe_id: str | None = Query(None),
             rank=len(out) + 1, player_id=attempt.player_id, handle=handle,
             score=round(attempt.score, 2), stars=attempt.stars,
             recipe_id=attempt.recipe_id, recipe_name=recipe_name,
-            created_at=attempt.created_at))
+            difficulty=attempt.difficulty, created_at=attempt.created_at))
         if len(out) >= limit:
             break
     return out

@@ -19,6 +19,8 @@ import { formatChefDisplayName } from "@/lib/leaderboard";
 import { MAX_CHEF_NAME_LENGTH, logoutChef, setChefName, useChefName } from "@/lib/recipes";
 import { cn } from "@/lib/utils";
 
+const MIN_PASSWORD_LENGTH = 6;
+
 interface ChefAuthModalProps {
   isOpen: boolean;
   onClose?: () => void;
@@ -55,6 +57,7 @@ export function ChefAuthModal({ isOpen, onClose, onSuccess, defaultTab }: ChefAu
   const [activeTab, setActiveTab] = useState<"profile" | "switch" | "register">("profile");
 
   const [inputHandle, setInputHandle] = useState("");
+  const [inputPassword, setInputPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [profileData, setProfileData] = useState<ChefProfileData | null>(null);
@@ -99,10 +102,14 @@ export function ChefAuthModal({ isOpen, onClose, onSuccess, defaultTab }: ChefAu
     onClose?.();
   };
 
-  const handleRegisterOrLogin = async (handleToAuth?: string) => {
-    const handle = (handleToAuth ?? inputHandle).trim();
+  const handleRegisterOrLogin = async () => {
+    const handle = inputHandle.trim();
     if (!handle) {
       setErrorMessage("Please enter a chef name.");
+      return;
+    }
+    if (inputPassword.length < MIN_PASSWORD_LENGTH) {
+      setErrorMessage(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
       return;
     }
     if (handle.length > MAX_CHEF_NAME_LENGTH) {
@@ -113,10 +120,11 @@ export function ChefAuthModal({ isOpen, onClose, onSuccess, defaultTab }: ChefAu
     setIsLoading(true);
     setErrorMessage(null);
     try {
-      const res = await api.authOrRegisterPlayer(handle);
+      const res = await api.authOrRegisterPlayer(handle, inputPassword);
       setChefName(res.handle);
       setLocalChefName(res.handle);
       setInputHandle("");
+      setInputPassword("");
       onSuccess?.(res.handle);
       handleClose();
     } catch (err: unknown) {
@@ -126,20 +134,13 @@ export function ChefAuthModal({ isOpen, onClose, onSuccess, defaultTab }: ChefAu
     }
   };
 
-  const handleSwitchChef = async (chef: ChefSummary) => {
-    setIsLoading(true);
+  // Switching to another chef needs their password: pre-fill the name on
+  // the sign-in form (clicking a name used to log straight in as them).
+  const handleSwitchChef = (chef: ChefSummary) => {
+    setInputHandle(chef.handle);
+    setInputPassword("");
     setErrorMessage(null);
-    try {
-      const res = await api.authOrRegisterPlayer(chef.handle);
-      setChefName(res.handle);
-      setLocalChefName(res.handle);
-      onSuccess?.(res.handle);
-      handleClose();
-    } catch (err: unknown) {
-      setErrorMessage((err as Error).message || "Failed to switch chef.");
-    } finally {
-      setIsLoading(false);
-    }
+    setActiveTab("register");
   };
 
   const handleLogout = () => {
@@ -455,6 +456,30 @@ export function ChefAuthModal({ isOpen, onClose, onSuccess, defaultTab }: ChefAu
                   className="w-full rounded-2xl border-2 border-border bg-secondary/50 py-3.5 pr-4 pl-14 font-display text-base font-extrabold text-foreground transition-all placeholder:font-sans placeholder:font-normal placeholder:text-muted-foreground focus:border-primary focus:bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
                 />
               </div>
+              <label
+                htmlFor="chefPasswordInput"
+                className="mt-4 block font-mono text-[11px] font-bold text-foreground uppercase tracking-wider"
+              >
+                Password
+              </label>
+              <input
+                id="chefPasswordInput"
+                type="password"
+                value={inputPassword}
+                autoComplete="current-password"
+                minLength={MIN_PASSWORD_LENGTH}
+                maxLength={128}
+                placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
+                onChange={(e) => {
+                  setInputPassword(e.target.value);
+                  if (errorMessage) setErrorMessage(null);
+                }}
+                className="mt-2 w-full rounded-2xl border-2 border-border bg-secondary/50 px-4 py-3.5 font-display text-base font-extrabold text-foreground transition-all placeholder:font-sans placeholder:font-normal placeholder:text-muted-foreground focus:border-primary focus:bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+              />
+              <p className="mt-1.5 font-mono text-[10px] text-muted-foreground">
+                New chef: this sets your password. Existing chef: enter yours (a chef made before
+                passwords existed gets this one as their first password).
+              </p>
               {errorMessage && (
                 <p className="mt-2 font-mono text-xs font-semibold text-destructive">
                   ⚠️ {errorMessage}
@@ -482,7 +507,7 @@ export function ChefAuthModal({ isOpen, onClose, onSuccess, defaultTab }: ChefAu
 
               <GameButton
                 type="submit"
-                disabled={!inputHandle.trim() || isLoading}
+                disabled={!inputHandle.trim() || !inputPassword || isLoading}
                 className="uppercase flex-1 sm:flex-initial sm:min-w-40 text-base tracking-wider"
               >
                 {isLoading ? "Signing In..." : "Enter Kitchen →"}

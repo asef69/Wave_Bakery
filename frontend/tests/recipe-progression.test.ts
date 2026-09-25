@@ -18,15 +18,17 @@ class LocalStorageMock {
 }
 
 const mockLocalStorage = new LocalStorageMock();
-if (typeof (globalThis as any).window === "undefined") {
-  (globalThis as any).window = {
+const globalWithWindow = globalThis as unknown as { window?: unknown };
+if (typeof globalWithWindow.window === "undefined") {
+  globalWithWindow.window = {
     localStorage: mockLocalStorage,
     dispatchEvent: () => true,
     addEventListener: () => {},
     removeEventListener: () => {},
   };
 } else if (!window.localStorage) {
-  (window as any).localStorage = mockLocalStorage;
+  (window as unknown as { localStorage: Storage }).localStorage =
+    mockLocalStorage as unknown as Storage;
 }
 
 import {
@@ -117,9 +119,18 @@ describe("Recipe Progression, Score Persistence & State Isolation", () => {
     saveRecipeBestScore("sandwich", 880);
 
     // Set some transient stage signals
-    window.localStorage.setItem("wavebakery_selected_ingredients_burger", JSON.stringify(["Bun", "Beef Patty"]));
-    window.localStorage.setItem("wavebakery_filtered_ingredients_burger", JSON.stringify({ lettuce: [1, 2, 3] }));
-    window.localStorage.setItem("wavebakery_pipeline_burger_mixed", JSON.stringify({ samples: [0.1, 0.2] }));
+    window.localStorage.setItem(
+      "wavebakery_selected_ingredients_burger",
+      JSON.stringify(["Bun", "Beef Patty"]),
+    );
+    window.localStorage.setItem(
+      "wavebakery_filtered_ingredients_burger",
+      JSON.stringify({ lettuce: [1, 2, 3] }),
+    );
+    window.localStorage.setItem(
+      "wavebakery_pipeline_burger_mixed",
+      JSON.stringify({ samples: [0.1, 0.2] }),
+    );
 
     // Start a fresh recipe run for burger
     startRecipeRun("burger", "easy");

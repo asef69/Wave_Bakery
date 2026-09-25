@@ -558,7 +558,9 @@ export const recipes: Recipe[] = [
       {
         name: "Cheese",
         instrument: "Mathematical Signal",
-        freq: 4,
+        // Same as the global ingredient list (what Generate shows); 4 here
+        // made Toast's cheese a different waveform in the pipeline.
+        freq: 6,
         washable: false,
         kind: "cheese",
       },
@@ -1018,20 +1020,6 @@ export function useActiveRecipe(): [Recipe, (id: string) => void] {
   return [recipe, setRecipe];
 }
 
-export const STAGE_ORDER = [
-  { id: "generate", label: "Generate Signal", path: "/generate", step: 1 },
-  { id: "filter", label: "Filter Lab", path: "/filtering", step: 2 },
-  { id: "mix", label: "Mixing Lab", path: "/mixing", step: 3 },
-  { id: "season", label: "Seasoning Lab", path: "/transform", step: 4 },
-  { id: "marinate", label: "Marinating Lab", path: "/marinate", step: 5 },
-  { id: "caramelize", label: "Caramelize Lab", path: "/caramelize", step: 6 },
-  { id: "chop", label: "Chop Lab", path: "/chop", step: 7 },
-  { id: "cook", label: "Cooking Lab", path: "/cooking", step: 8 },
-  { id: "beam", label: "Beam Delivery", path: "/beam-delivery", step: 9 },
-  { id: "score", label: "Final Comparison", path: "/score", step: 10 },
-  { id: "complete", label: "Complete", path: "/complete", step: 11 },
-] as const;
-
 export function getRecipeStationFlow(
   recipe?: Recipe,
 ): { id: string; label: string; path: string }[] {
@@ -1184,6 +1172,7 @@ export interface RecipeRunSession {
   endTime?: number;
   isCompleted: boolean;
   finalScore?: number;
+  finalStars?: number;
   backendSessionId?: string;
   backendSeed?: number;
   backendSubmitResult?: SubmitResult;
@@ -1198,6 +1187,18 @@ export interface RecipeRunSession {
   marinatingAccuracy?: number;
   cookingAccuracy?: number;
   deliveryAccuracy?: number;
+  systemAccuracy?: number;
+  chopAccuracy?: number;
+  caramelizeAccuracy?: number;
+  // Settings the server needs to rebuild and score the dish.
+  bowl?: string[];
+  chopFactor?: number;
+  antiAlias?: boolean;
+  caramelizeCarrier?: number;
+  caramelizeDepth?: number;
+  systemPreset?: "lowpass1" | "resonator2" | "moving_avg" | "notch";
+  systemPoleRadius?: number;
+  systemSamplingHz?: number;
 }
 
 export function startRecipeRun(recipeId: string, difficulty: RecipeDifficulty) {
@@ -1219,11 +1220,11 @@ export function startRecipeRun(recipeId: string, difficulty: RecipeDifficulty) {
     window.localStorage.setItem("wavebakery_recipe_session", JSON.stringify(session));
     window.dispatchEvent(new Event("wavebakery_session_changed"));
 
-    // Connect to backend session asynchronously
-    const chefName = getChefName() || "Chef Fourier";
+    // Connect to backend session asynchronously (only for a signed-in chef;
+    // otherwise the run stays local).
     api
-      .ensureAuthenticated(chefName)
-      .then(() => api.createSession(recipeId))
+      .ensureAuthenticated()
+      .then(() => api.createSession(recipeId, difficulty))
       .then((backendSession) => {
         const stored = window.localStorage.getItem("wavebakery_recipe_session");
         if (stored) {
@@ -1276,6 +1277,23 @@ export async function syncSessionParamsToBackend(recipeId?: string): Promise<voi
     blend: seasonFreq,
     marinate: session.marinateTime ?? activeRecipe.marinateTarget.timeScale,
     appliances: [appliance],
+    ...(session.bowl ? { bowl: session.bowl } : {}),
+    ...(session.caramelizeCarrier != null && session.caramelizeDepth != null
+      ? { carrier: session.caramelizeCarrier, depth: session.caramelizeDepth }
+      : {}),
+    ...(session.chopFactor != null
+      ? { chop_factor: session.chopFactor, anti_alias: session.antiAlias ?? true }
+      : {}),
+    // The oven's result can't be rebuilt server-side, so it is reported;
+    // System Delivery sends its settings and the server computes the score.
+    ...(session.deliveryAccuracy != null ? { delivery_accuracy: session.deliveryAccuracy } : {}),
+    ...(session.systemPreset
+      ? {
+          system_preset: session.systemPreset,
+          system_pole_radius: session.systemPoleRadius ?? 0,
+          system_sampling_hz: session.systemSamplingHz ?? 8000,
+        }
+      : {}),
   };
 
   try {
@@ -1285,8 +1303,54 @@ export async function syncSessionParamsToBackend(recipeId?: string): Promise<voi
   }
 }
 
+// One in-flight submit per backend session, shared by every caller (score
+// screen re-renders, leaderboard retry), so a dish is never served twice.
+const inflightSubmits = new Map<string, Promise<SubmitResult | null>>();
+
+/**
+ * Serves the current run's dish to the backend and stores the result on the
+ * session. Safe to call repeatedly: returns the stored result if there is
+ * one, joins an in-flight request, and otherwise syncs params then submits.
+ * Returns null when there is no backend session or the server is unreachable
+ * (the run stays unserved, so a later call can retry it).
+ */
+export function submitRunToBackend(recipeId?: string): Promise<SubmitResult | null> {
+  const session = getRecipeRunSession();
+  const sid = session?.backendSessionId;
+  if (!session || !sid) return Promise.resolve(null);
+  if (session.backendSubmitResult) return Promise.resolve(session.backendSubmitResult);
+
+  const existing = inflightSubmits.get(sid);
+  if (existing) return existing;
+
+  const request = syncSessionParamsToBackend(recipeId ?? session.recipeId)
+    .then(() => api.submitSession(sid))
+    .then((result) => {
+      updateRecipeRunSession({ backendSubmitResult: result });
+      return result;
+    })
+    .catch((err) => {
+      console.warn("Backend session submit failed (will retry later):", err);
+      return null;
+    })
+    .finally(() => {
+      inflightSubmits.delete(sid);
+    });
+  inflightSubmits.set(sid, request);
+  return request;
+}
+
 export function recordStageAccuracy(
-  stage: "filtering" | "mixing" | "seasoning" | "marinating" | "cooking" | "delivery",
+  stage:
+    | "filtering"
+    | "mixing"
+    | "seasoning"
+    | "marinating"
+    | "cooking"
+    | "delivery"
+    | "system"
+    | "chop"
+    | "caramelize",
   accuracy: number,
 ) {
   if (typeof window !== "undefined") {
@@ -1301,6 +1365,9 @@ export function recordStageAccuracy(
         else if (stage === "marinating") session.marinatingAccuracy = clamped;
         else if (stage === "cooking") session.cookingAccuracy = clamped;
         else if (stage === "delivery") session.deliveryAccuracy = clamped;
+        else if (stage === "system") session.systemAccuracy = clamped;
+        else if (stage === "chop") session.chopAccuracy = clamped;
+        else if (stage === "caramelize") session.caramelizeAccuracy = clamped;
 
         window.localStorage.setItem("wavebakery_recipe_session", JSON.stringify(session));
         window.dispatchEvent(new Event("wavebakery_session_changed"));

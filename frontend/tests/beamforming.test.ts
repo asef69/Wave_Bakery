@@ -66,7 +66,8 @@ describe("T10: Phased-Array Beamforming Physics", () => {
   });
 
   it("calculates target vs neighbor received signals and spatial SIR", async () => {
-    const { computeReceivedTableSignals, getPresetPhasesForAngle } = await import("@/lib/beamforming");
+    const { computeReceivedTableSignals, getPresetPhasesForAngle } =
+      await import("@/lib/beamforming");
     const targetAngle = 20;
     const phases = getPresetPhasesForAngle(targetAngle, 8);
     const speakers: SpeakerState[] = phases.map((p, idx) => ({
@@ -84,7 +85,8 @@ describe("T10: Phased-Array Beamforming Physics", () => {
   });
 
   it("computes Faculty DSP metrics (directivity, beamwidth, PSLL, spatial Nyquist)", async () => {
-    const { computeFacultyInspectorMetrics, getPresetPhasesForAngle } = await import("@/lib/beamforming");
+    const { computeFacultyInspectorMetrics, getPresetPhasesForAngle } =
+      await import("@/lib/beamforming");
     const targetAngle = 0; // broadside
     const phases = getPresetPhasesForAngle(targetAngle, 8);
     const speakers: SpeakerState[] = phases.map((p, idx) => ({

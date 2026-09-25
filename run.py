@@ -12,6 +12,7 @@ import sys
 import time
 import subprocess
 import signal
+import threading
 import webbrowser
 import urllib.request
 import urllib.error
@@ -43,6 +44,14 @@ def find_npm():
     if sys.platform == "win32":
         return "npm.cmd"
     return "npm"
+
+def relay_output(proc):
+    """Copy a child's combined stdout/stderr to this terminal, line by line."""
+    assert proc.stdout is not None
+    for raw in iter(proc.stdout.readline, b""):
+        sys.stdout.write(raw.decode("utf-8", errors="replace"))
+        sys.stdout.flush()
+
 
 def wait_for_backend(timeout=15):
     """Wait until the FastAPI backend reports healthy on /api/health."""
@@ -85,11 +94,26 @@ def main():
     backend_env = os.environ.copy()
     backend_env["PYTHONUNBUFFERED"] = "1"
     
-    backend_proc = subprocess.Popen(
-        [py_exec, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000", "--reload"],
-        cwd=BACKEND_DIR,
-        env=backend_env,
-    )
+    backend_cmd = [py_exec, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000", "--reload"]
+    if sys.platform == "win32":
+        # On Windows, uvicorn's --reload restarts its worker by sending
+        # CTRL_C_EVENT, which Windows delivers to EVERY process attached to the
+        # console — including this runner and npm. Each backend reload (any
+        # edit under backend/, or OneDrive touching a file) therefore looked
+        # like the user pressing Ctrl+C and shut both servers down. A separate
+        # hidden console keeps that event inside the backend; its output is
+        # relayed here so the logs still appear in this terminal.
+        backend_proc = subprocess.Popen(
+            backend_cmd,
+            cwd=BACKEND_DIR,
+            env=backend_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        threading.Thread(target=relay_output, args=(backend_proc,), daemon=True).start()
+    else:
+        backend_proc = subprocess.Popen(backend_cmd, cwd=BACKEND_DIR, env=backend_env)
 
     # 2. Wait for backend to be ready
     if not wait_for_backend(timeout=12):
@@ -109,7 +133,6 @@ def main():
         time.sleep(2.5)
         webbrowser.open("http://localhost:5173")
 
-    import threading
     threading.Thread(target=open_browser, daemon=True).start()
 
     print("\n" + "=" * 65)

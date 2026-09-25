@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { parametricPath } from "@/lib/signals";
+import { samplesAlongCurvePath, type PipelineSignal } from "@/lib/pipeline";
 
 type MiniWaveProps = {
   className?: string | undefined;
@@ -14,6 +15,8 @@ type MiniWaveProps = {
   height?: number | undefined;
   seed?: number | undefined;
   samples?: number[] | undefined;
+  /** Pipeline signal whose Mixing curve `samples` should be drawn along. */
+  curveRef?: PipelineSignal | null | undefined;
   parametricPoints?: Array<{ x: number; y: number }> | undefined;
   square?: boolean | undefined;
 };
@@ -31,6 +34,7 @@ export function MiniWave({
   height = 90,
   seed = 1,
   samples,
+  curveRef,
   parametricPoints,
   square = false,
 }: MiniWaveProps) {
@@ -41,14 +45,17 @@ export function MiniWave({
   let pathD = "";
 
   if (parametricPoints && parametricPoints.length > 0) {
-    const pointsToRender = noise > 0
-      ? parametricPoints.map((p, i) => {
-          const nx = Math.sin(i * 12.9898 * 10 + seed * 78.233) * noise * 0.12;
-          const ny = Math.sin(i * 13.4567 * 10 + seed * 53.123) * noise * 0.12;
-          return { x: p.x + nx, y: p.y + ny };
-        })
-      : parametricPoints;
+    const pointsToRender =
+      noise > 0
+        ? parametricPoints.map((p, i) => {
+            const nx = Math.sin(i * 12.9898 * 10 + seed * 78.233) * noise * 0.12;
+            const ny = Math.sin(i * 13.4567 * 10 + seed * 53.123) * noise * 0.12;
+            return { x: p.x + nx, y: p.y + ny };
+          })
+        : parametricPoints;
     pathD = parametricPath(plotWidth, plotHeight, pointsToRender, 14, true);
+  } else if (samples && samples.length > 0 && curveRef) {
+    pathD = samplesAlongCurvePath(samples, curveRef, plotWidth, plotHeight, 0.33);
   } else if (samples && samples.length > 0) {
     const len = samples.length;
     const pts: string[] = [];
@@ -81,10 +88,7 @@ export function MiniWave({
       <svg
         viewBox={`0 0 ${plotWidth} ${plotHeight}`}
         preserveAspectRatio={isSquare ? "xMidYMid meet" : "none"}
-        className={cn(
-          "relative z-10",
-          isSquare ? "mx-auto h-24 max-w-[160px]" : "h-20 w-full"
-        )}
+        className={cn("relative z-10", isSquare ? "mx-auto h-24 max-w-[160px]" : "h-20 w-full")}
         aria-hidden
       >
         <path
@@ -99,4 +103,3 @@ export function MiniWave({
     </div>
   );
 }
-

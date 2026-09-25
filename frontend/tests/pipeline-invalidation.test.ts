@@ -43,15 +43,17 @@ class LocalStorageMock {
 }
 
 const mockLocalStorage = new LocalStorageMock();
-if (typeof (globalThis as any).window === "undefined") {
-  (globalThis as any).window = {
+const globalWithWindow = globalThis as unknown as { window?: unknown };
+if (typeof globalWithWindow.window === "undefined") {
+  globalWithWindow.window = {
     localStorage: mockLocalStorage,
     dispatchEvent: () => true,
     addEventListener: () => {},
     removeEventListener: () => {},
   };
 } else if (!window.localStorage) {
-  (window as any).localStorage = mockLocalStorage;
+  (window as unknown as { localStorage: Storage }).localStorage =
+    mockLocalStorage as unknown as Storage;
 }
 
 describe("Pipeline Continuity & Invalidation Suite (Cases A through I)", () => {

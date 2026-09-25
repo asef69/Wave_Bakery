@@ -1,9 +1,15 @@
 import { useEffect, useState } from "react";
 import { type CookedSignalData, getActiveRecipe, recipes } from "./recipes";
-import { CHICKEN_SIGNAL_DEFINITION, getMathematicalSignal, MATHEMATICAL_SIGNALS } from "./signals";
+import {
+  CHICKEN_SIGNAL_DEFINITION,
+  computeSuperpositionCurve,
+  getMathematicalSignal,
+  MATHEMATICAL_SIGNALS,
+} from "./signals";
 import { getStaticCookingKernel, type CookingMethodType } from "./cooking-audio";
 
-export type PipelineStage = "raw" | "filtered" | "mixed" | "seasoned" | "marinated" | "cooked" | "delivered";
+export type PipelineStage =
+  "raw" | "filtered" | "mixed" | "seasoned" | "marinated" | "cooked" | "delivered";
 
 export interface PipelineSignal {
   recipeId: string;
@@ -178,7 +184,14 @@ export function getRecipeIngredientSamples(
 /**
  * Computes the discrete mixed signal resulting from the superposition of
  * actual recipe ingredient signals in the bowl.
- * Consumes the player's actual filtered output for washable ingredients.
+ *
+ * Each ingredient's samples come from getMixingIngredientSamples — the exact
+ * samples the Generate, Filtering and Mixing labs draw (phase 0, the same
+ * frequency rule, the player's filtered output for washed ingredients). It
+ * used to regenerate them with a per-ingredient phase offset
+ * (seed = (index + 1) * 0.85) and a different frequency fallback, so the
+ * saved mix (what Seasoning and every later stage received) did not match the
+ * waveform the Mixing lab showed.
  */
 export function computeMixedSignal(
   recipeId: string,
@@ -187,133 +200,135 @@ export function computeMixedSignal(
 ): PipelineSignal {
   const recipe = recipes.find((r) => r.id === recipeId) ?? getActiveRecipe();
   const effectiveIngredients = ingredientNames.length > 0 ? ingredientNames : recipe.ingredients;
+  return mixFromSamples(
+    recipe.id,
+    effectiveIngredients,
+    getMixingIngredientSamples(recipe.id, effectiveIngredients, sampleCount),
+    sampleCount,
+  );
+}
 
-  // When exactly one ingredient is in the bowl, its mixed signal IS that ingredient directly:
-  // preserve identical samples, amplitude, and deterministic detail seed without re-normalization.
-  if (effectiveIngredients.length === 1) {
-    const name = effectiveIngredients[0]!;
-    const detail = recipe.ingredientDetails.find(
-      (d) => d.name.toLowerCase() === name.toLowerCase(),
-    );
+/**
+ * Superposition of per-ingredient samples: one ingredient passes straight
+ * through; several are summed, scaled by 1/sqrt(K) and peak-limited to 0.95.
+ */
+function mixFromSamples(
+  recipeId: string,
+  names: string[],
+  samplesByName: Record<string, number[]>,
+  sampleCount: number,
+  extraMetadata: Record<string, unknown> = {},
+  curveOptions: { clean?: boolean } = {},
+): PipelineSignal {
+  const recipe = recipes.find((r) => r.id === recipeId) ?? getActiveRecipe();
+  const freqOf = (name: string, idx: number) => {
     const detailIndex = recipe.ingredientDetails.findIndex(
       (d) => d.name.toLowerCase() === name.toLowerCase(),
     );
-    const freq = detail?.freq ?? 3;
-    const seed = (detailIndex >= 0 ? detailIndex + 1 : 1) * 0.85;
+    const resolvedIdx = detailIndex >= 0 ? detailIndex : idx;
+    return recipe.ingredientDetails[detailIndex]?.freq ?? 2 + (resolvedIdx % 4) * 1.5;
+  };
 
-    let singleSamples: number[] | null = null;
-    if (detail?.washable) {
-      const storedFiltered = getFilteredIngredient(recipe.id, name);
-      if (storedFiltered && storedFiltered.length > 0) {
-        if (storedFiltered.length === sampleCount) {
-          singleSamples = [...storedFiltered];
-        } else {
-          singleSamples = [];
-          for (let i = 0; i < sampleCount; i++) {
-            const u = i / (sampleCount - 1);
-            singleSamples.push(sampleAt(storedFiltered, u));
-          }
-        }
-      }
+  let samples: number[];
+  if (names.length === 1) {
+    samples = [...(samplesByName[names[0]!] ?? new Array<number>(sampleCount).fill(0))];
+  } else {
+    const summed = new Array<number>(sampleCount).fill(0);
+    for (const name of names) {
+      const ing = samplesByName[name] ?? [];
+      for (let i = 0; i < sampleCount; i++) summed[i] = (summed[i] ?? 0) + (ing[i] ?? 0);
     }
+    const normFactor = 1 / Math.sqrt(Math.max(1, names.length));
+    samples = normalizeSamples(
+      summed.map((v) => v * normFactor),
+      0.95,
+    );
+  }
 
-    if (!singleSamples) {
-      const noise = detail?.washable ? 0.85 : 0.0;
-      singleSamples = getRecipeIngredientSamples(recipe.id, name, {
-        noise,
-        seed,
-        freq,
-        sampleCount,
-        amplitude: 1.0,
-      });
-    }
+  const count = Math.max(1, names.length);
+  const totalFreq = names.reduce((sum, n, i) => sum + freqOf(n, i), 0);
+  const frequency =
+    names.length === 1 ? freqOf(names[0]!, 0) : Math.max(2, Math.round(totalFreq / count));
 
-    return {
+  return withMixCurve(
+    {
       recipeId: recipe.id,
       stage: "mixed",
-      samples: singleSamples,
+      samples,
       sampleRate: 44100,
       duration: 3.0,
-      frequency: freq,
+      frequency,
       timestamp: Date.now(),
-      metadata: {
-        ingredients: effectiveIngredients,
-      },
-    };
-  }
+      metadata: { ingredients: names, ...extraMetadata },
+    },
+    curveOptions,
+  );
+}
 
-  const summed = new Array<number>(sampleCount).fill(0);
-  let totalFreq = 0;
-
-  for (let idx = 0; idx < effectiveIngredients.length; idx++) {
-    const name = effectiveIngredients[idx]!;
-    const detail = recipe.ingredientDetails.find(
-      (d) => d.name.toLowerCase() === name.toLowerCase(),
-    );
+/**
+ * Per-ingredient 1D samples exactly as the Mixing lab builds them for its
+ * graph (filtered samples if washed, else generated with seed 0).
+ */
+export function getMixingIngredientSamples(
+  recipeId: string,
+  ingredientNames: string[],
+  sampleCount = 401,
+  clean = false,
+): Record<string, number[]> {
+  const recipe = recipes.find((r) => r.id === recipeId) ?? getActiveRecipe();
+  const map: Record<string, number[]> = {};
+  ingredientNames.forEach((name, idx) => {
+    const filtered = clean ? null : getFilteredIngredient(recipe.id, name);
+    if (filtered && filtered.length > 0) {
+      // The server's filtered plot can have a different length; stretch it
+      // over the same window (end-to-end, no wrap-around).
+      map[name] =
+        filtered.length === sampleCount
+          ? filtered
+          : Array.from({ length: sampleCount }, (_, i) => {
+              const pos = (i / (sampleCount - 1)) * (filtered.length - 1);
+              const k = Math.min(filtered.length - 2, Math.floor(pos));
+              const a = filtered[k] ?? 0;
+              return a + (pos - k) * ((filtered[k + 1] ?? a) - a);
+            });
+      return;
+    }
     const detailIndex = recipe.ingredientDetails.findIndex(
       (d) => d.name.toLowerCase() === name.toLowerCase(),
     );
-    const freq = detail?.freq ?? 3 + (idx % 4) * 1.5;
-    const seed = (detailIndex >= 0 ? detailIndex + 1 : idx + 1) * 0.85;
-    totalFreq += freq;
+    const detail = recipe.ingredientDetails[detailIndex];
+    const resolvedIdx = detailIndex >= 0 ? detailIndex : idx;
+    map[name] = getRecipeIngredientSamples(recipe.id, name, {
+      freq: detail?.freq ?? 2 + (resolvedIdx % 4) * 1.5,
+      seed: 0,
+      noise: detail?.washable && !clean ? 0.85 : 0.0,
+      sampleCount,
+    });
+  });
+  return map;
+}
 
-    let ingSamples: number[] | null = null;
-
-    // Check if player has washed/filtered this washable ingredient
-    if (detail?.washable) {
-      const storedFiltered = getFilteredIngredient(recipe.id, name);
-      if (storedFiltered && storedFiltered.length > 0) {
-        // Resample if necessary to sampleCount
-        if (storedFiltered.length === sampleCount) {
-          ingSamples = storedFiltered;
-        } else {
-          ingSamples = [];
-          for (let i = 0; i < sampleCount; i++) {
-            const u = i / (sampleCount - 1);
-            ingSamples.push(sampleAt(storedFiltered, u));
-          }
-        }
-      }
-    }
-
-    // Fallback: If not filtered or not washable, generate standard ingredient samples
-    if (!ingSamples) {
-      const noise = detail?.washable ? 0.85 : 0.0;
-      ingSamples = getRecipeIngredientSamples(recipe.id, name, {
-        noise,
-        seed,
-        freq,
-        sampleCount,
-        amplitude: 1.0,
-      });
-    }
-
-    for (let i = 0; i < sampleCount; i++) {
-      summed[i] = (summed[i] ?? 0) + (ingSamples[i] ?? 0);
-    }
-  }
-
-  // Normalize superposition by number of ingredients
-  const count = Math.max(1, effectiveIngredients.length);
-  const normFactor = 1 / Math.sqrt(count);
-  for (let i = 0; i < sampleCount; i++) {
-    summed[i] = (summed[i] ?? 0) * normFactor;
-  }
-  const samples = normalizeSamples(summed, 0.95);
-  const nominalFreq = Math.max(2, Math.round(totalFreq / count));
-
-  return {
-    recipeId: recipe.id,
-    stage: "mixed",
-    samples,
-    sampleRate: 44100,
-    duration: 3.0,
-    frequency: nominalFreq,
-    timestamp: Date.now(),
-    metadata: {
-      ingredients: effectiveIngredients,
-    },
-  };
+/**
+ * If the mix contains a parametric ingredient, the Mixing lab shows a 2D
+ * superposition curve. Attach that exact curve to the mixed signal so every
+ * stage after Mixing can draw the shape the player saw.
+ */
+export function withMixCurve(
+  signal: PipelineSignal,
+  options: { clean?: boolean } = {},
+): PipelineSignal {
+  const names = signal.metadata?.["ingredients"];
+  if (!Array.isArray(names) || names.length === 0) return signal;
+  const ingredientNames = names as string[];
+  const curve = computeSuperpositionCurve(
+    ingredientNames.map((name) => ({ name })),
+    getMixingIngredientSamples(signal.recipeId, ingredientNames, 401, options.clean ?? false),
+  );
+  if (!curve) return signal;
+  // Samples are left untouched: they carry the player's filtered ingredients
+  // into audio and scoring (see tests/filtering-mixing-handoff.test.ts). The
+  // curve is the visual track every later stage transforms alongside them.
+  return { ...signal, metadata: { ...signal.metadata, curve: curve.points } };
 }
 
 /**
@@ -332,43 +347,13 @@ export function computeSeasonedSignal(
       : computeMixedSignal(mixedSignal.recipeId, []).samples;
 
   const effectiveFreq = Math.max(0.05, freqScale);
-  const n = Math.max(2, Math.round(inSamples.length / effectiveFreq));
-  
-  // time_scale(x, alpha) where alpha = effectiveFreq
-  // src = np.arange(n) * alpha
-  const scaledSamples: number[] = [];
-  for (let i = 0; i < n; i++) {
-    const srcIndex = i * effectiveFreq;
-    if (srcIndex < 0 || srcIndex > inSamples.length - 1) {
-      scaledSamples.push(0);
-    } else {
-      const idx = Math.floor(srcIndex);
-      const frac = srcIndex - idx;
-      const s0 = inSamples[idx] ?? 0;
-      const s1 = inSamples[idx + 1] ?? s0;
-      scaledSamples.push((s0 + frac * (s1 - s0)) * amplitude);
-    }
-  }
 
-  // Ensure it fits the requested sampleCount
-  const samples: number[] = [];
-  for (let i = 0; i < sampleCount; i++) {
-    const srcIndex = (i / (sampleCount - 1)) * (scaledSamples.length - 1);
-    if (srcIndex < 0 || srcIndex > scaledSamples.length - 1) {
-      samples.push(0);
-    } else {
-      const idx = Math.floor(srcIndex);
-      const frac = srcIndex - idx;
-      const s0 = scaledSamples[idx] ?? 0;
-      const s1 = scaledSamples[idx + 1] ?? s0;
-      samples.push(s0 + frac * (s1 - s0));
-    }
-  }
-
+  // y[n] = A · x(α·n): α > 1 compresses (more cycles), α < 1 stretches.
+  // Output is NOT renormalized, otherwise the amplitude dial would be undone.
   return {
     recipeId: mixedSignal.recipeId,
     stage: "seasoned",
-    samples: normalizeSamples(samples, 0.95),
+    samples: timeScaleSamples(inSamples, effectiveFreq, amplitude, sampleCount),
     sampleRate: mixedSignal.sampleRate,
     duration: mixedSignal.duration,
     frequency: mixedSignal.frequency * effectiveFreq,
@@ -376,13 +361,238 @@ export function computeSeasonedSignal(
     metadata: {
       amplitude,
       freqScale,
+      ...transformCurve(mixedSignal, amplitude, effectiveFreq),
     },
   };
 }
 
 /**
- * Computes the marinated signal by applying time scaling (stretch/compress)
- * to the actual seasoned signal.
+ * out[n] = A · x(α·n) over the same window. Past the end of x the signal
+ * repeats periodically, so α > 1 fills the window with extra cycles.
+ */
+function timeScaleSamples(
+  inSamples: number[],
+  alpha: number,
+  amplitude: number,
+  sampleCount: number,
+): number[] {
+  const span = inSamples.length - 1;
+  const samples: number[] = [];
+  for (let i = 0; i < sampleCount; i++) {
+    const t = (i / (sampleCount - 1)) * span * alpha;
+    const srcIndex = span > 0 ? t % span : 0;
+    const idx = Math.floor(srcIndex);
+    const frac = srcIndex - idx;
+    const s0 = inSamples[idx] ?? 0;
+    const s1 = inSamples[idx + 1] ?? s0;
+    samples.push((s0 + frac * (s1 - s0)) * amplitude);
+  }
+  return samples;
+}
+
+export type CurvePoint = { x: number; y: number };
+
+/** The 2D parametric Mixing curve a signal carries (mixed → seasoned → marinated). */
+export function getSignalCurve(signal: PipelineSignal | null | undefined): CurvePoint[] | null {
+  const curve = signal?.metadata?.["curve"];
+  return Array.isArray(curve) && curve.length > 1 ? (curve as CurvePoint[]) : null;
+}
+
+/**
+ * Draws a pipeline signal: its Mixing curve when it has one, otherwise its 1D
+ * samples. The curve's y is measured against the ORIGINAL mix's centre and
+ * half-height (carried along in metadata), so amplitude changes stay visible.
+ */
+export function pipelineSignalToPath(
+  signal: PipelineSignal,
+  width: number,
+  height: number,
+  yScale = 0.34,
+): string {
+  const curve = getSignalCurve(signal);
+  const mid = signal.metadata?.["curveYMid"];
+  const half = signal.metadata?.["curveYHalf"];
+  const pts: string[] = [];
+  if (curve && typeof mid === "number" && typeof half === "number" && half > 0) {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    for (const p of curve) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+    }
+    const spanX = maxX - minX || 1;
+    const pad = 16;
+    curve.forEach((p, i) => {
+      const x = pad + ((p.x - minX) / spanX) * (width - 2 * pad);
+      const y = height / 2 - ((p.y - mid) / half) * height * yScale;
+      pts.push(`${i === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`);
+    });
+    return pts.join(" ");
+  }
+  const len = signal.samples.length;
+  if (len === 0) return "";
+  signal.samples.forEach((s, i) => {
+    const x = (i / (len - 1)) * width;
+    const y = height / 2 - (s ?? 0) * height * yScale;
+    pts.push(`${i === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`);
+  });
+  return pts.join(" ");
+}
+
+/** Centre line and half-height the curve's y is measured against. */
+function curveFrame(signal: PipelineSignal): { mid: number; half: number } | null {
+  const curve = getSignalCurve(signal);
+  if (!curve) return null;
+  const mid = signal.metadata?.["curveYMid"];
+  const half = signal.metadata?.["curveYHalf"];
+  if (typeof mid === "number" && typeof half === "number" && half > 0) return { mid, half };
+  // A raw mixed signal: its samples were derived as ((y - mid) / half) · 0.95.
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const p of curve) {
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  return { mid: (minY + maxY) / 2, half: (maxY - minY) / 2 || 1 };
+}
+
+/**
+ * For stages that process the signal along its own time axis (cooking
+ * convolution, chop, caramelize, oven reconstruction): the curve keeps the
+ * input's x-positions, and whatever the stage did to the samples
+ * (output − input) is applied to the curve's height at the same instant.
+ */
+export function carryCurve(output: PipelineSignal, input: PipelineSignal): PipelineSignal {
+  const curve = getSignalCurve(input);
+  const frame = curveFrame(input);
+  const out = output.samples;
+  const inp = input.samples;
+  if (!curve || !frame || out.length < 2 || inp.length < 2) return output;
+  const at = (arr: number[], u: number) => {
+    const pos = u * (arr.length - 1);
+    const idx = Math.min(arr.length - 2, Math.floor(pos));
+    return arr[idx]! + (pos - idx) * (arr[idx + 1]! - arr[idx]!);
+  };
+  const last = curve.length - 1;
+  const newCurve = curve.map((p, i) => {
+    const u = i / last;
+    return { x: p.x, y: p.y + ((at(out, u) - at(inp, u)) / 0.95) * frame.half };
+  });
+  return {
+    ...output,
+    metadata: {
+      ...output.metadata,
+      curve: newCurve,
+      curveYMid: frame.mid,
+      curveYHalf: frame.half,
+    },
+  };
+}
+
+/**
+ * SVG path for a bare sample array that lives on `ref`'s time axis: drawn
+ * along ref's Mixing curve when it has one, else as a plain waveform.
+ */
+export function samplesAlongCurvePath(
+  samples: number[],
+  ref: PipelineSignal | null | undefined,
+  width: number,
+  height: number,
+  yScale = 0.34,
+): string {
+  const base: PipelineSignal = ref
+    ? { ...ref, samples }
+    : {
+        recipeId: "",
+        stage: "cooked",
+        samples,
+        sampleRate: 44100,
+        duration: 3,
+        frequency: 4,
+        timestamp: 0,
+      };
+  return pipelineSignalToPath(ref ? carryCurve(base, ref) : base, width, height, yScale);
+}
+
+/**
+ * SVG coordinates of the sample (t ∈ [0,1], value) on `ref`'s curve, for
+ * sample-point markers drawn on top of samplesAlongCurvePath.
+ */
+export function curvePointToSvg(
+  ref: PipelineSignal | null | undefined,
+  t: number,
+  value: number,
+  width: number,
+  height: number,
+  yScale = 0.34,
+): { x: number; y: number } {
+  const curve = ref ? getSignalCurve(ref) : null;
+  const frame = ref ? curveFrame(ref) : null;
+  const y = height / 2 - (curve && frame ? value / 0.95 : value) * height * yScale;
+  if (!curve || !frame) return { x: t * width, y };
+  let minX = Infinity;
+  let maxX = -Infinity;
+  for (const p of curve) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+  }
+  const pos = Math.max(0, Math.min(1, t)) * (curve.length - 1);
+  const idx = Math.min(curve.length - 2, Math.floor(pos));
+  const cx = curve[idx]!.x + (pos - idx) * (curve[idx + 1]!.x - curve[idx]!.x);
+  const pad = 16;
+  return { x: pad + ((cx - minX) / (maxX - minX || 1)) * (width - 2 * pad), y };
+}
+
+/**
+ * Applies the same transform as timeScaleSamples to the signal's Mixing
+ * curve: y is scaled by A about the mix's centre line, and the parameter is
+ * sped up by α. Past the end the curve repeats, shifted along x so it keeps
+ * moving right.
+ */
+function transformCurve(
+  input: PipelineSignal,
+  amplitude: number,
+  alpha: number,
+): { curve?: CurvePoint[]; curveYMid?: number; curveYHalf?: number } {
+  const curve = getSignalCurve(input);
+  if (!curve) return {};
+  let midY = input.metadata?.["curveYMid"];
+  let halfY = input.metadata?.["curveYHalf"];
+  if (typeof midY !== "number" || typeof halfY !== "number") {
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const p of curve) {
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+    midY = (minY + maxY) / 2;
+    halfY = (maxY - minY) / 2;
+  }
+  const mid = midY as number;
+  const last = curve.length - 1;
+  const dx = curve[last]!.x - curve[0]!.x;
+  const out: CurvePoint[] = [];
+  for (let i = 0; i <= last; i++) {
+    const t = (i / last) * last * alpha;
+    const period = Math.floor(t / last);
+    const local = t - period * last;
+    const idx = Math.min(last - 1, Math.floor(local));
+    const frac = local - idx;
+    const p0 = curve[idx]!;
+    const p1 = curve[idx + 1]!;
+    out.push({
+      x: p0.x + frac * (p1.x - p0.x) + period * dx,
+      y: mid + (p0.y + frac * (p1.y - p0.y) - mid) * amplitude,
+    });
+  }
+  return { curve: out, curveYMid: mid, curveYHalf: halfY as number };
+}
+
+/**
+ * Computes the marinated signal: a time delay y(t) = x(t − t0) with zero
+ * padding, t0 = timeScale seconds of the signal's duration. This matches the
+ * backend's stage_marinate (a time shift in seconds). The Mixing curve is
+ * delayed the same way: a flat lead-in at the centre line, then the curve.
  */
 export function computeMarinatedSignal(
   seasonedSignal: PipelineSignal,
@@ -396,7 +606,9 @@ export function computeMarinatedSignal(
       : computeMixedSignal(seasonedSignal.recipeId, []).samples;
 
   const effectiveScale = Math.max(0.01, timeScale);
-  const shiftSamples = Math.round((effectiveScale / Math.max(1, seasonedSignal.duration)) * sampleCount);
+  const shiftSamples = Math.round(
+    (effectiveScale / Math.max(1, seasonedSignal.duration)) * sampleCount,
+  );
 
   for (let i = 0; i < sampleCount; i++) {
     const srcNorm = (i - shiftSamples) / (sampleCount - 1);
@@ -417,8 +629,32 @@ export function computeMarinatedSignal(
     timestamp: Date.now(),
     metadata: {
       timeScale,
+      ...delayCurve(seasonedSignal, shiftSamples / (sampleCount - 1)),
     },
   };
+}
+
+/** Delays the signal's Mixing curve by a fraction d of the window. */
+function delayCurve(
+  input: PipelineSignal,
+  d: number,
+): { curve?: CurvePoint[]; curveYMid?: number; curveYHalf?: number } {
+  const curve = getSignalCurve(input);
+  const frame = curveFrame(input);
+  if (!curve || !frame) return {};
+  const last = curve.length - 1;
+  const x0 = curve[0]!.x;
+  const spanX = curve[last]!.x - x0;
+  const out = curve.map((_, i) => {
+    const u = i / last - d;
+    if (u < 0) return { x: x0 + u * spanX, y: frame.mid };
+    const pos = u * last;
+    const idx = Math.min(last - 1, Math.floor(pos));
+    const p0 = curve[idx]!;
+    const p1 = curve[idx + 1]!;
+    return { x: p0.x + (pos - idx) * (p1.x - p0.x), y: p0.y + (pos - idx) * (p1.y - p0.y) };
+  });
+  return { curve: out, curveYMid: frame.mid, curveYHalf: frame.half };
 }
 
 /**
@@ -474,19 +710,22 @@ export function computeConvolvedSignal(
   const finalSamples = normalizeSamples(outSamples, 0.95);
   const freqOffset = methodId === "fry" ? 2.5 : methodId === "grill" ? 1.5 : 0.8;
 
-  return {
-    recipeId: marinatedSignal.recipeId,
-    stage: "cooked",
-    samples: finalSamples,
-    sampleRate: marinatedSignal.sampleRate,
-    duration: marinatedSignal.duration,
-    frequency: marinatedSignal.frequency + freqOffset,
-    timestamp: Date.now(),
-    metadata: {
-      methodId,
-      pos,
+  return carryCurve(
+    {
+      recipeId: marinatedSignal.recipeId,
+      stage: "cooked",
+      samples: finalSamples,
+      sampleRate: marinatedSignal.sampleRate,
+      duration: marinatedSignal.duration,
+      frequency: marinatedSignal.frequency + freqOffset,
+      timestamp: Date.now(),
+      metadata: {
+        methodId,
+        pos,
+      },
     },
-  };
+    marinatedSignal,
+  );
 }
 
 /**
@@ -502,52 +741,18 @@ export function computeCleanMixedSignal(
   const effectiveIngredients =
     ingredientNames && ingredientNames.length > 0 ? ingredientNames : recipe.ingredients;
 
-  const summed = new Array<number>(sampleCount).fill(0);
-  let totalFreq = 0;
-
-  for (let idx = 0; idx < effectiveIngredients.length; idx++) {
-    const name = effectiveIngredients[idx]!;
-    const detail = recipe.ingredientDetails.find(
-      (d) => d.name.toLowerCase() === name.toLowerCase(),
-    );
-    const freq = detail?.freq ?? 3 + (idx % 4) * 1.5;
-    totalFreq += freq;
-
-    // Pure clean mathematical signal without contamination noise
-    const ingSamples = getRecipeIngredientSamples(recipe.id, name, {
-      noise: 0.0,
-      seed: (idx + 1) * 0.85,
-      freq,
-      sampleCount,
-      amplitude: 1.0,
-    });
-
-    for (let i = 0; i < sampleCount; i++) {
-      summed[i] = (summed[i] ?? 0) + (ingSamples[i] ?? 0);
-    }
-  }
-
-  const count = Math.max(1, effectiveIngredients.length);
-  const normFactor = 1 / Math.sqrt(count);
-  for (let i = 0; i < sampleCount; i++) {
-    summed[i] = (summed[i] ?? 0) * normFactor;
-  }
-  const samples = normalizeSamples(summed, 0.95);
-  const nominalFreq = Math.max(2, Math.round(totalFreq / count));
-
-  return {
-    recipeId: recipe.id,
-    stage: "mixed",
-    samples,
-    sampleRate: 44100,
-    duration: 3.0,
-    frequency: nominalFreq,
-    timestamp: Date.now(),
-    metadata: {
-      ingredients: effectiveIngredients,
-      clean: true,
-    },
-  };
+  // Built exactly like the player's mix (same per-ingredient samples, phase
+  // and frequency rule, same superposition and curve) but from clean
+  // ingredients, so any difference from the player's dish comes from the
+  // player's choices, not from two different generators.
+  return mixFromSamples(
+    recipe.id,
+    effectiveIngredients,
+    getMixingIngredientSamples(recipe.id, effectiveIngredients, sampleCount, true),
+    sampleCount,
+    { clean: true },
+    { clean: true },
+  );
 }
 
 /**
@@ -829,8 +1034,8 @@ export function savePipelineStageSignal(
       };
       window.localStorage.setItem(key, JSON.stringify(normalizedSignal));
       window.dispatchEvent(new Event("wavebakery_pipeline_signal_changed"));
-    } catch {
-      // ignore
+    } catch (e) {
+      console.error("[savePipelineStageSignal] failed", recipeId, stage, e);
     }
   }
 }
@@ -845,8 +1050,44 @@ export function getPipelineStageSignal(
       const key = `wavebakery_pipeline_${recipeId}_${stage}`;
       const stored = window.localStorage.getItem(key);
       if (stored) {
-        const parsed = JSON.parse(stored) as PipelineSignal;
+        let parsed = JSON.parse(stored) as PipelineSignal;
         if (parsed && Array.isArray(parsed.samples) && parsed.samples.length > 0) {
+          // Mixes saved before the curve was stored: rebuild it from the
+          // saved ingredient list so Seasoning still gets the Mixing curve.
+          if (stage === "mixed" && !getSignalCurve(parsed)) {
+            parsed = withMixCurve(parsed);
+          }
+          // Seasoned/marinated signals saved without the curve (or before
+          // curveYHalf existed): recompute from the upstream stage using the
+          // player's saved dials, so the curve keeps flowing downstream.
+          if (stage === "seasoned" && typeof parsed.metadata?.["curveYHalf"] !== "number") {
+            const mixed = getPipelineStageSignal(recipeId, "mixed", sampleCount);
+            const amp = parsed.metadata?.["amplitude"];
+            const fs = parsed.metadata?.["freqScale"];
+            if (getSignalCurve(mixed) && typeof amp === "number" && typeof fs === "number") {
+              parsed = computeSeasonedSignal(mixed, amp, fs, sampleCount);
+            }
+          }
+          if (stage === "marinated" && typeof parsed.metadata?.["curveYHalf"] !== "number") {
+            const seasoned = getPipelineStageSignal(recipeId, "seasoned", sampleCount);
+            const ts = parsed.metadata?.["timeScale"];
+            if (getSignalCurve(seasoned) && typeof ts === "number") {
+              parsed = computeMarinatedSignal(seasoned, ts, sampleCount);
+            }
+          }
+          // Cooked/delivered keep the time axis, so the curve is re-attached
+          // from the stage before without needing that stage's dials.
+          if (
+            (stage === "cooked" || stage === "delivered") &&
+            typeof parsed.metadata?.["curveYHalf"] !== "number"
+          ) {
+            const upstream = getPipelineStageSignal(
+              recipeId,
+              stage === "cooked" ? "marinated" : "cooked",
+              sampleCount,
+            );
+            parsed = carryCurve(parsed, upstream);
+          }
           if (parsed.samples.length !== sampleCount) {
             return {
               ...parsed,
@@ -856,8 +1097,8 @@ export function getPipelineStageSignal(
           return parsed;
         }
       }
-    } catch {
-      // ignore
+    } catch (e) {
+      console.error("[getPipelineStageSignal] failed, falling back to default", recipeId, stage, e);
     }
   }
   return getDefaultPipelineSignal(recipeId, stage, sampleCount);

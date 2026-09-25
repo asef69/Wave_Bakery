@@ -11,7 +11,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, KeepTogether, HRFlowable
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
 )
 from reportlab.pdfgen import canvas
 
@@ -34,7 +34,7 @@ class NumberedCanvas(canvas.Canvas):
 
     def showPage(self):
         self._saved_page_states.append(dict(self.__dict__))
-        self._startPage()
+        self._startPage() # type: ignore
 
     def save(self):
         num_pages = len(self._saved_page_states)
@@ -45,7 +45,7 @@ class NumberedCanvas(canvas.Canvas):
         super().save()
 
     def draw_page_decorations(self, page_count):
-        if self._pageNumber == 1:
+        if self._pageNumber == 1: # type: ignore
             return  # Cover page
         self.saveState()
         self.setFont('Helvetica', 8)
@@ -60,7 +60,7 @@ class NumberedCanvas(canvas.Canvas):
         
         # Footer
         self.line(54, 45, 612 - 54, 45)
-        self.drawRightString(612 - 54, 32, f'Page {self._pageNumber} of {page_count}')
+        self.drawRightString(612 - 54, 32, f'Page {self._pageNumber} of {page_count}') # type: ignore
         self.drawString(54, 32, 'WaveKitchen · Full-Stack DSP Game Specification')
         self.restoreState()
 

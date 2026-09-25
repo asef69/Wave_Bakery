@@ -18,9 +18,7 @@ describe("Precision Oven DSP: Sampling, Nyquist, FFT Equalizer, and IFFT", () =>
   const testSamples: number[] = [];
   for (let i = 0; i < sampleCount; i++) {
     const t = i / (sampleCount - 1);
-    testSamples.push(
-      0.6 * Math.sin(2 * Math.PI * 4 * t) + 0.4 * Math.sin(2 * Math.PI * 12 * t),
-    );
+    testSamples.push(0.6 * Math.sin(2 * Math.PI * 4 * t) + 0.4 * Math.sin(2 * Math.PI * 12 * t));
   }
 
   describe("1. Sampling & Nyquist Theorem Analysis", () => {

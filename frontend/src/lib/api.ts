@@ -15,9 +15,7 @@
 // registration. `import.meta.env.DEV` is true regardless of which port
 // Vite actually picks.
 const API_BASE =
-  typeof import.meta !== "undefined" && import.meta.env?.DEV
-    ? "http://127.0.0.1:8000/api"
-    : "/api";
+  typeof import.meta !== "undefined" && import.meta.env?.DEV ? "http://127.0.0.1:8000/api" : "/api";
 
 const TOKEN_KEY = "wavekitchen_player_token";
 
@@ -164,6 +162,11 @@ export interface CookParams {
   anti_alias?: boolean;
   appliances?: string[];
   cooking_method?: string | null;
+  bowl?: string[] | null;
+  delivery_accuracy?: number | null;
+  system_preset?: "lowpass1" | "resonator2" | "moving_avg" | "notch" | null;
+  system_pole_radius?: number | null;
+  system_sampling_hz?: number | null;
 }
 
 export interface StagesOut {
@@ -203,6 +206,8 @@ export interface SubmitResult {
   mixing_score?: number;
   transform_score?: number;
   cooking_score?: number;
+  delivery_score?: number | null;
+  system_score?: number | null;
   snr_db: number;
   mse: number;
   correlation: number;
@@ -226,6 +231,7 @@ export interface LeaderboardRow {
   stars: number;
   recipe_id: string;
   recipe_name: string;
+  difficulty?: string | null;
   created_at: string;
 }
 
@@ -347,21 +353,25 @@ class ApiClient {
   }
 
   // Auth & Players
-  async ensureAuthenticated(handle = "Chef Fourier"): Promise<string> {
+  /**
+   * Returns the signed-in chef's token, or throws if nobody is signed in.
+   * Signing in needs a password now, so this no longer auto-registers or
+   * logs in by name (which let anyone act as any chef).
+   */
+  async ensureAuthenticated(): Promise<string> {
     const existing = this.getToken();
     if (existing) {
       try {
         await this.getPlayerMe();
         return existing;
       } catch {
-        // Token invalid or expired on server, re-authenticate below
+        this.setToken(null);
       }
     }
-    const res = await this.authOrRegisterPlayer(handle);
-    return res.token;
+    throw new Error("Not signed in: sign in as a chef to save runs to the server.");
   }
 
-  async registerPlayer(handle: string) {
+  async registerPlayer(handle: string, password: string) {
     const res = await this.request<{
       token: string;
       id: string;
@@ -372,13 +382,13 @@ class ApiClient {
       rank_emoji: string;
     }>("/players", {
       method: "POST",
-      body: JSON.stringify({ handle }),
+      body: JSON.stringify({ handle, password }),
     });
     this.setToken(res.token);
     return res;
   }
 
-  async loginPlayer(handle: string) {
+  async loginPlayer(handle: string, password: string) {
     const res = await this.request<{
       token: string;
       id: string;
@@ -389,13 +399,13 @@ class ApiClient {
       rank_emoji: string;
     }>("/players/login", {
       method: "POST",
-      body: JSON.stringify({ handle }),
+      body: JSON.stringify({ handle, password }),
     });
     this.setToken(res.token);
     return res;
   }
 
-  async authOrRegisterPlayer(handle: string) {
+  async authOrRegisterPlayer(handle: string, password: string) {
     const res = await this.request<{
       token: string;
       id: string;
@@ -406,7 +416,7 @@ class ApiClient {
       rank_emoji: string;
     }>("/players/auth-or-register", {
       method: "POST",
-      body: JSON.stringify({ handle }),
+      body: JSON.stringify({ handle, password }),
     });
     this.setToken(res.token);
     return res;
@@ -468,10 +478,10 @@ class ApiClient {
   }
 
   // Sessions
-  async createSession(recipeId: string): Promise<GameSessionOut> {
+  async createSession(recipeId: string, difficulty?: string): Promise<GameSessionOut> {
     return this.request<GameSessionOut>("/sessions", {
       method: "POST",
-      body: JSON.stringify({ recipe_id: recipeId }),
+      body: JSON.stringify({ recipe_id: recipeId, difficulty }),
     });
   }
 
@@ -535,9 +545,15 @@ class ApiClient {
   }
 
   // Leaderboard
-  async getLeaderboard(recipeId?: string, limit = 20): Promise<LeaderboardRow[]> {
-    const q = recipeId ? `?recipe_id=${recipeId}&limit=${limit}` : `?limit=${limit}`;
-    return this.request<LeaderboardRow[]>(`/leaderboard${q}`);
+  async getLeaderboard(
+    recipeId?: string,
+    limit = 20,
+    difficulty?: string,
+  ): Promise<LeaderboardRow[]> {
+    const q = new URLSearchParams({ limit: String(limit) });
+    if (recipeId) q.set("recipe_id", recipeId);
+    if (difficulty) q.set("difficulty", difficulty);
+    return this.request<LeaderboardRow[]>(`/leaderboard?${q.toString()}`);
   }
 
   async getGlobalRanking(limit = 20): Promise<GlobalRankRow[]> {

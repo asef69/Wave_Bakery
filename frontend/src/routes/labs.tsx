@@ -25,7 +25,7 @@ import {
 } from "@/lib/recipes";
 import { cn } from "@/lib/utils";
 
-export function generatePlaygroundSamples(params: {
+function generatePlaygroundSamples(params: {
   freq: number;
   noise?: number;
   waveShape?: "sine" | "triangle" | "square";
@@ -1135,7 +1135,9 @@ function MixerSandbox({
     active: false,
   });
 
-  const tracks = [track1, track2, track3, track4];
+  // Memoized so the mixes below recompute only when a track changes (a new
+  // array every render made their useMemo recompute on every render).
+  const tracks = useMemo(() => [track1, track2, track3, track4], [track1, track2, track3, track4]);
   const setTracks = [setTrack1, setTrack2, setTrack3, setTrack4];
 
   const mixedSamples = useMemo(() => {
@@ -1155,7 +1157,7 @@ function MixerSandbox({
       out.push(val / totalGain);
     }
     return out;
-  }, [track1, track2, track3, track4, tracks]);
+  }, [tracks]);
 
   const getTrackSamples = (t: { name: string; freq: number; gain: number }) => {
     return generatePlaygroundSamples({
@@ -1185,7 +1187,7 @@ function MixerSandbox({
       pts.push(`${x === 0 ? "M" : "L"}${x} ${y.toFixed(2)}`);
     }
     return pts.join(" ");
-  }, [track1, track2, track3, track4, tracks]);
+  }, [tracks]);
 
   return (
     <div className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">

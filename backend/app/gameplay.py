@@ -10,6 +10,7 @@ instant.
 from __future__ import annotations
 
 import numpy as np
+from sqlalchemy import func
 from sqlalchemy.orm import Session as DbSession
 
 from . import config
@@ -183,11 +184,50 @@ def default_params(recipe: Recipe) -> dict:
 # --------------------------------------------------------------------------
 # stages
 # --------------------------------------------------------------------------
+def bowl_signals(db: DbSession, session: GameSession, signals: list[dict]) -> list:
+    """
+    The signals the player actually mixed. Recipe ingredients in the bowl use
+    their filtered version; extra (non-recipe) ingredients from the catalogue
+    go in clean; anything left out is simply missing from the mix. No bowl
+    recorded (older clients) means the whole recipe, as before.
+    """
+    bowl = (session.params or {}).get('bowl')
+    if bowl is None:
+        return [s['filtered'] for s in signals]
+    wanted = {str(n).strip().lower() for n in bowl}
+    mixed = [s['filtered'] for s in signals if s['ingredient'].name.lower() in wanted]
+    in_recipe = {s['ingredient'].name.lower() for s in signals}
+    for name in sorted(wanted - in_recipe):
+        extra = db.query(Ingredient).filter(func.lower(Ingredient.name) == name).first()
+        if extra is not None:
+            mixed.append(clean_signal(extra))
+    return mixed
+
+
 def compute_stages(db: DbSession, session: GameSession) -> tuple[dict, list[dict]]:
     signals = session_signals(db, session)
-    stages = pipeline.run_pipeline([s['filtered'] for s in signals],
+    stages = pipeline.run_pipeline(bowl_signals(db, session, signals),
                                    params_to_pipeline(session.params or {}))
     return stages, signals
+
+
+SYSTEM_ALIAS_FREE_FS = 4000.0
+
+
+def system_score_for(params: dict) -> float | None:
+    """
+    System Delivery (z-plane) score from the player's settings, mirroring
+    frontend lib/z-system.ts: 100 for a stable cart (every pole inside
+    |z| = 1), 15 if unstable, x0.6 if the sensor samples below 4 kHz.
+    """
+    preset = params.get('system_preset')
+    if preset is None:
+        return None
+    r = float(params.get('system_pole_radius') or 0.0)
+    max_pole = {'lowpass1': r, 'resonator2': r, 'moving_avg': 0.0, 'notch': 0.85}[preset]
+    stability = 100.0 if max_pole < 1.0 else 15.0
+    fs = float(params.get('system_sampling_hz') or SYSTEM_ALIAS_FREE_FS)
+    return round(stability * (1.0 if fs >= SYSTEM_ALIAS_FREE_FS else 0.6), 2)
 
 
 def stages_payload(stages: dict, session: GameSession) -> dict:
@@ -282,9 +322,25 @@ def judge(db: DbSession, session: GameSession) -> dict:
     filtering_score = round(prep_avg, 2)
     mixing_score = round(metrics.dish_metrics(target['mixed'], stages['mixed'])['score'], 2)
     transform_score = round(metrics.dish_metrics(target['marinated'], stages['marinated'])['score'], 2)
-    cooking_score = round(m['score'], 2)
+    # Cooking alone: the player's own pre-cooking signal through the recipe's
+    # appliances vs. through the player's. (This used to be the whole-dish
+    # score, so every earlier mistake also showed up as a "cooking" error.)
+    correctly_cooked = pipeline.stage_cook(stages['chopped'], list(recipe.appliances or []))
+    cooking_score = round(metrics.dish_metrics(correctly_cooked, stages['cooked'])['score'], 2)
 
     raw = 0.72 * m['score'] + 0.28 * prep_avg
+
+    # Finishing stations (Precision Oven, System Delivery) are part of the
+    # dish score when played: 10% and 5%, taken proportionally from the rest.
+    p = session.params or {}
+    delivery_score = p.get('delivery_accuracy')
+    system_score = system_score_for(p)
+    extras = [(float(v), w) for v, w in ((delivery_score, 0.10), (system_score, 0.05))
+              if v is not None]
+    if extras:
+        w_total = sum(w for _, w in extras)
+        raw = raw * (1.0 - w_total) + sum(v * w for v, w in extras)
+
     gamma = 1.0 / max(0.3, recipe.tolerance or 1.0)
     score = float(np.clip(100.0 * (raw / 100.0) ** gamma, 0, 100))
 
@@ -295,6 +351,8 @@ def judge(db: DbSession, session: GameSession) -> dict:
         'mixing_score': mixing_score,
         'transform_score': transform_score,
         'cooking_score': cooking_score,
+        'delivery_score': delivery_score,
+        'system_score': system_score,
         'score': round(score, 2),
         'stars': metrics.stars(score),
         'notes': notes or ['Textbook execution. Nothing to correct.'],

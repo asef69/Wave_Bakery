@@ -72,8 +72,7 @@ function GenerateScreen() {
     );
   }, [activeIngredientName]);
 
-  const isChicken =
-    activeIng.name.toLowerCase() === "chicken" || activeIng.kind === "chicken";
+  const isChicken = activeIng.name.toLowerCase() === "chicken" || activeIng.kind === "chicken";
   const [chickenAudio, setChickenAudio] = useState<DecodedChickenAudio | null>(() =>
     getCachedChickenAudio(),
   );
@@ -180,10 +179,19 @@ function GenerateScreen() {
     if (isChicken) {
       return chickenAudio ? chickenAudio.samples : getChickenStaticSamples();
     }
-    if (generated && activeIng.washable && backendItem?.dirty?.plot && backendItem.dirty.plot.length > 0) {
+    if (
+      generated &&
+      activeIng.washable &&
+      backendItem?.dirty?.plot &&
+      backendItem.dirty.plot.length > 0
+    ) {
       return backendItem.dirty.plot;
     }
-    if (!generated && backendItem?.clean_preview?.plot && backendItem.clean_preview.plot.length > 0) {
+    if (
+      !generated &&
+      backendItem?.clean_preview?.plot &&
+      backendItem.clean_preview.plot.length > 0
+    ) {
       return backendItem.clean_preview.plot;
     }
     return computeIngredientSamples({
@@ -590,9 +598,7 @@ function GenerateScreen() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="font-mono text-[10px] tracking-[0.24em] text-signal/70 uppercase">
-                    {generated
-                      ? "Generated Raw Signal (Noisy)"
-                      : "Awaiting Generation"}
+                    {generated ? "Generated Raw Signal (Noisy)" : "Awaiting Generation"}
                   </p>
                   {generated ? (
                     <span className="font-mono text-[9px] font-bold uppercase text-primary">
@@ -604,7 +610,9 @@ function GenerateScreen() {
                   size="sm"
                   variant="lab"
                   className="uppercase text-xs"
-                  onClick={() => handlePlayAudio(`raw-${activeIng.name}`, activeSamples, activeIng.freq)}
+                  onClick={() =>
+                    handlePlayAudio(`raw-${activeIng.name}`, activeSamples, activeIng.freq)
+                  }
                 >
                   {playingClip === `raw-${activeIng.name}` ? "🔊 Playing..." : "▶ Play Raw Signal"}
                 </GameButton>
@@ -643,7 +651,8 @@ function GenerateScreen() {
                 </span>
               </div>
               <p className="mt-3 text-xs text-muted-foreground leading-relaxed">
-                {activeIng.name} is a pantry-ready ingredient with zero field contamination. It generates clean with 0% noise and bypasses the Filtering Lab directly to Mixing.
+                {activeIng.name} is a pantry-ready ingredient with zero field contamination. It
+                generates clean with 0% noise and bypasses the Filtering Lab directly to Mixing.
               </p>
             </div>
           )}

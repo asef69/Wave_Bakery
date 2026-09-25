@@ -314,13 +314,7 @@ function LabWave({
               strokeWidth="0.75"
               opacity="0.15"
             />
-            <circle
-              cx={plotWidth / 2}
-              cy={plotHeight / 2}
-              r="2.5"
-              fill={stroke}
-              opacity="0.5"
-            />
+            <circle cx={plotWidth / 2} cy={plotHeight / 2} r="2.5" fill={stroke} opacity="0.5" />
           </>
         )}
         <path
@@ -381,7 +375,8 @@ function Spectrum({
           if (m > maxMag) maxMag = m;
         }
 
-        const normH = maxOverallMag > 0 ? Math.min(98, Math.max(2, (maxMag / maxOverallMag) * 100)) : 2;
+        const normH =
+          maxOverallMag > 0 ? Math.min(98, Math.max(2, (maxMag / maxOverallMag) * 100)) : 2;
         const isSignal = normH > 40; // True peaks will stand out above 40%
         return { hz, h: normH, isSignal };
       });
@@ -808,7 +803,14 @@ function FilteringLab() {
       return filteredParametricPoints;
     }
     return rawParametricPoints;
-  }, [canonicalParametricPoints, isClean, cleanedThis, applied, filteredParametricPoints, rawParametricPoints]);
+  }, [
+    canonicalParametricPoints,
+    isClean,
+    cleanedThis,
+    applied,
+    filteredParametricPoints,
+    rawParametricPoints,
+  ]);
 
   const [player, setPlayer] = useState<SignalAudioPlayer | null>(null);
   const [activePlayerId, setActivePlayerId] = useState<string | null>(null);
@@ -1140,7 +1142,9 @@ function FilteringLab() {
                       <span className="text-muted-foreground">signal status — </span>
                       <span
                         className={
-                          isClean || cleanedThis ? "text-signal font-bold" : "text-[oklch(0.65_0.17_35)] font-bold"
+                          isClean || cleanedThis
+                            ? "text-signal font-bold"
+                            : "text-[oklch(0.65_0.17_35)] font-bold"
                         }
                       >
                         {isClean || cleanedThis ? "clean" : "noisy"}
@@ -1161,7 +1165,7 @@ function FilteringLab() {
                           ? "WAV RECORDING"
                           : mathSignal?.parametricCurve
                             ? (mathSignal.parametricCurve.domainDisplay ?? "PARAMETRIC CURVE")
-                            : mathSignal?.equationDisplay ?? `${current.baseFreq} Hz`}
+                            : (mathSignal?.equationDisplay ?? `${current.baseFreq} Hz`)}
                       </span>
                     </div>
                   </div>
@@ -1210,11 +1214,7 @@ function FilteringLab() {
                           : "noisy ingredient signal"
                     }
                     samples={
-                      isClean || cleanedThis
-                        ? cleanSamples
-                        : applied
-                          ? filteredSamples
-                          : rawSamples
+                      isClean || cleanedThis ? cleanSamples : applied ? filteredSamples : rawSamples
                     }
                     parametricPoints={mainParametricPoints}
                     square={isSquareShape}

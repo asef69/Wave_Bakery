@@ -1,15 +1,9 @@
 import { useMemo, useRef, useState } from "react";
-import {
-  Activity,
-  AlertTriangle,
-  BookOpen,
-  CheckCircle2,
-  Sliders,
-  Truck,
-} from "lucide-react";
+import { Activity, AlertTriangle, BookOpen, CheckCircle2, Sliders, Truck } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SYSTEM_ALIAS_FREE_FS, systemPolesZeros, type SystemPresetType } from "@/lib/z-system";
 
-export type SystemPresetType = "lowpass1" | "resonator2" | "moving_avg" | "notch";
+export type { SystemPresetType };
 
 interface SystemResponsePlotterProps {
   preset: SystemPresetType;
@@ -25,12 +19,18 @@ interface SystemResponsePlotterProps {
 
 const PRESET_INFO: Record<
   SystemPresetType,
-  { label: string; desc: string; formula: string; recurrence: string; draggable: "pole" | "zero" | null }
+  {
+    label: string;
+    desc: string;
+    formula: string;
+    recurrence: string;
+    draggable: "pole" | "zero" | null;
+  }
 > = {
   lowpass1: {
     label: "1st-Order Lowpass",
-    desc: "H(z) = (1-a)/(1 - a z⁻¹)",
-    formula: "H(z) = (1 - r)(z + 1) / (z - r·e^{jω0})",
+    desc: "H(z) = (1-r)/(1 - r z⁻¹)",
+    formula: "H(z) = (1 - r)·z / (z - r)",
     recurrence: "y[n] = (1 - r)·x[n] + r·y[n-1]",
     draggable: "pole",
   },
@@ -68,38 +68,21 @@ export function SystemResponsePlotter({
   onSamplingRateChange,
   dishSignal,
 }: SystemResponsePlotterProps) {
-  const isStable = poleRadius < 1.0;
+  // Stable when every pole is inside the unit circle (the notch's poles sit
+  // at 0.85 and the moving average's at 0, whatever the r slider says).
+  const isStable = systemPolesZeros(preset, poleRadius, frequency).poles.every(
+    (p) => Math.hypot(p.re, p.im) < 1,
+  );
   const svgRef = useRef<SVGSVGElement>(null);
   const [dragging, setDragging] = useState(false);
   const info = PRESET_INFO[preset];
 
   // Calculate poles and zeros for current system setup
   const { poles, zeros, freqResponse, phaseResponse } = useMemo(() => {
-    const pList: Array<{ re: number; im: number }> = [];
-    const zList: Array<{ re: number; im: number }> = [];
+    const { poles: pList, zeros: zList, gain } = systemPolesZeros(preset, poleRadius, frequency);
     const N = 128;
     const response: number[] = new Array(N).fill(0);
     const phase: number[] = new Array(N).fill(0);
-
-    if (preset === "lowpass1") {
-      pList.push({ re: poleRadius * Math.cos(frequency), im: poleRadius * Math.sin(frequency) });
-      zList.push({ re: -1, im: 0 });
-    } else if (preset === "resonator2") {
-      pList.push({ re: poleRadius * Math.cos(frequency), im: poleRadius * Math.sin(frequency) });
-      pList.push({ re: poleRadius * Math.cos(frequency), im: -poleRadius * Math.sin(frequency) });
-      zList.push({ re: 0, im: 0 });
-    } else if (preset === "moving_avg") {
-      pList.push({ re: 0, im: 0 });
-      for (let k = 1; k < 6; k++) {
-        const angle = (2 * Math.PI * k) / 6;
-        zList.push({ re: Math.cos(angle), im: Math.sin(angle) });
-      }
-    } else if (preset === "notch") {
-      zList.push({ re: Math.cos(frequency), im: Math.sin(frequency) });
-      zList.push({ re: Math.cos(frequency), im: -Math.sin(frequency) });
-      pList.push({ re: 0.85 * Math.cos(frequency), im: 0.85 * Math.sin(frequency) });
-      pList.push({ re: 0.85 * Math.cos(frequency), im: -0.85 * Math.sin(frequency) });
-    }
 
     // Compute H(e^{j w}) for w from 0 to PI (magnitude via geometric distances,
     // phase via actual complex angle accumulation)
@@ -126,7 +109,7 @@ export function SystemResponsePlotter({
         denAngle += Math.atan2(dy, dx);
       }
 
-      const H = denSq > 1e-6 ? Math.sqrt(numSq / denSq) : 10;
+      const H = denSq > 1e-6 ? Math.abs(gain) * Math.sqrt(numSq / denSq) : 10;
       response[i] = Math.min(4.0, H);
       phase[i] = numAngle - denAngle;
     }
@@ -137,15 +120,17 @@ export function SystemResponsePlotter({
   // Compute FFT magnitudes for input and equalized output spectrum
   const { inputSpectrum, outputSpectrum } = useMemo(() => {
     const N = 64;
-    const inSpec: number[] = new Array(N).fill(0);
-    const outSpec: number[] = new Array(N).fill(0);
+    const inSpec: number[] = new Array(N / 2 + 1).fill(0);
+    const outSpec: number[] = new Array(N / 2 + 1).fill(0);
 
     const sig =
       dishSignal && dishSignal.length >= N
         ? dishSignal
         : new Array(N).fill(0).map((_, i) => Math.sin((2 * Math.PI * 440 * i) / 8000));
 
-    for (let k = 0; k < N; k++) {
+    // Only bins 0..N/2 are distinct for a real signal (the rest mirror them),
+    // and bin k sits at ω = 2πk/N, which is where H(e^{jω}) must be read.
+    for (let k = 0; k <= N / 2; k++) {
       let re = 0;
       let im = 0;
       for (let n = 0; n < N; n++) {
@@ -157,7 +142,8 @@ export function SystemResponsePlotter({
       const mag = Math.sqrt(re * re + im * im) / N;
       inSpec[k] = mag;
 
-      const respIdx = Math.floor((k / N) * freqResponse.length);
+      const w = (2 * Math.PI * k) / N;
+      const respIdx = Math.round((w / Math.PI) * (freqResponse.length - 1));
       const gain = freqResponse[respIdx] ?? 1.0;
       outSpec[k] = isStable ? mag * gain : mag * 5.0; // explosion if unstable
     }
@@ -204,7 +190,8 @@ export function SystemResponsePlotter({
   };
 
   const nyquistHz = samplingRateHz / 2;
-  const isAliasing = samplingRateHz < 3000;
+  // Same threshold as the station's chef line, buttons and accuracy.
+  const isAliasing = samplingRateHz < SYSTEM_ALIAS_FREE_FS;
 
   // Cart wobble intensity: amplitude grows with pole radius, speed with frequency
   const wobbleDeg = Math.min(14, poleRadius * 12);
@@ -261,7 +248,9 @@ export function SystemResponsePlotter({
 
         <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
           {(
-            Object.entries(PRESET_INFO) as Array<[SystemPresetType, (typeof PRESET_INFO)[SystemPresetType]]>
+            Object.entries(PRESET_INFO) as Array<
+              [SystemPresetType, (typeof PRESET_INFO)[SystemPresetType]]
+            >
           ).map(([id, p]) => {
             const isActive = preset === id;
             return (
@@ -386,15 +375,36 @@ export function SystemResponsePlotter({
                 }
               >
                 {/* Dish on the cart */}
-                <ellipse cx={70} cy={62} rx={22} ry={7} fill="oklch(0.9 0.02 90)" stroke="oklch(0.6 0.02 90)" />
+                <ellipse
+                  cx={70}
+                  cy={62}
+                  rx={22}
+                  ry={7}
+                  fill="oklch(0.9 0.02 90)"
+                  stroke="oklch(0.6 0.02 90)"
+                />
                 <circle cx={70} cy={60} r={9} fill="oklch(0.78 0.16 55)" />
                 {/* Cart tray */}
                 <rect x={38} y={68} width={64} height={10} rx={3} fill="oklch(0.52 0.07 45)" />
                 {/* Cart post */}
                 <rect x={66} y={78} width={8} height={20} fill="oklch(0.4 0.06 42)" />
                 {/* Wheels */}
-                <circle cx={52} cy={104} r={10} fill="oklch(0.24 0.03 250)" stroke="oklch(0.78 0.02 80)" strokeWidth={2} />
-                <circle cx={88} cy={104} r={10} fill="oklch(0.24 0.03 250)" stroke="oklch(0.78 0.02 80)" strokeWidth={2} />
+                <circle
+                  cx={52}
+                  cy={104}
+                  r={10}
+                  fill="oklch(0.24 0.03 250)"
+                  stroke="oklch(0.78 0.02 80)"
+                  strokeWidth={2}
+                />
+                <circle
+                  cx={88}
+                  cy={104}
+                  r={10}
+                  fill="oklch(0.24 0.03 250)"
+                  stroke="oklch(0.78 0.02 80)"
+                  strokeWidth={2}
+                />
               </g>
               {/* Floor line */}
               <line x1={10} y1={116} x2={130} y2={116} stroke="var(--border)" strokeWidth={2} />
@@ -440,11 +450,35 @@ export function SystemResponsePlotter({
               onPointerLeave={() => setDragging(false)}
             >
               {/* Grid axes */}
-              <line x1="10" y1="100" x2="190" y2="100" stroke="var(--border)" strokeWidth="1.5" strokeDasharray="3 3" />
-              <line x1="100" y1="10" x2="100" y2="190" stroke="var(--border)" strokeWidth="1.5" strokeDasharray="3 3" />
+              <line
+                x1="10"
+                y1="100"
+                x2="190"
+                y2="100"
+                stroke="var(--border)"
+                strokeWidth="1.5"
+                strokeDasharray="3 3"
+              />
+              <line
+                x1="100"
+                y1="10"
+                x2="100"
+                y2="190"
+                stroke="var(--border)"
+                strokeWidth="1.5"
+                strokeDasharray="3 3"
+              />
 
               {/* Unit Circle |z|=1 = safe carrying limit */}
-              <circle cx="100" cy="100" r="70" fill="none" stroke="var(--primary)" strokeWidth="2" strokeOpacity={0.6} />
+              <circle
+                cx="100"
+                cy="100"
+                r="70"
+                fill="none"
+                stroke="var(--primary)"
+                strokeWidth="2"
+                strokeOpacity={0.6}
+              />
 
               {/* ROC Boundary Circle (r) */}
               <circle
@@ -478,15 +512,48 @@ export function SystemResponsePlotter({
               {poles.map((p, idx) => {
                 const pt = toSvgCoords(p.re, p.im);
                 return (
-                  <g key={`pole-${idx}`} className={info.draggable === "pole" ? "cursor-grab" : undefined}>
-                    <line x1={pt.x - 5} y1={pt.y - 5} x2={pt.x + 5} y2={pt.y + 5} stroke={isStable ? "#eab308" : "#ef4444"} strokeWidth="3" />
-                    <line x1={pt.x + 5} y1={pt.y - 5} x2={pt.x - 5} y2={pt.y + 5} stroke={isStable ? "#eab308" : "#ef4444"} strokeWidth="3" />
+                  <g
+                    key={`pole-${idx}`}
+                    className={info.draggable === "pole" ? "cursor-grab" : undefined}
+                  >
+                    <line
+                      x1={pt.x - 5}
+                      y1={pt.y - 5}
+                      x2={pt.x + 5}
+                      y2={pt.y + 5}
+                      stroke={isStable ? "#eab308" : "#ef4444"}
+                      strokeWidth="3"
+                    />
+                    <line
+                      x1={pt.x + 5}
+                      y1={pt.y - 5}
+                      x2={pt.x - 5}
+                      y2={pt.y + 5}
+                      stroke={isStable ? "#eab308" : "#ef4444"}
+                      strokeWidth="3"
+                    />
                   </g>
                 );
               })}
 
-              <text x="175" y="95" fill="var(--muted-foreground)" fontSize="9" fontFamily="monospace">Re</text>
-              <text x="105" y="20" fill="var(--muted-foreground)" fontSize="9" fontFamily="monospace">Im</text>
+              <text
+                x="175"
+                y="95"
+                fill="var(--muted-foreground)"
+                fontSize="9"
+                fontFamily="monospace"
+              >
+                Re
+              </text>
+              <text
+                x="105"
+                y="20"
+                fill="var(--muted-foreground)"
+                fontSize="9"
+                fontFamily="monospace"
+              >
+                Im
+              </text>
             </svg>
           </div>
 
@@ -511,8 +578,24 @@ export function SystemResponsePlotter({
           <div className="mt-4 flex justify-center">
             <svg width="200" height="150" viewBox="0 0 200 150" className="overflow-visible">
               <rect x="0" y="0" width="200" height="140" fill="oklch(0.2 0.03 250)" rx="8" />
-              <line x1="0" y1="70" x2="200" y2="70" stroke="var(--border)" strokeWidth="1" opacity={0.3} />
-              <line x1="100" y1="0" x2="100" y2="140" stroke="var(--border)" strokeWidth="1" opacity={0.3} />
+              <line
+                x1="0"
+                y1="70"
+                x2="200"
+                y2="70"
+                stroke="var(--border)"
+                strokeWidth="1"
+                opacity={0.3}
+              />
+              <line
+                x1="100"
+                y1="0"
+                x2="100"
+                y2="140"
+                stroke="var(--border)"
+                strokeWidth="1"
+                opacity={0.3}
+              />
 
               {/* Magnitude curve */}
               <path
@@ -551,7 +634,11 @@ export function SystemResponsePlotter({
               <span className="h-0.5 w-3 bg-primary inline-block" /> |H| magnitude
             </span>
             <span className="flex items-center gap-1">
-              <span className="h-0.5 w-3 bg-[#a78bfa] inline-block" style={{ borderTop: "1px dashed #a78bfa" }} /> ∠H phase
+              <span
+                className="h-0.5 w-3 bg-[#a78bfa] inline-block"
+                style={{ borderTop: "1px dashed #a78bfa" }}
+              />{" "}
+              ∠H phase
             </span>
           </div>
         </div>

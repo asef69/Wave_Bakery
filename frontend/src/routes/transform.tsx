@@ -8,7 +8,6 @@ import { GameButton } from "@/components/game/GameButton";
 import { LabShell } from "@/components/game/LabShell";
 import { SignalAudioPlayer, type PlaybackState } from "@/lib/audio";
 import {
-  api,
   computeSeasonedSignal,
   getRecipeRunSession,
   recipes,
@@ -21,7 +20,7 @@ import {
   usePipelineStageSignal,
   useRecipeProgress,
 } from "@/lib/recipes";
-import { invalidateDownstreamStages } from "@/lib/pipeline";
+import { invalidateDownstreamStages, pipelineSignalToPath } from "@/lib/pipeline";
 
 export const Route = createFileRoute("/transform")({
   head: () => ({
@@ -45,20 +44,6 @@ export const Route = createFileRoute("/transform")({
 
 const TOL = 0.08;
 
-function seasonedSamplesToPath(samples: number[], width: number, height: number): string {
-  const mid = height / 2;
-  const len = samples.length;
-  if (len === 0) return "";
-  const pts: string[] = [];
-  for (let i = 0; i < len; i++) {
-    const x = (i / (len - 1)) * width;
-    const s = samples[i] ?? 0;
-    const y = mid - s * height * 0.34;
-    pts.push(`${i === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`);
-  }
-  return pts.join(" ");
-}
-
 function SeasoningLab() {
   const [recipe] = useActiveRecipe();
   const [unlockedStep, unlock] = useRecipeProgress();
@@ -72,7 +57,10 @@ function SeasoningLab() {
         const key = `wavebakery_pipeline_${recipe.id}_seasoned`;
         const stored = window.localStorage.getItem(key);
         if (stored) {
-          const parsed = JSON.parse(stored) as { metadata?: { amplitude?: number; freqScale?: number }; samples?: number[] };
+          const parsed = JSON.parse(stored) as {
+            metadata?: { amplitude?: number; freqScale?: number };
+            samples?: number[];
+          };
           if (Array.isArray(parsed?.samples) && parsed.samples.length > 0) {
             return parsed;
           }
@@ -202,10 +190,18 @@ function SeasoningLab() {
     }
   };
 
+  const lastSyncRef = useRef<string | null>(null);
   useEffect(() => {
     if (done || unlockedStep >= 5) {
+      // Saving the signal/session below re-renders this component with fresh
+      // object identities, which would re-fire this effect forever. Only sync
+      // when the player's actual values change.
+      const sig = `${recipe.id}|${done}|${amp}|${freq}|${accuracy}`;
+      if (lastSyncRef.current === sig) return;
+      lastSyncRef.current = sig;
+
       if (done) unlock(5);
-      
+
       if (userModifiedRef.current) {
         invalidateDownstreamStages(recipe.id, "seasoned");
       }
@@ -219,21 +215,11 @@ function SeasoningLab() {
 
       savePipelineStageSignal(recipe.id, "seasoned", playerSeasoned);
 
-      const session = getRecipeRunSession();
-      if (session?.backendSessionId) {
-        const payload = {
-          seasoning: amp,
-          frequency: freq,
-          blend: freq,
-          marinate: session.marinateTime ?? recipe.marinateTarget.timeScale,
-          appliances: [session.cookingAppliance || recipe.cookingMethod.id],
-        };
-        api.setParams(session.backendSessionId, payload).catch((err) => {
-          console.warn("Backend setParams sync error:", err);
-        });
-      }
+      // Shared sync reads the dials just saved to the session and keeps the
+      // other stations' values (a hand-built payload here reset them).
+      syncSessionParamsToBackend(recipe.id).catch(() => {});
     }
-  }, [done, unlockedStep, playerSeasoned, recipe.id, unlock, accuracy, amp, freq, recipe.cookingMethod.id, recipe.marinateTarget.timeScale]);
+  }, [done, unlockedStep, playerSeasoned, recipe.id, unlock, accuracy, amp, freq]);
 
   const chefLine = done
     ? "Perfect! The signal has just the right flavor character."
@@ -373,7 +359,7 @@ function SeasoningLab() {
               ))}
               {/* target reference waveform (hidden numerical target) */}
               <path
-                d={seasonedSamplesToPath(targetSeasoned.samples, width, height)}
+                d={pipelineSignalToPath(targetSeasoned, width, height)}
                 fill="none"
                 stroke="var(--primary)"
                 strokeWidth="2.4"
@@ -383,7 +369,7 @@ function SeasoningLab() {
               />
               {/* player seasoned waveform */}
               <path
-                d={seasonedSamplesToPath(playerSeasoned.samples, width, height)}
+                d={pipelineSignalToPath(playerSeasoned, width, height)}
                 fill="none"
                 stroke="var(--signal)"
                 strokeWidth="3.4"

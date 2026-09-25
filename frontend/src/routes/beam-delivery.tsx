@@ -23,10 +23,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChefFourier } from "@/components/game/ChefFourier";
 import { GameButton } from "@/components/game/GameButton";
 import { LabShell } from "@/components/game/LabShell";
+import { StationLocked } from "@/components/game/StationLocked";
 import { SignalAudioPlayer, type PlaybackState } from "@/lib/audio";
 import {
   getDefaultPipelineSignal,
+  carryCurve,
+  curvePointToSvg,
   getIdealDishSignal,
+  samplesAlongCurvePath,
   savePipelineStageSignal,
   usePipelineStageSignal,
 } from "@/lib/pipeline";
@@ -35,7 +39,6 @@ import {
   computeBandMetrics,
   computeDiscreteSignalFFT,
   computeSignalIFFT,
-  computeSignalSimilarity,
   computeSpectrumSimilarity,
   computeStandardFFT,
   findMaxSignalFrequency,
@@ -47,9 +50,10 @@ import {
   type SpectrumBin,
   type SpectrumData,
 } from "@/lib/precision-oven-dsp";
+import { computeSignalSimilarity } from "@/lib/dsp";
 import {
   recordStageAccuracy,
-  saveCookedSignal,
+  syncSessionParamsToBackend,
   useActiveRecipe,
   useCookedSignal,
   useRecipeProgress,
@@ -69,7 +73,8 @@ export const Route = createFileRoute("/beam-delivery")({
       { property: "og:title", content: "🔥 Precision Oven — WaveBakery" },
       {
         property: "og:description",
-        content: "Sampling, Nyquist Theorem, Frequency Spectrum FFT and IFFT Reconstruction finishing station.",
+        content:
+          "Sampling, Nyquist Theorem, Frequency Spectrum FFT and IFFT Reconstruction finishing station.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -88,19 +93,8 @@ const STAGES: Array<{ id: OvenStage; label: string; short: string; num: string }
   { id: "plate", label: "5. Final Check", short: "Plate", num: "05" },
 ];
 
-function samplesToSvgPath(samples: number[], width: number, height: number, scale = 0.36): string {
-  if (!samples || samples.length === 0) return "";
-  const mid = height / 2;
-  const len = samples.length;
-  const pts: string[] = [];
-  for (let i = 0; i < len; i++) {
-    const x = (i / (len - 1)) * width;
-    const s = samples[i] ?? 0;
-    const y = mid - s * height * scale;
-    pts.push(`${i === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`);
-  }
-  return pts.join(" ");
-}
+/** Highest rate the oven's sampler (slider and FFT bands) supports. */
+const MAX_OVEN_FS = 64;
 
 function PrecisionOvenScreen() {
   const [recipe] = useActiveRecipe();
@@ -127,9 +121,7 @@ function PrecisionOvenScreen() {
 
   // Navigation & Unlock State
   const [currentStage, setCurrentStage] = useState<OvenStage>("sampling");
-  const [unlockedStages, setUnlockedStages] = useState<Set<OvenStage>>(
-    new Set(["sampling"]),
-  );
+  const [unlockedStages, setUnlockedStages] = useState<Set<OvenStage>>(new Set(["sampling"]));
 
   // -------------------------------------------------------------
   // STAGE 1: SAMPLING & ALIASING
@@ -169,6 +161,14 @@ function PrecisionOvenScreen() {
       return;
     }
 
+    if (entered > MAX_OVEN_FS) {
+      setPasswordStatus("error");
+      setPasswordFeedback(
+        `✕ ${entered} Hz is beyond the oven's ${MAX_OVEN_FS} Hz sampler. Find the smallest rate that still satisfies fs ≥ 2·fmax.`,
+      );
+      return;
+    }
+
     if (entered < minSafeSamplingRate) {
       setPasswordStatus("error");
       setPasswordFeedback(
@@ -203,8 +203,8 @@ function PrecisionOvenScreen() {
   }, [dishSamples, activeRate]);
 
   const bandAvailability: BandAvailability = useMemo(() => {
-    return getBandAvailability(activeRate, 64);
-  }, [activeRate]);
+    return getBandAvailability(activeRate, playerBaseFFT.real.length);
+  }, [activeRate, playerBaseFFT.real.length]);
 
   // Frequency-domain manipulation controls
   const [lowGain, setLowGain] = useState<number>(1.0);
@@ -214,9 +214,7 @@ function PrecisionOvenScreen() {
     Math.min(26, Math.round(activeRate / 2)),
   );
   const [notchActive, setNotchActive] = useState<boolean>(false);
-  const [notchHz, setNotchHz] = useState<number>(() =>
-    Math.min(22, Math.round(activeRate / 2)),
-  );
+  const [notchHz, setNotchHz] = useState<number>(() => Math.min(22, Math.round(activeRate / 2)));
 
   // Active hover/focus band for visual highlighting on graph
   const [activeBandHover, setActiveBandHover] = useState<
@@ -257,16 +255,35 @@ function PrecisionOvenScreen() {
   // STAGE 4: IFFT RECONSTRUCTION & AUDIO PLAYBACK
   // -------------------------------------------------------------
   const reconstructedSamples = useMemo(() => {
-    return computeSignalIFFT(tunedSpectrum.tunedReal, tunedSpectrum.tunedImag, dishSamples.length);
-  }, [tunedSpectrum.tunedReal, tunedSpectrum.tunedImag, dishSamples.length]);
+    return computeSignalIFFT(
+      tunedSpectrum.tunedReal,
+      tunedSpectrum.tunedImag,
+      dishSamples.length,
+      activeRate,
+    );
+  }, [tunedSpectrum.tunedReal, tunedSpectrum.tunedImag, dishSamples.length, activeRate]);
 
   const timeDomainSimilarity = useMemo(() => {
     return computeSignalSimilarity(reconstructedSamples, targetSignal.samples);
   }, [reconstructedSamples, targetSignal.samples]);
 
+  // The station's goal is the MINIMUM safe rate: full marks up to 25% above
+  // 2·fmax, falling linearly to 0 at the sampler's maximum. Any rate that
+  // merely satisfied Nyquist used to score the same.
+  const samplingEfficiency = useMemo(() => {
+    const slack = minSafeSamplingRate * 1.25;
+    if (activeRate <= slack) return 100;
+    return Math.max(
+      0,
+      Math.round(100 * (1 - (activeRate - slack) / Math.max(1, MAX_OVEN_FS - slack))),
+    );
+  }, [activeRate, minSafeSamplingRate]);
+
   const overallScore = useMemo(() => {
-    return Math.round(spectrumMatchPercent * 0.45 + timeDomainSimilarity * 0.55);
-  }, [spectrumMatchPercent, timeDomainSimilarity]);
+    return Math.round(
+      spectrumMatchPercent * 0.4 + timeDomainSimilarity * 0.5 + samplingEfficiency * 0.1,
+    );
+  }, [spectrumMatchPercent, timeDomainSimilarity, samplingEfficiency]);
 
   // Audio Playback
   const [playbackState, setPlaybackState] = useState<PlaybackState>({
@@ -330,41 +347,34 @@ function PrecisionOvenScreen() {
   // STAGE 5: FINAL PLATING & PIPELINE SAVE
   // -------------------------------------------------------------
   const handlePlateAndFinish = () => {
-    saveCookedSignal({
-      recipeId: recipe.id,
-      methodId: cookedSignal.methodId || recipe.cookingMethod.id,
-      methodName: cookedSignal.methodName || recipe.cookingMethod.name,
-      frequency: cookedSignal.frequency || 4,
-      amplitude: cookedSignal.amplitude || 1,
-      noise: cookedSignal.noise || 0,
-      shift: cookedSignal.shift || 0,
-      pos: 100,
-      timestamp: Date.now(),
-      samples: reconstructedSamples,
-      metadata: {
-        ovenSamplingRate: activeRate,
-        spectrumMatchPercent,
-        timeDomainSimilarity,
-        overallScore,
-      },
-    });
-    savePipelineStageSignal(recipe.id, "delivered", {
-      recipeId: recipe.id,
-      stage: "delivered",
-      samples: reconstructedSamples,
-      sampleRate: 44100,
-      duration: 3.0,
-      frequency: cookedSignal.frequency || 4,
-      timestamp: Date.now(),
-      metadata: {
-        ovenSamplingRate: activeRate,
-        spectrumMatchPercent,
-        timeDomainSimilarity,
-        overallScore,
-      },
-    });
+    // The oven output is the DELIVERED stage; the cooked dish stays as the
+    // Cooking lab left it (it used to be overwritten here, so Check Dish and
+    // System Delivery showed the oven output labelled as "cooked").
+    savePipelineStageSignal(
+      recipe.id,
+      "delivered",
+      carryCurve(
+        {
+          recipeId: recipe.id,
+          stage: "delivered",
+          samples: reconstructedSamples,
+          sampleRate: 44100,
+          duration: 3.0,
+          frequency: cookedSignal.frequency || 4,
+          timestamp: Date.now(),
+          metadata: {
+            ovenSamplingRate: activeRate,
+            spectrumMatchPercent,
+            timeDomainSimilarity,
+            overallScore,
+          },
+        },
+        pipelineCooked,
+      ),
+    );
 
     recordStageAccuracy("delivery", overallScore);
+    syncSessionParamsToBackend(recipe.id).catch(() => {});
     unlock(8);
     navigate({ to: "/system-delivery" });
   };
@@ -372,6 +382,18 @@ function PrecisionOvenScreen() {
   // Helper dimensions for SVG oscilloscopes
   const svgWidth = 600;
   const svgHeight = 220;
+
+  if (unlockedStep < 7) {
+    return (
+      <StationLocked
+        station="Precision Oven"
+        reason="Cook your signal in the Cooking Lab before finishing it in the oven."
+        chefLine="There's nothing to finish yet: convolve the dish in the Cooking Lab first!"
+        goTo="/cooking"
+        goLabel="Go to Cooking Lab →"
+      />
+    );
+  }
 
   return (
     <LabShell
@@ -398,7 +420,8 @@ function PrecisionOvenScreen() {
                 🔥 Precision Oven
               </h1>
               <p className="text-sm text-muted-foreground">
-                Sampling · Nyquist Theorem · Aliasing Elimination · FFT Spectrum · IFFT Reconstruction
+                Sampling · Nyquist Theorem · Aliasing Elimination · FFT Spectrum · IFFT
+                Reconstruction
               </p>
             </div>
 
@@ -446,7 +469,8 @@ function PrecisionOvenScreen() {
                   Find the Safe Sampling Rate ($f_s$)
                 </h2>
                 <p className="text-sm text-muted-foreground">
-                  Adjust the sampling frequency slider. Watch BOTH the waveform and the spectrum. Find the minimum rate that avoids aliasing!
+                  Adjust the sampling frequency slider. Watch BOTH the waveform and the spectrum.
+                  Find the minimum rate that avoids aliasing!
                 </p>
               </div>
 
@@ -477,16 +501,21 @@ function PrecisionOvenScreen() {
             <div className="kitchen-card border-2 border-border bg-card p-5">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div className="space-y-1">
-                  <label htmlFor="sampling-rate-slider" className="font-mono text-xs font-bold text-foreground uppercase">
+                  <label
+                    htmlFor="sampling-rate-slider"
+                    className="font-mono text-xs font-bold text-foreground uppercase"
+                  >
                     Sampling Frequency ($f_s$):
                   </label>
                   <p className="text-xs text-muted-foreground">
-                    Discrete samples per second across normalized 1-second interval (Nyquist limit = $f_s / 2$)
+                    Discrete samples per second across normalized 1-second interval (Nyquist limit =
+                    $f_s / 2$)
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="font-mono text-2xl font-extrabold text-primary">
-                    {samplingRate} <span className="text-sm font-semibold text-muted-foreground">Hz</span>
+                    {samplingRate}{" "}
+                    <span className="text-sm font-semibold text-muted-foreground">Hz</span>
                   </span>
                   <span className="rounded-md bg-secondary px-2.5 py-1 font-mono text-xs text-muted-foreground">
                     {aliasingData.samplePoints.length} discrete points
@@ -522,7 +551,16 @@ function PrecisionOvenScreen() {
                     </h3>
                   </div>
                   <span className="font-mono text-[11px] text-muted-foreground">
-                    Error: <span className={aliasingData.isAdequate ? "text-emerald-400 font-bold" : "text-amber-400 font-bold"}>{aliasingData.timeDomainError}%</span>
+                    Error:{" "}
+                    <span
+                      className={
+                        aliasingData.isAdequate
+                          ? "text-emerald-400 font-bold"
+                          : "text-amber-400 font-bold"
+                      }
+                    >
+                      {aliasingData.timeDomainError}%
+                    </span>
                   </span>
                 </div>
 
@@ -532,11 +570,25 @@ function PrecisionOvenScreen() {
                     className="h-48 w-full"
                     preserveAspectRatio="none"
                   >
-                    <line x1="0" y1={svgHeight / 2} x2={svgWidth} y2={svgHeight / 2} stroke="currentColor" strokeDasharray="3 3" className="text-border/40" />
+                    <line
+                      x1="0"
+                      y1={svgHeight / 2}
+                      x2={svgWidth}
+                      y2={svgHeight / 2}
+                      stroke="currentColor"
+                      strokeDasharray="3 3"
+                      className="text-border/40"
+                    />
 
                     {/* Continuous Reference Waveform (Gold) */}
                     <path
-                      d={samplesToSvgPath(dishSamples, svgWidth, svgHeight, 0.38)}
+                      d={samplesAlongCurvePath(
+                        dishSamples,
+                        pipelineCooked,
+                        svgWidth,
+                        svgHeight,
+                        0.38,
+                      )}
                       fill="none"
                       stroke="#f59e0b"
                       strokeWidth="2"
@@ -545,7 +597,13 @@ function PrecisionOvenScreen() {
 
                     {/* Reconstructed Waveform from Discrete Samples (Cyan or Rose if Aliased) */}
                     <path
-                      d={samplesToSvgPath(aliasingData.reconstructedWaveform, svgWidth, svgHeight, 0.38)}
+                      d={samplesAlongCurvePath(
+                        aliasingData.reconstructedWaveform,
+                        pipelineCooked,
+                        svgWidth,
+                        svgHeight,
+                        0.38,
+                      )}
                       fill="none"
                       stroke={aliasingData.isAdequate ? "#06b6d4" : "#f43f5e"}
                       strokeWidth="2.5"
@@ -554,8 +612,14 @@ function PrecisionOvenScreen() {
 
                     {/* Discrete Sample Points */}
                     {aliasingData.samplePoints.map((pt, idx) => {
-                      const px = pt.t * svgWidth;
-                      const py = svgHeight / 2 - pt.y * svgHeight * 0.38;
+                      const { x: px, y: py } = curvePointToSvg(
+                        pipelineCooked,
+                        pt.t,
+                        pt.y,
+                        svgWidth,
+                        svgHeight,
+                        0.38,
+                      );
                       return (
                         <circle
                           key={idx}
@@ -583,8 +647,17 @@ function PrecisionOvenScreen() {
                     <span>Sample Points ($N={aliasingData.samplePoints.length}$)</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className={cn("h-2 w-4 rounded-full", aliasingData.isAdequate ? "bg-cyan-500" : "bg-rose-500")} />
-                    <span>{aliasingData.isAdequate ? "Preserved Reconstruction" : "Aliased Reconstruction"}</span>
+                    <span
+                      className={cn(
+                        "h-2 w-4 rounded-full",
+                        aliasingData.isAdequate ? "bg-cyan-500" : "bg-rose-500",
+                      )}
+                    />
+                    <span>
+                      {aliasingData.isAdequate
+                        ? "Preserved Reconstruction"
+                        : "Aliased Reconstruction"}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -599,7 +672,11 @@ function PrecisionOvenScreen() {
                     </h3>
                   </div>
                   <span className="font-mono text-[11px] text-muted-foreground">
-                    Nyquist Limit: <span className="font-bold text-primary">{aliasingData.nyquistLimit.toFixed(1)} Hz</span> ($f_s / 2$)
+                    Nyquist Limit:{" "}
+                    <span className="font-bold text-primary">
+                      {aliasingData.nyquistLimit.toFixed(1)} Hz
+                    </span>{" "}
+                    ($f_s / 2$)
                   </span>
                 </div>
 
@@ -641,7 +718,9 @@ function PrecisionOvenScreen() {
                   <div className="mt-2 flex items-center justify-between border-t border-border/40 pt-1 font-mono text-[10px] text-muted-foreground">
                     <span>0 Hz</span>
                     <span>{(aliasingData.nyquistLimit / 2).toFixed(1)} Hz</span>
-                    <span className="font-bold text-primary">{aliasingData.nyquistLimit.toFixed(1)} Hz (Nyquist)</span>
+                    <span className="font-bold text-primary">
+                      {aliasingData.nyquistLimit.toFixed(1)} Hz (Nyquist)
+                    </span>
                   </div>
                 </div>
 
@@ -662,9 +741,7 @@ function PrecisionOvenScreen() {
                         )}
                       >
                         <span>Orig: {f.originalHz} Hz</span>
-                        <span>
-                          {f.isFolded ? `↳ Folded: ${f.aliasedHz} Hz` : "✓ Preserved"}
-                        </span>
+                        <span>{f.isFolded ? `↳ Folded: ${f.aliasedHz} Hz` : "✓ Preserved"}</span>
                       </div>
                     ))}
                   </div>
@@ -714,7 +791,8 @@ function PrecisionOvenScreen() {
                 Unlock the Frequency Domain
               </h2>
               <p className="text-sm text-muted-foreground">
-                Enter the minimum safe sampling frequency ($f_s$) that you discovered avoids aliasing.
+                Enter the minimum safe sampling frequency ($f_s$) that you discovered avoids
+                aliasing.
               </p>
             </div>
 
@@ -740,7 +818,7 @@ function PrecisionOvenScreen() {
                     <input
                       type="number"
                       min={1}
-                      max={120}
+                      max={MAX_OVEN_FS}
                       value={enteredFsInput}
                       onChange={(e) => {
                         setEnteredFsInput(e.target.value);
@@ -815,7 +893,8 @@ function PrecisionOvenScreen() {
                   Match the Target Dish Spectrum
                 </h2>
                 <p className="text-sm text-muted-foreground">
-                  Each band slider operates strictly on its assigned frequency range. Hover or adjust to see the live highlighting!
+                  Each band slider operates strictly on its assigned frequency range. Hover or
+                  adjust to see the live highlighting!
                 </p>
               </div>
 
@@ -898,7 +977,9 @@ function PrecisionOvenScreen() {
                           : "bg-cyan-500/10 text-cyan-400/80 hover:bg-cyan-500/20",
                       )}
                     >
-                      <span className="truncate">TOP (16–{Math.min(32, targetFFT.nyquistLimit).toFixed(0)} Hz)</span>
+                      <span className="truncate">
+                        TOP (16–{Math.min(32, targetFFT.nyquistLimit).toFixed(0)} Hz)
+                      </span>
                     </div>
                   )}
 
@@ -956,7 +1037,9 @@ function PrecisionOvenScreen() {
                           }}
                           className={cn(
                             "h-full transition-all",
-                            targetFFT.nyquistLimit > 32 ? "border-r-2 border-dashed border-cyan-500/30" : "",
+                            targetFFT.nyquistLimit > 32
+                              ? "border-r-2 border-dashed border-cyan-500/30"
+                              : "",
                             activeBandHover === "high"
                               ? "bg-cyan-500/25 ring-1 ring-cyan-400/50"
                               : "bg-cyan-500/5",
@@ -974,13 +1057,18 @@ function PrecisionOvenScreen() {
                           (activeBandHover === "mid" && bin.band === "mid") ||
                           (activeBandHover === "high" && bin.band === "high");
                         const isAnyHovered = activeBandHover !== null;
-                        const opacityClass = isAnyHovered && !isHovered ? "opacity-35" : "opacity-100";
+                        const opacityClass =
+                          isAnyHovered && !isHovered ? "opacity-35" : "opacity-100";
 
                         return (
-                          <div key={i} className="group relative flex h-full flex-1 flex-col justify-end items-center">
+                          <div
+                            key={i}
+                            className="group relative flex h-full flex-1 flex-col justify-end items-center"
+                          >
                             {/* Tooltip */}
                             <div className="pointer-events-none absolute -top-8 z-30 hidden rounded-md bg-secondary px-1.5 py-0.5 font-mono text-[9px] text-foreground shadow-md group-hover:block whitespace-nowrap">
-                              {bin.frequency} Hz : {(bin.magnitude * 100).toFixed(0)}% ({bin.band.toUpperCase()})
+                              {bin.frequency} Hz : {(bin.magnitude * 100).toFixed(0)}% (
+                              {bin.band.toUpperCase()})
                             </div>
 
                             <div
@@ -989,10 +1077,16 @@ function PrecisionOvenScreen() {
                                 "w-full rounded-t-sm transition-all duration-150",
                                 opacityClass,
                                 bin.band === "low"
-                                  ? isHovered ? "bg-amber-300 ring-2 ring-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" : "bg-gradient-to-t from-amber-600 to-amber-400"
+                                  ? isHovered
+                                    ? "bg-amber-300 ring-2 ring-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]"
+                                    : "bg-gradient-to-t from-amber-600 to-amber-400"
                                   : bin.band === "mid"
-                                    ? isHovered ? "bg-emerald-300 ring-2 ring-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]" : "bg-gradient-to-t from-emerald-600 to-emerald-400"
-                                    : isHovered ? "bg-cyan-300 ring-2 ring-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.6)]" : "bg-gradient-to-t from-cyan-600 to-cyan-400",
+                                    ? isHovered
+                                      ? "bg-emerald-300 ring-2 ring-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]"
+                                      : "bg-gradient-to-t from-emerald-600 to-emerald-400"
+                                    : isHovered
+                                      ? "bg-cyan-300 ring-2 ring-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.6)]"
+                                      : "bg-gradient-to-t from-cyan-600 to-cyan-400",
                               )}
                             />
                           </div>
@@ -1142,7 +1236,9 @@ function PrecisionOvenScreen() {
                           : "bg-cyan-500/10 text-cyan-400/80 hover:bg-cyan-500/20",
                       )}
                     >
-                      <span className="truncate">TOP (16–{Math.min(32, activeRate / 2).toFixed(0)} Hz)</span>
+                      <span className="truncate">
+                        TOP (16–{Math.min(32, activeRate / 2).toFixed(0)} Hz)
+                      </span>
                     </div>
                   )}
 
@@ -1200,7 +1296,9 @@ function PrecisionOvenScreen() {
                           }}
                           className={cn(
                             "h-full transition-all",
-                            activeRate / 2 > 32 ? "border-r-2 border-dashed border-cyan-500/30" : "",
+                            activeRate / 2 > 32
+                              ? "border-r-2 border-dashed border-cyan-500/30"
+                              : "",
                             activeBandHover === "high"
                               ? "bg-cyan-500/25 ring-1 ring-cyan-400/50"
                               : "bg-cyan-500/5",
@@ -1236,7 +1334,9 @@ function PrecisionOvenScreen() {
                         }}
                         className={cn(
                           "pointer-events-none absolute inset-y-0 z-20 w-0 border-l-2 border-purple-400 transition-all",
-                          activeBandHover === "notch" ? "shadow-[0_0_8px_rgba(168,85,247,0.8)]" : "",
+                          activeBandHover === "notch"
+                            ? "shadow-[0_0_8px_rgba(168,85,247,0.8)]"
+                            : "",
                         )}
                       >
                         <span className="absolute -top-1 -translate-x-1/2 rounded bg-purple-950/90 px-1 py-0.5 font-mono text-[8px] text-purple-300 border border-purple-500/40 whitespace-nowrap shadow-sm">
@@ -1254,15 +1354,22 @@ function PrecisionOvenScreen() {
                           (activeBandHover === "mid" && bin.band === "mid") ||
                           (activeBandHover === "high" && bin.band === "high") ||
                           (activeBandHover === "cutoff" && bin.frequency > browningCutoffHz) ||
-                          (activeBandHover === "notch" && notchActive && Math.abs(bin.frequency - notchHz) <= 3);
+                          (activeBandHover === "notch" &&
+                            notchActive &&
+                            Math.abs(bin.frequency - notchHz) <= 3);
                         const isAnyHovered = activeBandHover !== null;
-                        const opacityClass = isAnyHovered && !isHovered ? "opacity-35" : "opacity-100";
+                        const opacityClass =
+                          isAnyHovered && !isHovered ? "opacity-35" : "opacity-100";
 
                         return (
-                          <div key={i} className="group relative flex h-full flex-1 flex-col justify-end items-center">
+                          <div
+                            key={i}
+                            className="group relative flex h-full flex-1 flex-col justify-end items-center"
+                          >
                             {/* Tooltip */}
                             <div className="pointer-events-none absolute -top-8 z-30 hidden rounded-md bg-secondary px-1.5 py-0.5 font-mono text-[9px] text-foreground shadow-md group-hover:block whitespace-nowrap">
-                              {bin.frequency} Hz : {(bin.magnitude * 100).toFixed(0)}% ({bin.band.toUpperCase()})
+                              {bin.frequency} Hz : {(bin.magnitude * 100).toFixed(0)}% (
+                              {bin.band.toUpperCase()})
                             </div>
 
                             <div
@@ -1271,11 +1378,17 @@ function PrecisionOvenScreen() {
                                 "w-full rounded-t-sm transition-all duration-100",
                                 opacityClass,
                                 bin.band === "low"
-                                  ? isHovered ? "bg-amber-300 ring-2 ring-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" : "bg-gradient-to-t from-amber-600 to-amber-400"
+                                  ? isHovered
+                                    ? "bg-amber-300 ring-2 ring-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]"
+                                    : "bg-gradient-to-t from-amber-600 to-amber-400"
                                   : bin.band === "mid"
-                                    ? isHovered ? "bg-emerald-300 ring-2 ring-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]" : "bg-gradient-to-t from-emerald-600 to-emerald-400"
+                                    ? isHovered
+                                      ? "bg-emerald-300 ring-2 ring-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]"
+                                      : "bg-gradient-to-t from-emerald-600 to-emerald-400"
                                     : bin.band === "high"
-                                      ? isHovered ? "bg-cyan-300 ring-2 ring-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.6)]" : "bg-gradient-to-t from-cyan-600 to-cyan-400"
+                                      ? isHovered
+                                        ? "bg-cyan-300 ring-2 ring-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.6)]"
+                                        : "bg-gradient-to-t from-cyan-600 to-cyan-400"
                                       : "bg-muted-foreground/30",
                               )}
                             />
@@ -1426,12 +1539,12 @@ function PrecisionOvenScreen() {
                           <td className="py-2.5 text-muted-foreground">
                             {m.rangeLabel}
                             <span className="text-[10px] text-muted-foreground/70 block">
-                              {m.binCount > 0 ? `${m.binCount} FFT bins` : "0 bins (Nyquist limited)"}
+                              {m.binCount > 0
+                                ? `${m.binCount} FFT bins`
+                                : "0 bins (Nyquist limited)"}
                             </span>
                           </td>
-                          <td className="py-2.5 font-bold text-foreground">
-                            {m.targetEnergy}%
-                          </td>
+                          <td className="py-2.5 font-bold text-foreground">{m.targetEnergy}%</td>
                           <td className="py-2.5 font-bold">
                             <span
                               className={cn(
@@ -1550,7 +1663,10 @@ function PrecisionOvenScreen() {
                   {/* Energy & Match Diagnostic */}
                   <div className="flex items-center justify-between rounded bg-black/40 px-2 py-1 font-mono text-[10px] border border-border/40">
                     <span className="text-muted-foreground">
-                      Tgt: <strong className="text-foreground">{bandMetrics[0]?.targetEnergy}%</strong> | Live: <strong className="text-amber-400">{bandMetrics[0]?.liveEnergy}%</strong>
+                      Tgt:{" "}
+                      <strong className="text-foreground">{bandMetrics[0]?.targetEnergy}%</strong> |
+                      Live:{" "}
+                      <strong className="text-amber-400">{bandMetrics[0]?.liveEnergy}%</strong>
                     </span>
                     <span
                       className={cn(
@@ -1558,7 +1674,11 @@ function PrecisionOvenScreen() {
                         bandMetrics[0]?.status === "match" ? "text-emerald-400" : "text-amber-400",
                       )}
                     >
-                      {bandMetrics[0]?.status === "match" ? "✓ Balanced" : bandMetrics[0]?.status === "needs-boost" ? "Boost ↑" : "Cut ↓"}
+                      {bandMetrics[0]?.status === "match"
+                        ? "✓ Balanced"
+                        : bandMetrics[0]?.status === "needs-boost"
+                          ? "Boost ↑"
+                          : "Cut ↓"}
                     </span>
                   </div>
                   <div className="flex items-center justify-between font-mono text-[10px] text-muted-foreground">
@@ -1599,19 +1719,34 @@ function PrecisionOvenScreen() {
                   {/* Energy & Match Diagnostic */}
                   <div className="flex items-center justify-between rounded bg-black/40 px-2 py-1 font-mono text-[10px] border border-border/40">
                     <span className="text-muted-foreground">
-                      Tgt: <strong className="text-foreground">{bandMetrics[1]?.targetEnergy}%</strong> | Live: <strong className="text-emerald-400">{bandMetrics[1]?.liveEnergy}%</strong>
+                      Tgt:{" "}
+                      <strong className="text-foreground">{bandMetrics[1]?.targetEnergy}%</strong> |
+                      Live:{" "}
+                      <strong className="text-emerald-400">{bandMetrics[1]?.liveEnergy}%</strong>
                     </span>
                     <span
                       className={cn(
                         "font-bold",
-                        bandMetrics[1]?.status === "match" ? "text-emerald-400" : "text-emerald-300",
+                        bandMetrics[1]?.status === "match"
+                          ? "text-emerald-400"
+                          : "text-emerald-300",
                       )}
                     >
-                      {bandMetrics[1]?.status === "match" ? "✓ Balanced" : bandMetrics[1]?.status === "needs-boost" ? "Boost ↑" : "Cut ↓"}
+                      {bandMetrics[1]?.status === "match"
+                        ? "✓ Balanced"
+                        : bandMetrics[1]?.status === "needs-boost"
+                          ? "Boost ↑"
+                          : "Cut ↓"}
                     </span>
                   </div>
                   <div className="flex items-center justify-between font-mono text-[10px] text-muted-foreground">
-                    <span className={bandAvailability.crumb.status === "active" ? "text-emerald-400 font-bold" : "text-amber-400 font-bold"}>
+                    <span
+                      className={
+                        bandAvailability.crumb.status === "active"
+                          ? "text-emerald-400 font-bold"
+                          : "text-amber-400 font-bold"
+                      }
+                    >
                       {bandAvailability.crumb.status === "active"
                         ? "● ACTIVE (6–16 Hz)"
                         : `◐ PARTIAL (6–${bandAvailability.nyquistLimit.toFixed(1)} Hz)`}
@@ -1639,7 +1774,9 @@ function PrecisionOvenScreen() {
                   <div className="flex items-center justify-between font-mono text-xs">
                     <span className="font-bold text-foreground">Top Crisp (16–32 Hz)</span>
                     <span className="text-primary font-bold">
-                      {bandAvailability.top.status === "unavailable" ? "OFF" : `${highGain.toFixed(2)}×`}
+                      {bandAvailability.top.status === "unavailable"
+                        ? "OFF"
+                        : `${highGain.toFixed(2)}×`}
                     </span>
                   </div>
                   <input
@@ -1662,19 +1799,32 @@ function PrecisionOvenScreen() {
                   {/* Energy & Match Diagnostic */}
                   <div className="flex items-center justify-between rounded bg-black/40 px-2 py-1 font-mono text-[10px] border border-border/40">
                     {bandAvailability.top.status === "unavailable" ? (
-                      <span className="text-rose-400 font-bold text-[9px]">Nyquist limit &le; 16 Hz (fs too low)</span>
+                      <span className="text-rose-400 font-bold text-[9px]">
+                        Nyquist limit &le; 16 Hz (fs too low)
+                      </span>
                     ) : (
                       <>
                         <span className="text-muted-foreground">
-                          Tgt: <strong className="text-foreground">{bandMetrics[2]?.targetEnergy}%</strong> | Live: <strong className="text-cyan-400">{bandMetrics[2]?.liveEnergy}%</strong>
+                          Tgt:{" "}
+                          <strong className="text-foreground">
+                            {bandMetrics[2]?.targetEnergy}%
+                          </strong>{" "}
+                          | Live:{" "}
+                          <strong className="text-cyan-400">{bandMetrics[2]?.liveEnergy}%</strong>
                         </span>
                         <span
                           className={cn(
                             "font-bold",
-                            bandMetrics[2]?.status === "match" ? "text-emerald-400" : "text-cyan-400",
+                            bandMetrics[2]?.status === "match"
+                              ? "text-emerald-400"
+                              : "text-cyan-400",
                           )}
                         >
-                          {bandMetrics[2]?.status === "match" ? "✓ Balanced" : bandMetrics[2]?.status === "needs-boost" ? "Boost ↑" : "Cut ↓"}
+                          {bandMetrics[2]?.status === "match"
+                            ? "✓ Balanced"
+                            : bandMetrics[2]?.status === "needs-boost"
+                              ? "Boost ↑"
+                              : "Cut ↓"}
                         </span>
                       </>
                     )}
@@ -1765,14 +1915,19 @@ function PrecisionOvenScreen() {
                     onChange={(e) => setNotchActive(e.target.checked)}
                     className="h-4 w-4 cursor-pointer accent-purple-500"
                   />
-                  <label htmlFor="notch-toggle" className="cursor-pointer font-mono text-xs font-bold text-foreground">
+                  <label
+                    htmlFor="notch-toggle"
+                    className="cursor-pointer font-mono text-xs font-bold text-foreground"
+                  >
                     Charred Resonant Notch Filter (Narrow harmonic rejection)
                   </label>
                 </div>
 
                 {notchActive && (
                   <div className="flex items-center gap-3">
-                    <span className="font-mono text-xs text-muted-foreground">Notch Frequency:</span>
+                    <span className="font-mono text-xs text-muted-foreground">
+                      Notch Frequency:
+                    </span>
                     <input
                       type="range"
                       min={10}
@@ -1782,7 +1937,9 @@ function PrecisionOvenScreen() {
                       onChange={(e) => setNotchHz(parseInt(e.target.value, 10))}
                       className="h-2 w-36 cursor-pointer accent-purple-500"
                     />
-                    <span className="font-mono text-xs font-bold text-purple-400">{notchHz} Hz</span>
+                    <span className="font-mono text-xs font-bold text-purple-400">
+                      {notchHz} Hz
+                    </span>
                   </div>
                 )}
               </div>
@@ -1824,7 +1981,8 @@ function PrecisionOvenScreen() {
                 Time-Domain Reconstruction & Audio
               </h2>
               <p className="text-sm text-muted-foreground">
-                The tuned frequency spectrum has been synthesized back to time-domain samples via IFFT.
+                The tuned frequency spectrum has been synthesized back to time-domain samples via
+                IFFT.
               </p>
             </div>
 
@@ -1849,11 +2007,25 @@ function PrecisionOvenScreen() {
                   className="h-56 w-full"
                   preserveAspectRatio="none"
                 >
-                  <line x1="0" y1={svgHeight / 2} x2={svgWidth} y2={svgHeight / 2} stroke="currentColor" strokeDasharray="3 3" className="text-border/40" />
+                  <line
+                    x1="0"
+                    y1={svgHeight / 2}
+                    x2={svgWidth}
+                    y2={svgHeight / 2}
+                    stroke="currentColor"
+                    strokeDasharray="3 3"
+                    className="text-border/40"
+                  />
 
                   {/* Target Waveform (Gold Dashed) */}
                   <path
-                    d={samplesToSvgPath(targetSignal.samples, svgWidth, svgHeight, 0.4)}
+                    d={samplesAlongCurvePath(
+                      targetSignal.samples,
+                      pipelineCooked,
+                      svgWidth,
+                      svgHeight,
+                      0.4,
+                    )}
                     fill="none"
                     stroke="#f59e0b"
                     strokeWidth="2"
@@ -1863,7 +2035,13 @@ function PrecisionOvenScreen() {
 
                   {/* Reconstructed Waveform (Cyan Solid) */}
                   <path
-                    d={samplesToSvgPath(reconstructedSamples, svgWidth, svgHeight, 0.4)}
+                    d={samplesAlongCurvePath(
+                      reconstructedSamples,
+                      pipelineCooked,
+                      svgWidth,
+                      svgHeight,
+                      0.4,
+                    )}
                     fill="none"
                     stroke="#06b6d4"
                     strokeWidth="2.5"
@@ -1905,7 +2083,8 @@ function PrecisionOvenScreen() {
                     <span>Acoustic Signal Audition</span>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Web Audio synthesis playing the actual IFFT reconstructed samples at musical pitch
+                    Web Audio synthesis playing the actual IFFT reconstructed samples at musical
+                    pitch
                   </p>
                 </div>
 
@@ -2003,7 +2182,10 @@ function PrecisionOvenScreen() {
                   <ShieldCheck className="h-6 w-6" />
                   <span className="font-mono text-2xl font-extrabold">{activeRate} Hz</span>
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">No aliasing (fs &ge; 2 &middot; fmax)</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  No aliasing (fs &ge; 2 &middot; fmax = {minSafeSamplingRate} Hz) · Efficiency{" "}
+                  {samplingEfficiency}%
+                </p>
               </div>
 
               <div className="kitchen-card border-2 border-border bg-card p-5">

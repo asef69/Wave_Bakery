@@ -24,7 +24,7 @@ export interface PipelineStageBlock {
   description: string;
 }
 
-export const PIPELINE_BLOCKS: PipelineStageBlock[] = [
+const PIPELINE_BLOCKS: PipelineStageBlock[] = [
   {
     id: "synthesis",
     name: "Ingredient Sources",
