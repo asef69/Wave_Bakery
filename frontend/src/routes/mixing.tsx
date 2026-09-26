@@ -5,6 +5,7 @@ import { ChefFourier } from "@/components/game/ChefFourier";
 import { DragTutorialCue } from "@/components/game/DragTutorialCue";
 import { GameButton } from "@/components/game/GameButton";
 import { IngredientGlyph, type IngredientKind } from "@/components/game/IngredientGlyph";
+import { RecipeTimerBadge, TimeExpiredModal } from "@/components/game/RecipeTimer";
 import { SignalAudioPlayer } from "@/lib/audio";
 import {
   computeMixedSignal,
@@ -273,6 +274,21 @@ function MixingLab() {
     };
   }, [player]);
 
+  useEffect(() => {
+    const handleReset = () => {
+      setBowl([]);
+      setMixed(false);
+      setCommittedMixedSamples(null);
+      setShowDragCue(true);
+      if (player) {
+        player.destroy();
+        setPlayer(null);
+      }
+    };
+    window.addEventListener("wavebakery_stage_reset", handleReset);
+    return () => window.removeEventListener("wavebakery_stage_reset", handleReset);
+  }, [player]);
+
   const add = (name: string) => {
     setShowDragCue(false);
     if (mixed) return;
@@ -398,6 +414,7 @@ function MixingLab() {
         aria-hidden
       />
 
+      <TimeExpiredModal />
       <div className="relative z-10 mx-auto max-w-[110rem] px-8 py-6">
         {/* TOP HUD */}
         <header className="lab-panel flex flex-wrap items-center justify-between gap-6 px-6 py-4">
@@ -420,7 +437,8 @@ function MixingLab() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-8">
+          <div className="flex flex-wrap items-center gap-6">
+            <RecipeTimerBadge />
             <dl className="font-mono text-[10px] tracking-[0.18em] text-signal/60 uppercase">
               <div className="flex gap-3">
                 <dt>Recipe</dt>

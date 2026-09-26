@@ -394,7 +394,7 @@ function ScoreScreen() {
               FINAL <span className="text-gradient-warm">COMPARISON</span>
             </h1>
           </div>
-          {session && <RecipeTimerBadge />}
+          {session && <RecipeTimerBadge showPause={false} />}
         </div>
 
         <div className="mt-8 grid gap-5 lg:grid-cols-2">

@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { getMathematicalSignal } from "./signals";
 import { getIdealDishSignal, getOrSaveExpectedSignal } from "./pipeline";
 import { api, type SubmitResult } from "./api";
+import { pauseAllActiveAudio, resumeAllActiveAudio } from "./audio";
 
 export * from "./signals";
 export * from "./pipeline";
@@ -1122,8 +1123,8 @@ export const DIFFICULTY_CONFIGS: Record<RecipeDifficulty, DifficultyConfig> = {
     id: "easy",
     name: "EASY",
     badge: "EASY",
-    timeSeconds: 300, // 5:00
-    timeDisplay: "5:00",
+    timeSeconds: 420, // 7:00 (+120s)
+    timeDisplay: "7:00",
     description: "Comfortable time to learn the recipe.",
     tag: "Relaxed",
     colorClass: "text-emerald-600 dark:text-emerald-400 border-emerald-500/40 bg-emerald-500/10",
@@ -1133,8 +1134,8 @@ export const DIFFICULTY_CONFIGS: Record<RecipeDifficulty, DifficultyConfig> = {
     id: "medium",
     name: "MEDIUM",
     badge: "MEDIUM",
-    timeSeconds: 210, // 3:30
-    timeDisplay: "3:30",
+    timeSeconds: 300, // 5:00 (+90s)
+    timeDisplay: "5:00",
     description: "A balanced challenge.",
     tag: "Standard",
     colorClass: "text-amber-600 dark:text-amber-400 border-amber-500/40 bg-amber-500/10",
@@ -1144,8 +1145,8 @@ export const DIFFICULTY_CONFIGS: Record<RecipeDifficulty, DifficultyConfig> = {
     id: "hard",
     name: "HARD",
     badge: "HARD",
-    timeSeconds: 120, // 2:00
-    timeDisplay: "2:00",
+    timeSeconds: 190, // 3:10 (+70s)
+    timeDisplay: "3:10",
     description: "Fast execution required.",
     tag: "Challenging",
     colorClass: "text-orange-600 dark:text-orange-400 border-orange-500/40 bg-orange-500/10",
@@ -1155,8 +1156,8 @@ export const DIFFICULTY_CONFIGS: Record<RecipeDifficulty, DifficultyConfig> = {
     id: "masterchef",
     name: "MASTERCHEF",
     badge: "MASTERCHEF",
-    timeSeconds: 60, // 1:00
-    timeDisplay: "1:00",
+    timeSeconds: 120, // 2:00 (+60s)
+    timeDisplay: "2:00",
     description: "No room for hesitation.",
     tag: "Expert",
     colorClass: "text-rose-600 dark:text-rose-400 border-rose-500/40 bg-rose-500/10",
@@ -1208,6 +1209,10 @@ export interface RecipeRunSession {
   antiAlias?: boolean;
   caramelizeCarrier?: number;
   caramelizeDepth?: number;
+  countdownPending?: boolean;
+  isPaused?: boolean;
+  pausedRemaining?: number;
+  pausedAt?: number;
   systemPreset?: "lowpass1" | "resonator2" | "moving_avg" | "notch";
   systemPoleRadius?: number;
   systemSamplingHz?: number;
@@ -1239,6 +1244,8 @@ export function startRecipeRun(recipeId: string, difficulty: RecipeDifficulty) {
       totalSeconds: config.timeSeconds,
       startTime: Date.now(),
       isCompleted: false,
+      countdownPending: false,
+      isPaused: false,
     };
     window.localStorage.setItem("wavebakery_recipe_session", JSON.stringify(session));
     window.dispatchEvent(new Event("wavebakery_session_changed"));
@@ -1263,6 +1270,147 @@ export function startRecipeRun(recipeId: string, difficulty: RecipeDifficulty) {
       .catch((err) => {
         console.warn("Could not create backend session (using local fallback):", err);
       });
+  }
+}
+
+/**
+ * Pauses active recipe gameplay: freezes the timer and pauses active audio.
+ */
+export function pauseRecipeRun() {
+  if (typeof window !== "undefined") {
+    try {
+      const stored = window.localStorage.getItem("wavebakery_recipe_session");
+      if (stored) {
+        const session: RecipeRunSession = JSON.parse(stored);
+        if (!session.isCompleted && !session.countdownPending && !session.isPaused) {
+          const elapsed = Math.floor((Date.now() - session.startTime) / 1000);
+          const remaining = Math.max(0, session.totalSeconds - elapsed);
+          session.isPaused = true;
+          session.pausedRemaining = remaining;
+          session.pausedAt = Date.now();
+          window.localStorage.setItem("wavebakery_recipe_session", JSON.stringify(session));
+          window.dispatchEvent(new Event("wavebakery_session_changed"));
+          pauseAllActiveAudio();
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/**
+ * Resumes recipe gameplay: re-anchors startTime to preserve exact remaining time and resumes audio.
+ */
+export function resumeRecipeRun() {
+  if (typeof window !== "undefined") {
+    try {
+      const stored = window.localStorage.getItem("wavebakery_recipe_session");
+      if (stored) {
+        const session: RecipeRunSession = JSON.parse(stored);
+        if (session.isPaused) {
+          const remaining =
+            typeof session.pausedRemaining === "number" ? session.pausedRemaining : session.totalSeconds;
+          session.isPaused = false;
+          session.startTime = Date.now() - (session.totalSeconds - remaining) * 1000;
+          delete session.pausedRemaining;
+          delete session.pausedAt;
+          window.localStorage.setItem("wavebakery_recipe_session", JSON.stringify(session));
+          window.dispatchEvent(new Event("wavebakery_session_changed"));
+          resumeAllActiveAudio();
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/**
+ * Resets recipe timer to full allocation for current difficulty, holding in paused state until countdown finishes.
+ */
+export function resetRecipeTimerToFull(recipeId?: string) {
+  if (typeof window !== "undefined") {
+    try {
+      const stored = window.localStorage.getItem("wavebakery_recipe_session");
+      if (stored) {
+        const session: RecipeRunSession = JSON.parse(stored);
+        const config = DIFFICULTY_CONFIGS[session.difficulty];
+        session.totalSeconds = config.timeSeconds;
+        session.pausedRemaining = config.timeSeconds;
+        session.startTime = Date.now();
+        session.isPaused = true;
+        session.isCompleted = false;
+        delete session.endTime;
+        window.localStorage.setItem("wavebakery_recipe_session", JSON.stringify(session));
+        window.dispatchEvent(new Event("wavebakery_session_changed"));
+      }
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/**
+ * Resets the current station's transient data and triggers a clean re-mount.
+ */
+export function resetCurrentStage(recipeId?: string, currentPath?: string) {
+  if (typeof window !== "undefined") {
+    try {
+      const activeId = recipeId ?? getRecipeRunSession()?.recipeId ?? getActiveRecipe().id;
+      const path = currentPath ?? window.location.pathname;
+
+      if (path.includes("generate")) {
+        window.localStorage.removeItem(`wavebakery_selected_ingredients_${activeId}`);
+        window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_raw`);
+      } else if (path.includes("filter")) {
+        window.localStorage.removeItem(`wavebakery_filtered_ingredients_${activeId}`);
+        window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_filtered`);
+      } else if (path.includes("chop")) {
+        window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_chop`);
+      } else if (path.includes("mix")) {
+        window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_mixed`);
+      } else if (path.includes("caramelize")) {
+        window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_caramelize`);
+      } else if (path.includes("transform")) {
+        window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_seasoned`);
+      } else if (path.includes("marinate")) {
+        window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_marinated`);
+      } else if (path.includes("cooking")) {
+        window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_cooked`);
+        window.localStorage.removeItem(`wavebakery_cooked_signal_${activeId}`);
+      } else if (path.includes("beam")) {
+        window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_delivered`);
+      } else if (path.includes("system")) {
+        window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_system`);
+      }
+
+      window.dispatchEvent(new CustomEvent("wavebakery_stage_reset", { detail: { recipeId: activeId, path } }));
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/**
+ * Completes the pre-gameplay 3-2-1-GO countdown, officially starting the recipe run timer.
+ */
+export function completeCountdown() {
+  if (typeof window !== "undefined") {
+    try {
+      const stored = window.localStorage.getItem("wavebakery_recipe_session");
+      if (stored) {
+        const session: RecipeRunSession = JSON.parse(stored);
+        if (session.countdownPending) {
+          session.countdownPending = false;
+          session.startTime = Date.now();
+          window.localStorage.setItem("wavebakery_recipe_session", JSON.stringify(session));
+          window.dispatchEvent(new Event("wavebakery_session_changed"));
+        }
+      }
+    } catch {
+      // ignore
+    }
   }
 }
 
@@ -1472,6 +1620,12 @@ export function useRecipeTimer() {
   const [timeRemaining, setTimeRemaining] = useState<number>(() => {
     const s = getRecipeRunSession();
     if (!s) return 300;
+    if (s.isPaused) {
+      return s.pausedRemaining ?? s.totalSeconds;
+    }
+    if (s.countdownPending) {
+      return s.totalSeconds;
+    }
     if (s.isCompleted && s.endTime) {
       const elapsed = Math.floor((s.endTime - s.startTime) / 1000);
       return Math.max(0, s.totalSeconds - elapsed);
@@ -1482,7 +1636,13 @@ export function useRecipeTimer() {
 
   useEffect(() => {
     const handleSessionChange = () => {
-      setSession(getRecipeRunSession());
+      const currentSession = getRecipeRunSession();
+      setSession(currentSession);
+      if (currentSession?.isPaused) {
+        setTimeRemaining(currentSession.pausedRemaining ?? currentSession.totalSeconds);
+      } else if (currentSession?.countdownPending) {
+        setTimeRemaining(currentSession.totalSeconds);
+      }
     };
     window.addEventListener("wavebakery_session_changed", handleSessionChange);
     window.addEventListener("storage", handleSessionChange);
@@ -1490,7 +1650,11 @@ export function useRecipeTimer() {
     const interval = setInterval(() => {
       const currentSession = getRecipeRunSession();
       if (currentSession) {
-        if (currentSession.isCompleted && currentSession.endTime) {
+        if (currentSession.isPaused) {
+          setTimeRemaining(currentSession.pausedRemaining ?? currentSession.totalSeconds);
+        } else if (currentSession.countdownPending) {
+          setTimeRemaining(currentSession.totalSeconds);
+        } else if (currentSession.isCompleted && currentSession.endTime) {
           const elapsed = Math.floor((currentSession.endTime - currentSession.startTime) / 1000);
           setTimeRemaining(Math.max(0, currentSession.totalSeconds - elapsed));
         } else {
@@ -1508,9 +1672,11 @@ export function useRecipeTimer() {
     };
   }, []);
 
-  const isExpired = session ? !session.isCompleted && timeRemaining <= 0 : false;
-  const isLowTime = timeRemaining <= 45 && timeRemaining > 15;
-  const isCritical = timeRemaining <= 15 && timeRemaining > 0;
+  const isPaused = Boolean(session?.isPaused);
+  const isCountdownPending = Boolean(session?.countdownPending);
+  const isExpired = session ? !session.isCompleted && !isCountdownPending && !isPaused && timeRemaining <= 0 : false;
+  const isLowTime = !isCountdownPending && !isPaused && timeRemaining <= 45 && timeRemaining > 15;
+  const isCritical = !isCountdownPending && !isPaused && timeRemaining <= 15 && timeRemaining > 0;
 
   const minutes = Math.floor(timeRemaining / 60);
   const seconds = timeRemaining % 60;
@@ -1524,6 +1690,10 @@ export function useRecipeTimer() {
     isLowTime,
     isCritical,
     difficultyConfig: session ? DIFFICULTY_CONFIGS[session.difficulty] : null,
+    isCountdownPending,
+    isPaused,
+    pauseRun: pauseRecipeRun,
+    resumeRun: resumeRecipeRun,
   };
 }
 

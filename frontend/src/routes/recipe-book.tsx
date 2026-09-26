@@ -7,6 +7,7 @@ import { DishGlyph } from "@/components/game/DishGlyph";
 import { GameButton } from "@/components/game/GameButton";
 import { IngredientGlyph } from "@/components/game/IngredientGlyph";
 import { RecipeCard } from "@/components/game/RecipeCard";
+import { StationCountdown } from "@/components/game/StationCountdown";
 import { WaveformDisplay } from "@/components/game/WaveformDisplay";
 import {
   type RecipeDifficulty,
@@ -21,6 +22,7 @@ import {
   useRecipeBestScores,
   type Recipe,
 } from "@/lib/recipes";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/recipe-book")({
   head: () => ({
@@ -113,6 +115,8 @@ function RecipeBook() {
 
 function RecipeBriefing({ recipe, onBack }: { recipe: Recipe; onBack: () => void }) {
   const [isDifficultyModalOpen, setIsDifficultyModalOpen] = useState(false);
+  const [selectedDifficulty, setSelectedDifficulty] = useState<RecipeDifficulty>("medium");
+  const [isCountingDown, setIsCountingDown] = useState(false);
   const navigate = useNavigate();
   const bestScores = useRecipeBestScores();
   const effectiveRecipe = enrichRecipeWithBestScore(recipe, bestScores);
@@ -120,15 +124,21 @@ function RecipeBriefing({ recipe, onBack }: { recipe: Recipe; onBack: () => void
   const expectedSignal = useMemo(() => getOrSaveExpectedSignal(recipe.id), [recipe.id]);
 
   const handleProceed = (difficulty: RecipeDifficulty) => {
+    setSelectedDifficulty(difficulty);
+    setIsDifficultyModalOpen(false);
+    setIsCountingDown(true);
+  };
+
+  const handleCountdownComplete = () => {
     setActiveRecipe(recipe.id);
     resetRecipeProgress(recipe.id);
-    startRecipeRun(recipe.id, difficulty);
-    setIsDifficultyModalOpen(false);
-    navigate({ to: "/kitchen" });
+    startRecipeRun(recipe.id, selectedDifficulty);
+    setIsCountingDown(false);
+    navigate({ to: "/generate" });
   };
 
   return (
-    <section className="mt-8">
+    <section className="mt-8 relative">
       {/* Centered Difficulty Selection Pop-up Modal */}
       <DifficultyModal
         recipe={recipe}
@@ -137,7 +147,16 @@ function RecipeBriefing({ recipe, onBack }: { recipe: Recipe; onBack: () => void
         onProceed={handleProceed}
       />
 
-      {/* Return button and volume header */}
+      {/* 3-2-1-GO Countdown Overlay */}
+      {isCountingDown && <StationCountdown onComplete={handleCountdownComplete} />}
+
+      <div
+        className={cn(
+          "transition-all duration-700 ease-out",
+          isCountingDown && "filter blur-xl brightness-50 pointer-events-none select-none",
+        )}
+      >
+        {/* Return button and volume header */}
       <div className="mb-4 flex items-center justify-between">
         <button
           onClick={onBack}
@@ -402,6 +421,7 @@ function RecipeBriefing({ recipe, onBack }: { recipe: Recipe; onBack: () => void
             </div>
           </div>
         </div>
+      </div>
       </div>
     </section>
   );

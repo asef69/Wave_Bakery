@@ -21,16 +21,13 @@ import { GameButton } from "@/components/game/GameButton";
 import { IngredientGlyph } from "@/components/game/IngredientGlyph";
 import { WaveformDisplay } from "@/components/game/WaveformDisplay";
 import { SignalAudioPlayer } from "@/lib/audio";
-import { DifficultyModal } from "@/components/game/DifficultyModal";
 import { getIdealDishSignal, getOrSaveExpectedSignal } from "@/lib/pipeline";
 import {
   useActiveRecipe,
   useChefName,
   type Recipe,
   recipes,
-  startRecipeRun,
   resetRecipeProgress,
-  type RecipeDifficulty,
 } from "@/lib/recipes";
 import { cn } from "@/lib/utils";
 
@@ -120,15 +117,7 @@ function RecipeMissionBriefing() {
   const [chefName] = useChefName();
   const [player, setPlayer] = useState<SignalAudioPlayer | null>(null);
   const [activeTab, setActiveTab] = useState<"overview" | "dsp_bridge">("overview");
-  const [isDifficultyModalOpen, setIsDifficultyModalOpen] = useState(false);
   const navigate = useNavigate();
-
-  const handleProceed = (difficulty: RecipeDifficulty) => {
-    resetRecipeProgress(recipe.id);
-    startRecipeRun(recipe.id, difficulty);
-    setIsDifficultyModalOpen(false);
-    navigate({ to: "/kitchen" });
-  };
 
   const targetSignal = useMemo(() => {
     try {
@@ -158,12 +147,6 @@ function RecipeMissionBriefing() {
 
   return (
     <main className="relative min-h-screen bg-background pb-16">
-      <DifficultyModal
-        recipe={recipe}
-        isOpen={isDifficultyModalOpen}
-        onClose={() => setIsDifficultyModalOpen(false)}
-        onProceed={handleProceed}
-      />
       <div className="lab-grid pointer-events-none absolute inset-0 opacity-[0.08]" aria-hidden />
 
       <div className="relative z-10 mx-auto max-w-7xl px-6 pt-8 sm:px-10">
@@ -473,7 +456,7 @@ function RecipeMissionBriefing() {
               <GameButton
                 size="lg"
                 className="uppercase font-extrabold tracking-wider"
-                onClick={() => setIsDifficultyModalOpen(true)}
+                onClick={() => navigate({ to: "/kitchen" })}
               >
                 Proceed to Kitchen →
               </GameButton>

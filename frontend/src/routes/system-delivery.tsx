@@ -255,7 +255,7 @@ function SystemDeliveryLab() {
             >
               {isStable ? "✓ Stable Suspension" : "⚠️ Resonance Risk (|z| ≥ 1.0)"}
             </span>
-            {session && <RecipeTimerBadge />}
+            {session && <RecipeTimerBadge showPause={false} />}
           </div>
         </div>
 

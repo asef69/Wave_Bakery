@@ -7,6 +7,7 @@ import { ChefNameModal } from "@/components/game/ChefNameModal";
 import { LogoutModal } from "@/components/game/LogoutModal";
 import { GameButton } from "@/components/game/GameButton";
 import { useChefName } from "@/lib/recipes";
+import { useSoundSettings } from "@/lib/sound";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
@@ -49,19 +50,32 @@ const defaultSettings: SettingsState = {
 };
 
 function SettingsScreen() {
-  const [settings, setSettings] = useState<SettingsState>(defaultSettings);
+  const [soundSettings, setSoundSettings] = useSoundSettings();
+  const [settings, setSettings] = useState<SettingsState>(() => ({
+    ...defaultSettings,
+    masterVolume: soundSettings.volume,
+  }));
   const [showResetNotice, setShowResetNotice] = useState(false);
   const [chefName, saveChefName] = useChefName();
   const [isNameModalOpen, setIsNameModalOpen] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const [theme, setTheme] = useTheme();
 
+  // Sync external volume updates
+  useEffect(() => {
+    setSettings((prev) => (prev.masterVolume !== soundSettings.volume ? { ...prev, masterVolume: soundSettings.volume } : prev));
+  }, [soundSettings.volume]);
+
   const updateSetting = <K extends keyof SettingsState>(key: K, value: SettingsState[K]) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
+    if (key === "masterVolume") {
+      setSoundSettings({ volume: Number(value) });
+    }
   };
 
   const handleReset = () => {
     setSettings(defaultSettings);
+    setSoundSettings({ volume: 80, soundEnabled: true });
     setTheme("light");
     setShowResetNotice(true);
     setTimeout(() => setShowResetNotice(false), 3000);

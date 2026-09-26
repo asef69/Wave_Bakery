@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { ChefFourier } from "@/components/game/ChefFourier";
 import { GameButton } from "@/components/game/GameButton";
@@ -28,6 +28,16 @@ export function LabShell({
   nextTo,
   nextLabel = "Continue →",
 }: LabShellProps) {
+  const [stageKey, setStageKey] = useState<number>(0);
+
+  useEffect(() => {
+    const handleStageReset = () => {
+      setStageKey((prev) => prev + 1);
+    };
+    window.addEventListener("wavebakery_stage_reset", handleStageReset);
+    return () => window.removeEventListener("wavebakery_stage_reset", handleStageReset);
+  }, []);
+
   return (
     <main className="relative min-h-screen bg-background">
       <TimeExpiredModal />
@@ -61,7 +71,7 @@ export function LabShell({
           aria-hidden
         />
 
-        <div className="mt-8">{children}</div>
+        <div key={stageKey} className="mt-8">{children}</div>
 
         <div className="mt-10 flex flex-wrap items-end justify-between gap-6">
           <ChefFourier size="sm" float={false} message={chefLine} />
