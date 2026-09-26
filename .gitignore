@@ -30,3 +30,6 @@ Thumbs.db
 
 # Windows / OneDrive folder metadata
 desktop.ini
+
+# LaTeX build output
+docs/build/
