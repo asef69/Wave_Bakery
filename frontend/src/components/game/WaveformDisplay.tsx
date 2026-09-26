@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { samplesAlongCurvePath, type PipelineSignal } from "@/lib/pipeline";
 import { cn } from "@/lib/utils";
 
 type WaveformDisplayProps = {
@@ -11,15 +12,19 @@ type WaveformDisplayProps = {
   square?: boolean | undefined;
   cursorProgress?: number | null | undefined;
   samples?: number[] | undefined;
+  /** Pipeline signal whose Mixing curve `samples` should be drawn along. */
+  curveRef?: PipelineSignal | null | undefined;
   parametricPoints?: Array<{ x: number; y: number }> | undefined;
   color?: string | undefined;
-  signalParams?: {
-    frequency?: number | undefined;
-    amplitude?: number | undefined;
-    noise?: number | undefined;
-    shift?: number | undefined;
-    color?: string | undefined;
-  } | undefined;
+  signalParams?:
+    | {
+        frequency?: number | undefined;
+        amplitude?: number | undefined;
+        noise?: number | undefined;
+        shift?: number | undefined;
+        color?: string | undefined;
+      }
+    | undefined;
 };
 
 function wavePath(width: number, height: number, seed: number) {
@@ -36,12 +41,7 @@ function wavePath(width: number, height: number, seed: number) {
   return points.join(" ");
 }
 
-function samplePath(
-  width: number,
-  height: number,
-  samples: number[],
-  padding = 0,
-) {
+function samplePath(width: number, height: number, samples: number[], padding = 0) {
   if (!samples || samples.length === 0) return "";
   const mid = height / 2;
   const points: string[] = [];
@@ -171,7 +171,7 @@ function cookedSignalPath(
   const { frequency = 4, amplitude = 1, noise = 0, shift = 0 } = params;
   const points: string[] = [];
   for (let x = 0; x <= width; x += 2) {
-    const t = ((x / width) - shift) * Math.PI * 2 * frequency;
+    const t = (x / width - shift) * Math.PI * 2 * frequency;
     const n = noise ? Math.sin(x * 12.9898 + seed * 78.233) * noise * height * 0.16 : 0;
     const y = mid - Math.sin(t + seed) * amplitude * height * 0.33 + n;
     points.push(`${x === 0 ? "M" : "L"}${x} ${y.toFixed(2)}`);
@@ -189,6 +189,7 @@ export function WaveformDisplay({
   square = false,
   cursorProgress,
   samples,
+  curveRef,
   parametricPoints,
   color = "var(--signal)",
   signalParams,
@@ -197,9 +198,15 @@ export function WaveformDisplay({
   const plotHeight = square ? 600 : height;
   const isCursorActive = cursorProgress !== undefined && cursorProgress !== null;
   const clampProgress = isCursorActive ? Math.max(0, Math.min(1, cursorProgress)) : 0;
-  const activeParametric = parametricPoints && parametricPoints.length > 0 ? parametricPoints : null;
+  const activeParametric =
+    parametricPoints && parametricPoints.length > 0 ? parametricPoints : null;
   const activeSamples = samples && samples.length > 0 ? samples : null;
   const strokeColor = signalParams?.color ?? color;
+  const samplesD = activeSamples
+    ? curveRef
+      ? samplesAlongCurvePath(activeSamples, curveRef, plotWidth, plotHeight, 0.33)
+      : samplePath(plotWidth, plotHeight, activeSamples, square ? 24 : 0)
+    : "";
 
   const currentParametricPoint = useMemo(() => {
     if (!activeParametric || !isCursorActive || activeParametric.length === 0) return null;
@@ -315,7 +322,13 @@ export function WaveformDisplay({
 
               {/* Underlying glow shadow from actual parametric curve */}
               <path
-                d={parametricPath(plotWidth, plotHeight, activeParametric, square ? 24 : 16, square)}
+                d={parametricPath(
+                  plotWidth,
+                  plotHeight,
+                  activeParametric,
+                  square ? 24 : 16,
+                  square,
+                )}
                 fill="none"
                 stroke={strokeColor}
                 strokeWidth="5"
@@ -325,7 +338,13 @@ export function WaveformDisplay({
               />
               {/* Primary sharp waveform trace from actual parametric curve */}
               <path
-                d={parametricPath(plotWidth, plotHeight, activeParametric, square ? 24 : 16, square)}
+                d={parametricPath(
+                  plotWidth,
+                  plotHeight,
+                  activeParametric,
+                  square ? 24 : 16,
+                  square,
+                )}
                 fill="none"
                 stroke={strokeColor}
                 strokeWidth="2.5"
@@ -426,7 +445,7 @@ export function WaveformDisplay({
 
               {/* Underlying glow shadow from actual samples */}
               <path
-                d={samplePath(plotWidth, plotHeight, activeSamples, square ? 24 : 0)}
+                d={samplesD}
                 fill="none"
                 stroke={strokeColor}
                 strokeWidth="5"
@@ -435,7 +454,7 @@ export function WaveformDisplay({
               />
               {/* Primary sharp waveform trace from actual samples */}
               <path
-                d={samplePath(plotWidth, plotHeight, activeSamples, square ? 24 : 0)}
+                d={samplesD}
                 fill="none"
                 stroke={strokeColor}
                 strokeWidth="2.5"
@@ -514,7 +533,9 @@ export function WaveformDisplay({
           </div>
         ) : variant === "wave" ? (
           <div className="relative w-full overflow-hidden" style={{ height }}>
-            <div className={cn("flex w-[200%]", animated && !isCursorActive && "animate-wave-drift")}>
+            <div
+              className={cn("flex w-[200%]", animated && !isCursorActive && "animate-wave-drift")}
+            >
               {[0, 1].map((i) => (
                 <svg
                   key={i}

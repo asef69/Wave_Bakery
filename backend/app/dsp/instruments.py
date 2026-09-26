@@ -173,95 +173,125 @@ def piccolo(n: int, f0: float = 880.0) -> np.ndarray:
     return C.normalize((raw + breath) * _adsr(n, 0.08, 0.06, 0.9, 0.2), 0.9)
 
 
+def _sign(x: np.ndarray) -> np.ndarray:
+    """sgn(x) with sgn(0) = +1, matching the frontend's `s >= 0 ? 1 : -1`
+    (numpy's own np.sign returns 0 at x == 0, which would silently diverge
+    from the frontend at each zero-crossing)."""
+    return np.where(x >= 0.0, 1.0, -1.0)
+
+
 def carrot(n: int = C.FRAME, f0: float = 4.5) -> np.ndarray:
-    """y = 5 - (1 + cos(0.5x))^4"""
-    t = np.arange(n) / n
-    x = 4.0 * np.pi * f0 * t
-    y = 5.0 - np.power(1.0 + np.cos(0.5 * x), 4.0)
-    # Center and normalize into [-1, 1]
-    norm_y = (y + 3.0) / 8.0
-    return C.normalize(norm_y.astype(np.float32), 0.9)
+    """Matches frontend evaluateCarrotWave: y = 5 - (1 + cos(0.5x))^4,
+    x = 4*pi*f*t with the ingredient's fixed f = 4.5 (not the seeded pitch —
+    see the module-level note above tomato/carrot/cucumber history: using the
+    real seed f0 here would push this shape's harmonics far above its
+    ideal_cutoff)."""
+    t = np.arange(n) / (n - 1)
+    x = 4.0 * np.pi * 4.5 * t
+    raw_y = 5.0 - np.power(1.0 + np.cos(0.5 * x), 4.0)
+    y = (raw_y + 3.0) / 8.0
+    return y.astype(np.float32)
 
 
 def cucumber(n: int = C.FRAME, f0: float = 7.0) -> np.ndarray:
-    """y = 6 * tanh(4 * cos(x))"""
-    t = np.arange(n) / n
-    x = 2.0 * np.pi * f0 * t
-    y = 6.0 * np.tanh(4.0 * np.cos(x))
-    return C.normalize((y / 6.0).astype(np.float32), 0.9)
+    """Matches frontend evaluateCucumberWave: y = 6*tanh(4*cos(x)) / 6,
+    x = 2*pi*f*t with the ingredient's fixed f = 7."""
+    t = np.arange(n) / (n - 1)
+    x = 2.0 * np.pi * 7.0 * t
+    y = np.tanh(4.0 * np.cos(x))
+    return y.astype(np.float32)
 
 
 def sauce(n: int = C.FRAME, f0: float = 4.0) -> np.ndarray:
-    """Parametric curve: x(t) = (3 + 2 sin(5t)) cos(t), y(t) = (2 + sin(5t)) sin(t)"""
-    t = (np.arange(n) / n) * (6.0 * np.pi)
-    y = (2.0 + np.sin(5.0 * t)) * np.sin(t)
-    return C.normalize((y / 3.0).astype(np.float32), 0.9)
+    """Matches frontend evaluateSauceWave (parametric y-component):
+    y = (2 + sin(5t)) sin(t) / 3, t = 6*pi*normT."""
+    t = (np.arange(n) / (n - 1)) * 6.0 * np.pi
+    y = (2.0 + np.sin(5.0 * t)) * np.sin(t) / 3.0
+    return y.astype(np.float32)
 
 
 def egg(n: int = C.FRAME, f0: float = 4.0) -> np.ndarray:
-    """Parametric curve: x(t) = (1.5 + 0.5 sin(t)) cos(t), y(t) = -(2 + 0.2 sin(t)) sin(t)"""
-    t = (np.arange(n) / n) * (6.0 * np.pi)
-    y = -(2.0 + 0.2 * np.sin(t)) * np.sin(t)
-    return C.normalize((y / 2.2).astype(np.float32), 0.9)
+    """Matches frontend evaluateEggWave (parametric y-component):
+    y = -(2 + 0.2 sin(t)) sin(t) / 2.2, t = 6*pi*normT."""
+    t = (np.arange(n) / (n - 1)) * 6.0 * np.pi
+    y = -(2.0 + 0.2 * np.sin(t)) * np.sin(t) / 2.2
+    return y.astype(np.float32)
 
 
 def cheese(n: int = C.FRAME, f0: float = 6.0) -> np.ndarray:
-    """Periodic triangular wave: x(t) = (2/pi) * asin(sin(2*pi*f*t))"""
-    t = np.arange(n) / SR
-    s = np.sin(2.0 * np.pi * f0 * t)
-    s_clamped = np.clip(s, -1.0, 1.0)
-    y = (2.0 / np.pi) * np.arcsin(s_clamped)
-    return C.normalize(y.astype(np.float32), 0.9)
+    """Matches frontend evaluateTriangleWave for Cheese: x(t) = (2/pi)
+    asin(sin(2*pi*f*t)) with the ingredient's fixed f = 6 (its
+    ingredientDetails.freq, not the seeded pitch)."""
+    freq = f0 if (0 < f0 <= 20.0) else 6.0
+    t = np.arange(n) / (n - 1)
+    s = np.clip(np.sin(2.0 * np.pi * freq * t), -1.0, 1.0)
+    y = (2.0 / np.pi) * np.arcsin(s)
+    return y.astype(np.float32)
 
 
 def sugar(n: int = C.FRAME, f0: float = 5.0) -> np.ndarray:
-    """Periodic square wave: x(t) = sgn(sin(2*pi*f*t))"""
-    t = np.arange(n) / SR
-    y = np.sign(np.sin(2.0 * np.pi * f0 * t))
-    return C.normalize(y.astype(np.float32), 0.9)
+    """Matches frontend evaluateSquareWave for Sugar: x(t) = sgn(sin(2*pi*f*t))
+    with the ingredient's fixed f = 5."""
+    t = np.arange(n) / (n - 1)
+    y = _sign(np.sin(2.0 * np.pi * 5.0 * t))
+    return y.astype(np.float32)
 
 
 def salt(n: int = C.FRAME, f0: float = 12.0) -> np.ndarray:
-    """Small-amplitude periodic square wave"""
-    t = np.arange(n) / SR
-    y = 0.4 * np.sign(np.sin(2.0 * np.pi * f0 * t))
-    return C.normalize(y.astype(np.float32), 0.8)
+    """Matches frontend evaluateSquareWave for Salt: x(t) = 0.4*sgn(sin(2*pi*f*t))
+    with the ingredient's fixed f = 12."""
+    t = np.arange(n) / (n - 1)
+    y = 0.4 * _sign(np.sin(2.0 * np.pi * 12.0 * t))
+    return y.astype(np.float32)
 
 
 def bread(n: int = C.FRAME, f0: float = 3.0) -> np.ndarray:
-    """Superposition wave: 0.8 sin(6*pi*t) + 0.6 sin(18*pi*t)"""
-    t = np.arange(n) / SR
-    y = 0.8 * np.sin(2.0 * np.pi * f0 * t) + 0.6 * np.sin(2.0 * np.pi * (3.0 * f0) * t)
-    return C.normalize(y.astype(np.float32), 0.9)
+    """Matches frontend evaluateBreadWave: y = 0.8 sin(2*pi*f1*t) +
+    0.6 sin(2*pi*f2*t), f1 = 3 (fixed), f2 = 3*f1 = 9."""
+    t = np.arange(n) / (n - 1)
+    f1 = 3.0
+    f2 = f1 * 3.0
+    y = 0.8 * np.sin(2.0 * np.pi * f1 * t) + 0.6 * np.sin(2.0 * np.pi * f2 * t)
+    peak = float(np.max(np.abs(y)))
+    if peak > 1.0:
+        y = y / peak
+    return y.astype(np.float32)
 
 
 def patty(n: int = C.FRAME, f0: float = 2.0) -> np.ndarray:
-    """Horizontal oval vertical trace: y(t) = 0.7 sin(t)"""
-    t = 2.0 * np.pi + (np.arange(n) / n) * (6.0 * np.pi)
-    y = 0.7 * np.sin(t)
-    return C.normalize((y / 0.7).astype(np.float32), 0.9)
+    """Matches frontend evaluatePattyWave (parametric y-component):
+    y = 0.7 sin(t) / 0.7 = sin(t), t = 2*pi + normT*6*pi."""
+    t = 2.0 * np.pi + (np.arange(n) / (n - 1)) * 6.0 * np.pi
+    y = np.sin(t)
+    return y.astype(np.float32)
 
 
 def lettuce(n: int = C.FRAME, f0: float = 3.0) -> np.ndarray:
-    """Leaf ripple trace: y(t) = 2.2 cos(t) + 0.45 cos(7.5t)"""
-    t = -8.0 * np.pi + (np.arange(n) / n) * (16.0 * np.pi)
-    y = 2.2 * np.cos(t) + 0.45 * np.cos(7.5 * t)
-    return C.normalize((y / 2.65).astype(np.float32), 0.9)
+    """Matches frontend evaluateLettuceWave (parametric y-component):
+    y = (2.2 cos(t) + 0.45 cos(7.5t)) / 2.65, t = -8*pi + normT*16*pi."""
+    t = -8.0 * np.pi + (np.arange(n) / (n - 1)) * 16.0 * np.pi
+    y = (2.2 * np.cos(t) + 0.45 * np.cos(7.5 * t)) / 2.65
+    return y.astype(np.float32)
 
 
 def tomato(n: int = C.FRAME, f0: float = 5.0) -> np.ndarray:
-    """Heart / cardoid trace: y(t) = 1.3 cos(t) - 0.5 cos(2t) - 0.2 cos(3t)"""
-    t = (np.arange(n) / n) * (2.0 * np.pi * f0)
-    y = 1.3 * np.cos(t) - 0.5 * np.cos(2.0 * t) - 0.2 * np.cos(3.0 * t)
-    return C.normalize((y / 2.0).astype(np.float32), 0.9)
+    """Matches frontend evaluateTomatoWave (parametric y-component):
+    y = -(1.5 + 0.2 sin(t)) sin(t) / 1.7, t = 6*pi*normT."""
+    t = (np.arange(n) / (n - 1)) * 6.0 * np.pi
+    y = -(1.5 + 0.2 * np.sin(t)) * np.sin(t) / 1.7
+    return y.astype(np.float32)
 
 
 def onion(n: int = C.FRAME, f0: float = 6.0) -> np.ndarray:
-    """Spiral trace: y(t) = (0.1 + 0.08t) sin(3t)"""
-    t = (np.arange(n) / n) * (6.0 * np.pi)
-    y = (0.1 + 0.08 * t) * np.sin(3.0 * t)
-    max_rad = 0.1 + 0.08 * (6.0 * np.pi)
-    return C.normalize((y / max_rad).astype(np.float32), 0.9)
+    """Matches frontend evaluateOnionWave (parametric y-component, an
+    Archimedean spiral): r(t) = 0.1 + 0.08t, y = r*sin(3t) / maxRadius,
+    t = 6*pi*normT, maxRadius = r(6*pi)."""
+    t = (np.arange(n) / (n - 1)) * 6.0 * np.pi
+    r = 0.1 + 0.08 * t
+    max_radius = 0.1 + 0.08 * (6.0 * np.pi)
+    y = (r * np.sin(3.0 * t)) / max_radius
+    return y.astype(np.float32)
+
 
 
 CHICKEN_PCM = np.array([
@@ -374,32 +404,62 @@ def chicken(n: int = C.FRAME, f0: float = 0.0) -> np.ndarray:
 
 
 def milk(n: int = C.FRAME, f0: float = 440.0) -> np.ndarray:
-    """Smooth pure liquid sinusoid."""
-    t = np.arange(n) / SR
-    y = np.sin(2 * np.pi * f0 * t)
-    return C.normalize(y.astype(np.float32), 0.8)
+    """Matches frontend evaluateMilkWave: y = (1.4 sin(0.7x) + 0.6 sin(1.3x)
+    + 0.3 sin(2.1x + 0.8)) / 2.3, x = 2*pi*f*t with the ingredient's fixed
+    f = 5 (its ingredientDetails.freq)."""
+    t = np.arange(n) / (n - 1)
+    x = 2.0 * np.pi * 5.0 * t
+    raw_y = 1.4 * np.sin(0.7 * x) + 0.6 * np.sin(1.3 * x) + 0.3 * np.sin(2.1 * x + 0.8)
+    y = raw_y / 2.3
+    return y.astype(np.float32)
 
 
 def flour(n: int = C.FRAME, f0: float = 300.0) -> np.ndarray:
-    """Flour powder: soft filtered white noise burst."""
-    rng = np.random.default_rng(42)
-    raw = C.white(n, 0.8, rng)
-    filtered = C.filter_signal(raw, [C.bandpass(200, 1200)])
-    return C.normalize(filtered, 0.8)
+    """Matches frontend evaluateFlourWave: y = sgn(sin(2*pi*f*t)) -
+    sgn(sin(2*pi*2f*t)) * cos(2*pi*f*t), with the ingredient's fixed f = 2."""
+    t = np.arange(n) / (n - 1)
+    f = 2.0
+    sq1 = _sign(np.sin(2.0 * np.pi * f * t))
+    sq2 = _sign(np.sin(2.0 * np.pi * (2.0 * f) * t))
+    cos_term = np.cos(2.0 * np.pi * f * t)
+    y = sq1 - sq2 * cos_term
+    return y.astype(np.float32)
 
 
 def butter(n: int = C.FRAME, f0: float = 220.0) -> np.ndarray:
-    """Butter: mellow harmonic warmth."""
-    parts = [(1, 1.0, 1.0), (2, 0.4, 1.5), (3, 0.2, 2.0)]
-    raw = _additive(n, f0, parts)
-    return C.normalize(raw * _adsr(n, 0.05, 0.1, 0.8, 0.2), 0.8)
+    """Matches frontend evaluateButterWave: trapezoid blocks
+    y = max(0, 1.2 - 1.2*max(|mod(x+9,14)-9|-4, 0)) - 0.6, x in [-21, 21]."""
+    t = np.arange(n) / (n - 1)
+    x = -21.0 + t * 42.0
+    mod_val = np.mod(x + 9.0, 14.0)
+    inner_max = np.maximum(np.abs(mod_val - 9.0) - 4.0, 0.0)
+    raw_y = np.maximum(0.0, 1.2 - 1.2 * inner_max)
+    y = raw_y - 0.6
+    return y.astype(np.float32)
 
 
 def noodles(n: int = C.FRAME, f0: float = 330.0) -> np.ndarray:
-    """Noodles wave: multi-harmonic noodle strand."""
-    t = np.arange(n) / SR
-    y = np.sin(2 * np.pi * f0 * t) + 0.5 * np.sin(2 * np.pi * (2 * f0) * t)
-    return C.normalize(y.astype(np.float32), 0.85)
+    """Matches frontend evaluateNoodleWave (parametric y-component):
+    y = cos(theta), theta = -12*pi + normT*24*pi."""
+    t = -12.0 * np.pi + (np.arange(n) / (n - 1)) * 24.0 * np.pi
+    y = np.cos(t)
+    return y.astype(np.float32)
+
+
+def bun(n: int = C.FRAME, f0: float = 0.0) -> np.ndarray:
+    """Matches frontend evaluateBunWave: dome profile
+    y = (5*(max(0, 0.5+0.5cos(0.3x)))^0.25 + 0.03cos(9x) - 2.5) / 2.5,
+    x = -10*pi/3 + (20*pi/3)*f*t with the ingredient's fixed f = 3."""
+    t = np.arange(n) / (n - 1)
+    f = 3.0
+    x = -(10.0 * np.pi) / 3.0 + ((20.0 * np.pi) / 3.0) * f * t
+    base = np.maximum(0.0, 0.5 + 0.5 * np.cos(0.3 * x))
+    raw_y = 5.0 * np.power(base, 0.25) + 0.03 * np.cos(9.0 * x)
+    y = (raw_y - 2.5) / 2.5
+    peak = float(np.max(np.abs(y)))
+    if peak > 1.0:
+        y = y / peak
+    return y.astype(np.float32)
 
 
 VOICES = {
@@ -431,7 +491,7 @@ VOICES = {
     'sugar': sugar,
     'salt': salt,
     'bread': bread,
-    'bun': bread,
+    'bun': bun,
     'patty': patty,
     'beef patty': patty,
     'beef_patty': patty,

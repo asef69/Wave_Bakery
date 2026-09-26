@@ -1,0 +1,692 @@
+\documentclass[11pt,a4paper]{article}
+\input{wk-style}
+\fancyhead[L]{\small\color{wkgrey}WaveKitchen / WaveBakery}
+\fancyhead[R]{\small\color{wkgrey}Detailed Architecture}
+
+\begin{document}
+
+\begin{titlepage}
+\centering
+\vspace*{2.5cm}
+{\color{wkorange}\rule{\linewidth}{1.2pt}}\\[0.6cm]
+{\Huge\bfseries\color{wkink} WaveKitchen / WaveBakery}\\[0.35cm]
+{\LARGE\color{wkteal} Detailed Architecture}\\[0.3cm]
+{\large The inner mathematics, the function behind every operation, and the step-by-step
+workings of generation, filtering, mixing, seasoning, marinating, cooking, the oven, the
+z-plane, scoring and the leaderboard}\\[0.6cm]
+{\color{wkorange}\rule{\linewidth}{1.2pt}}\\[1.5cm]
+
+\begin{tikzpicture}[node distance=6mm and 5mm]
+\node[st,minimum width=40mm] (fe) {\textbf{Browser (frontend)}\\React + TanStack\\signals, stages, graphs, audio};
+\node[st,right=18mm of fe,minimum width=40mm] (be) {\textbf{FastAPI (backend)}\\NumPy / SciPy DSP\\judge, points, leaderboard};
+\node[gate,below=of fe,minimum width=40mm] (ls) {localStorage\\run session, stage signals};
+\node[gate,below=of be,minimum width=40mm] (db) {SQLite\\chefs, sessions, attempts};
+\draw[arr,<->] (fe)--node[above,font=\scriptsize]{/api (JSON)}(be);
+\draw[arr,<->] (fe)--(ls); \draw[arr,<->] (be)--(db);
+\end{tikzpicture}
+
+\vfill
+{\large CSE 220 --- Signals and Linear Systems project}\\[0.2cm]
+{\color{wkgrey}Companion to the \emph{Detailed Gameplay Overview}}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+% ====================================================================
+\section{System architecture}
+% ====================================================================
+\subsection{Processes and responsibilities}
+\begin{longtable}{@{}P{3.4cm}P{12.1cm}@{}}
+\toprule
+Part & Responsibility \\
+\midrule
+\endhead
+\file{run.py} & Starts the backend (\texttt{uvicorn app.main:app --reload}, port 8000; on Windows in its own hidden console so its reload Ctrl+C cannot stop the runner) and the Vite dev server (port 5173). Relays backend logs; stops both on exit. \\
+Frontend & Synthesises ingredient signals, runs every station's DSP, draws, plays audio, keeps the run in \texttt{localStorage}, and talks to the backend through \file{frontend/src/lib/api.ts} (header \texttt{X-Player-Token}). \\
+Backend & Owns chefs (hashed passwords, tokens), sessions and attempts; regenerates ingredients from a seed; rebuilds and scores the dish; computes points, ranks, tier unlocks and leaderboards. \\
+\bottomrule
+\end{longtable}
+
+\subsection{Frontend storage (\texttt{localStorage})}
+\begin{longtable}{@{}P{6.2cm}P{9.3cm}@{}}
+\toprule
+Key & Contents \\
+\midrule
+\endhead
+\file{wavebakery_recipe_session} & The run: recipe, difficulty, start/end time, every stage accuracy, every dial (seasoning, marinate, appliance, bowl, oven, cart), final score/stars, backend session id and result. Type \fn{RecipeRunSession} in \file{lib/recipes.ts}. \\
+\file{wavebakery_progress_<recipe>} & Highest unlocked level (1--9). \\
+\file{wavebakery_pipeline_<recipe>_<stage>} & A saved \fn{PipelineSignal} for stage \texttt{raw, filtered, mixed, seasoned, marinated, cooked, delivered}. \\
+\file{wavebakery_filtered_ingredients_<recipe>} & Filtered samples per washable ingredient. \\
+\file{wavebakery_cooked_signal_<recipe>} & The cooked dish (\fn{CookedSignalData}). \\
+\file{wavebakery_selected_ingredients_<recipe>} & Ingredients picked in Generate. \\
+\file{wavebakery_leaderboard_entries} & The on-device leaderboard. \\
+\file{wavekitchen_player_token}, \file{wavebakery_chef_name} & Server token and chef name. \\
+\file{wavebakery_recipe_best_scores} & Best total per recipe. \\
+\bottomrule
+\end{longtable}
+Changing a stage calls \fn{invalidateDownstreamStages} (\file{lib/pipeline.ts}), which deletes
+every later stage's saved signal so nothing stale is carried forward.
+
+\subsection{Backend tables (\file{backend/app/models.py})}
+\begin{longtable}{@{}P{3.4cm}P{12.1cm}@{}}
+\toprule
+Table & Fields that matter \\
+\midrule
+\endhead
+\texttt{players} & handle, token, scrypt \texttt{password\_hash}, points, unlocked tier. \\
+\texttt{ingredients}, \texttt{appliances}, \texttt{recipes} & Catalogue from \file{seed.py}; recipes hold targets (seasoning, blend, marinate, appliances), tier, tolerance, noise difficulty. A recipe removed from the book stays in the table (old runs reference it) but is retired (\texttt{is\_active} false). \\
+\texttt{game\_sessions} & One run: seed, status (\texttt{active/served/abandoned}), difficulty, params (JSON). \\
+\file{session_ingredients} & Per-slot seed, contaminants, filter bands/tools, prep score, accepted. \\
+\texttt{attempts} & A served dish: score, stars, prep score, SNR, MSE, correlation, spectral similarity, overall score and time bonus, points, difficulty, scoring version, notes. The leaderboard's source. \\
+\bottomrule
+\end{longtable}
+
+% ====================================================================
+\section{Conventions: how a signal is represented}
+% ====================================================================
+\subsection{The \texttt{PipelineSignal}}
+Every frontend stage produces
+\[
+\mathbf{x}=\bigl(x[0],\dots,x[N-1]\bigr),\qquad N=401,\qquad t_n=\tfrac{n}{N-1}\in[0,1],
+\]
+plus metadata (frequency label, duration label, and optionally the 2-D mixing curve).
+A frequency of $f$ ``game Hz'' means $f$ cycles in the window.
+
+\begin{mathbox}{Helper functions (\file{frontend/src/lib/pipeline.ts})}
+\begin{itemize}[leftmargin=*]
+\item \fn{sampleAt}$(\mathbf{x},u)$: periodic linear interpolation. With $u'=u \bmod 1$,
+  $p=u'(N-1)$, $i=\lfloor p\rfloor$:
+  $\;x(u)=x[i]+(p-i)\,(x[i+1]-x[i])$.
+\item \fn{resampleSignal}$(\mathbf{x},M)$: $y[m]=\text{sampleAt}(\mathbf{x},m/(M-1))$.
+\item \fn{normalizeSamples}$(\mathbf{x},0.95)$: scales \emph{down only}:
+  $y=x\cdot\min(1,\,0.95/\max_n|x[n]|)$.
+\end{itemize}
+\end{mathbox}
+
+\subsection{From samples to sound (\file{frontend/src/lib/audio.ts})}
+\fn{SignalAudioPlayer} treats the window as one period-group and loops it. With the
+signal's frequency label $f$ (default 4),
+\[
+f_0=\operatorname{clip}\!\left(220\cdot\tfrac{f}{4},\,110,\,880\right)\text{ Hz},\qquad
+\text{windows per second}=\frac{f_0}{\max(1,f)} .
+\]
+Output sample $k$ at the device rate $F_s$ ($t=k/F_s$) is
+$s(t)=x\bigl((t\cdot f_0/f)\bmod 1\bigr)\cdot g\cdot e(t)$ with gain
+$g=0.75/\max|x|$ and a 30\,ms attack / 120\,ms release envelope $e(t)$. So the audible
+fundamental is $f_0$ and the timbre is exactly the drawn waveform. The recorded chicken
+plays its decoded WAV buffer directly.
+
+\textbf{Loop seam} (\fn{smoothLoopSeam}): looping jumps from $x[N-1]$ back to $x[0]$. If that
+jump is larger than $1.5\times$ the largest step inside the signal (a signal that does not
+complete whole cycles in the window, e.g.\ carrot, milk or a delayed dish), the last 5\,\% of
+the window is blended towards $x[0]$ with a raised-cosine ramp
+$x[n]+\bigl(x[0]-x[N-1]\bigr)\tfrac12\bigl(1-\cos\pi u\bigr)$, removing the click that would
+otherwise repeat at the loop rate. Genuine edges (square waves) are left untouched.
+
+% ====================================================================
+\section{Signal generation}
+% ====================================================================
+\subsection{Frontend ingredient models (\file{frontend/src/lib/signals.ts})}
+Each ingredient is an \fn{IngredientSignalDefinition} with \fn{evaluate},
+\fn{generateSamples} and, for 2-D shapes, a \fn{parametricCurve}. The router
+\fn{getRecipeIngredientSamples} (\file{lib/pipeline.ts}) returns 401 samples:
+\begin{enumerate}
+\item \textbf{Chicken} $\rightarrow$ \fn{generateChickenSamples}: linear interpolation of the decoded PCM
+  (\file{lib/chicken-samples.ts}) over the whole 2.16\,s clip.
+\item \textbf{Catalogued ingredient} $\rightarrow$ its \fn{generateSamples}$(f,A,\phi,\text{noise})$.
+\item \textbf{Fallback}: $x[n]=A\sin(2\pi f t_n+\phi)$.
+\end{enumerate}
+
+\begin{mathbox}{Periodic families}
+\begin{align*}
+\text{triangle (Cheese)}:&\quad x(t)=A\tfrac{2}{\pi}\arcsin\bigl(\sin(2\pi ft+\phi)\bigr)
+  = \tfrac{8A}{\pi^2}\sum_{k\ \text{odd}}\tfrac{(-1)^{(k-1)/2}}{k^2}\sin(2\pi kft+\dots)\\
+\text{square (Sugar, Salt)}:&\quad x(t)=A\,\mathrm{sgn}\bigl(\sin(2\pi ft+\phi)\bigr)
+  = \tfrac{4A}{\pi}\sum_{k\ \text{odd}}\tfrac{1}{k}\sin(2\pi kft+\dots)
+\end{align*}
+The Fourier series explains what the Filtering and Oven spectra show: a square wave keeps
+strong odd harmonics ($1/k$), a triangle loses them quickly ($1/k^2$).
+\end{mathbox}
+
+\begin{mathbox}{Parametric ingredients and their 1-D signal}
+A curve $\gamma(\theta)=(X(\theta),Y(\theta))$, $\theta\in[\theta_{\min},\theta_{\max}]$, is
+sampled at 601 points for drawing. The 1-D signal uses the vertical component over the
+same parameter range, e.g.\ Noodles ($\theta\in[-12\pi,12\pi]$):
+\[
+x[n]=A\cos\bigl(-12\pi+24\pi\,t_n+\phi\bigr)\quad(\text{i.e. }Y/5).
+\]
+\end{mathbox}
+
+\begin{mathbox}{Frontend noise model (\fn{ingredientNoise})}
+Five tones above the ingredient's band (15.3, 18.7, 22.1, 26.9, 31.4 game Hz):
+\[
+n(t)=0.85\,\nu\,\frac{1}{5}\sum_{i=1}^{5}\sin\bigl(2\pi f_i t+37.1\,\phi_s\,i\bigr),
+\qquad x_{\text{dirty}}=x-n .
+\]
+Tones are used instead of a hashed pseudo-random sequence so the noise is genuinely spread
+above the cutoff instead of aliasing into one spike.
+\end{mathbox}
+
+\subsection{Backend ingredient synthesis and contamination}
+Backend signals are real audio: $F_s=22\,050$\,Hz, frame length $4096$ ($\approx186$\,ms)
+(\file{backend/app/dsp/core.py}). \fn{clean_signal} calls \fn{instruments.synth} (additive
+partials with ADSR envelopes: piano, guitar, bell, flute, \dots, plus mathematical voices for
+cheese, sugar, salt, bread, patty, carrot, cucumber, sauce, egg).
+
+\fn{contamination.corrupt}(clean, difficulty $d$, seed) uses a seeded RNG so the same session
+always reproduces the same dirty ingredient:
+\begin{itemize}
+\item number of layers $=1+\text{rand}\{0,\dots,\min(2,\lfloor d\rfloor)\}$;
+\item each layer's amplitude $a=0.08+0.10\,d\,(0.6+0.8u)$, $u\sim U(0,1)$;
+\item type chosen from \{\textbf{white} (whole band), \textbf{hiss} (high-passed noise starting
+  just above the ingredient's ideal cutoff $\times(1.1..1.6)$), \textbf{burst} (sparse clicks)\};
+\item $x_{\text{dirty}}=x+\sum_\ell n_\ell$, and every contaminant's band $[f_{lo},f_{hi}]$ is recorded.
+\end{itemize}
+
+% ====================================================================
+\section{Filtering}
+% ====================================================================
+\subsection{Server filter (authoritative)}
+\fn{apply_filter_chain} (\file{backend/app/dsp/pipeline.py}) is an FFT-mask filter:
+\[
+N=2^{\lceil\log_2 L\rceil},\quad X[k]=\mathrm{FFT}_N\{x\},\quad
+Y[k]=X[k]\,H(f_k),\quad f_k=\tfrac{kF_s}{N},\quad y=\mathrm{IFFT}_N\{Y\}[0..L-1].
+\]
+The player's cutoff becomes a low-pass tool with a raised-cosine transition of width
+$w=\max(30,\,0.15f_c)$ (\fn{core.lowpass}):
+\[
+H(f)=\begin{cases}1 & f\le f_c\\[2pt]
+1-\tfrac12\bigl(1-\cos\pi\tfrac{f-f_c}{w}\bigr) & f_c<f<f_c+w\\[2pt]
+0 & f\ge f_c+w\end{cases}
+\]
+(Graphic-EQ bands, high-pass, band-pass, notch and a harmonic ``de-hum'' comb are built the
+same way and multiplied: \fn{chain}.)
+
+\subsection{Cleaning (prep) score --- \fn{metrics.prep_quality}}
+With magnitude spectra $C$ (clean), $D$ (dirty), $F$ (filtered) and the set of noise bins
+$\mathcal{B}$ (inside any contaminant band):
+\begin{align*}
+\text{noise}_{\text{before}}&=\sum_{k\in\mathcal B}\max(0,D_k-C_k), &
+\text{noise}_{\text{after}}&=\sum_{k\in\mathcal B}\max(0,F_k-C_k),\\
+\text{removal}&=\operatorname{clip}\Bigl(1-\tfrac{\text{noise}_{\text{after}}}{\text{noise}_{\text{before}}},0,1\Bigr), &
+\text{preservation}&=\operatorname{clip}\Bigl(\tfrac{\sum_k\min(C_k,F_k)}{\sum_k C_k},0,1\Bigr),
+\end{align*}
+\[
+\text{prep}=100\,(0.55\,\text{removal}+0.45\,\text{preservation}).
+\]
+Flags: \emph{over-filtered} if preservation $<0.55$; \emph{still dirty} if removal $<0.5$.
+\fn{accept_ingredient} rejects prep $<45$ or either flag. It is deliberately not a
+distance to the clean signal, which would reward doing nothing when the noise is quiet.
+
+\subsection{Frontend Filtering Lab (\file{routes/filtering.tsx})}
+\begin{enumerate}
+\item Input: the server's dirty/clean plots for the slot when a session exists, otherwise
+  \fn{getRecipeIngredientSamples} with noise $0.85$ (dirty) and $0$ (clean).
+\item Live preview while dragging (cutoff $f_c\in[0,900]$, ideal $f^\star$):
+  noise $=\text{dirty}-\text{clean}$;
+  if $f_c<f^\star$: signal gain $\max(0,1-\tfrac{f^\star-f_c}{200})$, noise gain $0$;
+  else noise gain $\bigl(\tfrac{f_c-f^\star}{900-f^\star}\bigr)^{1.5}$.
+\item \emph{Apply}: sends a low-pass tool with that cutoff to the server and shows its
+  filtered plot and prep score. Cleanliness $=$ server prep score (offline: the similarity of
+  filtered vs clean, or $97-|f_c-f^\star|/6$ before applying).
+\item Pass mark: cleanliness $\ge 85$. \emph{Advance} accepts the ingredient on the server,
+  saves the filtered samples (\fn{saveFilteredIngredient}) and records the stage accuracy
+  as the running average of cleanliness over the washed ingredients.
+\end{enumerate}
+
+% ====================================================================
+\section{Mixing}
+% ====================================================================
+\begin{mathbox}{\fn{computeMixedSignal} (\file{lib/pipeline.ts})}
+For bowl ingredients $k=1..K$ with samples $x_k$ (the saved filtered samples if the
+ingredient was washed, otherwise its generated samples, noisy if washable):
+\[
+m[n]=\text{normalize}_{0.95}\Bigl(\tfrac{1}{\sqrt K}\sum_{k=1}^{K}x_k[n]\Bigr),\qquad
+K=1:\ m=x_1\ \text{(pass-through)} .
+\]
+The $1/\sqrt K$ factor keeps the RMS of $K$ uncorrelated signals comparable to one signal.
+\end{mathbox}
+
+\begin{mathbox}{The mixing-bowl curve (\fn{computeSuperpositionCurve}, \fn{withMixCurve})}
+If any bowl ingredient is parametric, the bowl is the geometric sum at a common
+normalised parameter $u\in[0,1]$ (601 points):
+\[
+X(u)=\sum_{k\in\text{param}}X_k(\theta_k(u)),\qquad
+Y(u)=\sum_{k\in\text{param}}Y_k(\theta_k(u))+\sum_{j\in\text{1-D}}x_j(u).
+\]
+The curve is attached as metadata (\texttt{curve}); the samples $m[n]$ are unchanged, so
+filtering still reaches the mix. Later stages transform the curve alongside the samples
+(\fn{transformCurve}, \fn{delayCurve}, \fn{carryCurve}) and \fn{pipelineSignalToPath} draws it.
+\end{mathbox}
+
+\textbf{Accuracy} (\fn{handleMix}, \file{routes/mixing.tsx}):
+$\text{mix}=100\cdot\frac{|\text{bowl}\cap\text{recipe}|}{|\text{recipe}|}$. The bowl's
+ingredient names are stored in the session and synced to the server.
+
+\textbf{Server} (\fn{bowl_signals}, \fn{stage_mix}): recipe ingredients in the bowl use their
+filtered signal, extra catalogue ingredients are added clean, missing ones are absent; then
+$m=\frac{1}{\sqrt K}\sum_k \text{resize}(x_k,4096)$.
+
+% ====================================================================
+\section{Seasoning and marinating}
+% ====================================================================
+\subsection{Seasoning --- \fn{computeSeasonedSignal}}
+\[
+s[n]=A\cdot m\bigl((\alpha\,t_n)\bmod 1\bigr)\qquad(\text{via \fn{timeScaleSamples}}),
+\]
+i.e.\ $y(t)=A\,x(\alpha t)$ with the mix repeated periodically when $\alpha>1$. No
+renormalisation, so $A$ really changes the height. The frequency label becomes $\alpha f$.
+The curve: $Y\mapsto Y_{\text{mid}}+A(Y-Y_{\text{mid}})$, parameter sped up by $\alpha$ with an
+$x$-offset per repeat. \textbf{Accuracy} (\file{routes/transform.tsx}):
+\[
+\text{acc}=\max\Bigl(0,\,100-70\bigl(\tfrac{|A-A^\star|}{A^\star}+\tfrac{|\alpha-\alpha^\star|}{\alpha^\star}\bigr)\Bigr),
+\quad\text{pass at }85.
+\]
+\textbf{Server}: \fn{stage_season} $y=A x$; \fn{stage_blend} $y[n]=x(\alpha n)$ by linear
+interpolation with zeros past the end (\fn{core.time_scale}); length becomes $\lfloor L/\alpha\rceil$.
+
+\subsection{Marinating --- \fn{computeMarinatedSignal}}
+With time $s$ (seconds) and duration label $D=3$:
+\[
+d=\operatorname{round}\!\Bigl(\tfrac{s}{\max(1,D)}\cdot N\Bigr),\qquad
+r[n]=\begin{cases}m\bigl(\tfrac{n-d}{N-1}\bigr) & 0\le n-d\\ 0 & n<d\end{cases},
+\qquad r\leftarrow\text{normalize}_{0.95}(r).
+\]
+The curve gets a flat lead-in at the centre line (\fn{delayCurve}).
+\textbf{Accuracy}: $\max\bigl(0,\,100-150\tfrac{|s-s^\star|}{s^\star}\bigr)$, pass at 85.
+\textbf{Server}: \fn{stage_marinate} delays by $sF_s$ samples after zero-padding; integer
+delays copy samples, fractional delays use the shift theorem
+\[
+Y[k]=X[k]\,e^{-j2\pi k\,d/N}\qquad(\fn{core.time_shift}).
+\]
+
+% ====================================================================
+\section{Cooking --- convolution}
+% ====================================================================
+\subsection{Impulse responses}
+Frontend kernels (\fn{generateStaticCookingKernel}, 96 taps, $\sum_k|h[k]|=1$):
+\begin{align*}
+h_{\text{grill}}[k]&=e^{-k/16}\bigl(\tau_k+0.15\sin(1.85k)e^{-k/16}\bigr),\ \ \tau_k\ \text{taps }1,.55,.38,.22,.12,.06\text{ at }k=0,4,11,21,35,54\\
+h_{\text{fry}}[k]&=e^{-k/22}\bigl(0.45\sin(12.99k+3.14)+0.35\sin(31.42k+1.2)+0.2\cos(57.17k)\bigr)\\
+h_{\text{bake}}[k]&=e^{-((k-16)/14)^2}\quad\text{(Gaussian, a smooth low-pass)}\\
+h_{\text{boil}}[k]&=e^{-k/26}\bigl(0.7\sin(\pi k/7)+0.3\sin(\pi k/14)\bigr)\quad\text{(damped resonator)}
+\end{align*}
+Server impulse responses (\file{backend/app/dsp/systems.py}): grill = comb (delay 90, feedback
+0.62, 7 taps), fry = short bright decay ($\tau=130$), bake = long dark decay ($\tau=700$,
+low-passed), boil = resonator $e^{-k/\tau}\sin(2\pi f_0k/F_s)$ at 320\,Hz, simmer = 48-tap moving
+average, sear $=[1,-1]$ (differencer), plus smoke and steam composites.
+
+\subsection{\fn{computeConvolvedSignal} (\file{lib/pipeline.ts})}
+Slider position $p\in[0,100]$, $\tau=p/100$, shift $s=\operatorname{round}(30\tau)$:
+\[
+c[n]=\sum_{k=0}^{95}x\bigl((n-k-s)\bmod N\bigr)\,h[k]\quad\text{(circular convolution)},
+\]
+\[
+y[n]=(1-w)\,x[n]+w\,c[n],\qquad w=\min(1,1.15\tau),
+\]
+plus a small crackle $0.04\tau\sin(27.13n+7.4)$ for frying, then normalised to $0.95$.
+\textbf{Accuracy} (\file{routes/cooking.tsx}): $50$ if the recipe's method is chosen (else 15)
+$+\min(50,\,p/2)$. The target cooked signal uses the recipe's method at $p=100$.
+
+\textbf{Server} (\fn{stage_cook}, \fn{apply_system}): linear convolution $y=x*h$ (SciPy,
+direct or FFT), truncated to the input length, rescaled to $0.95$ only if it clips.
+Several appliances are one system: \fn{cascade} $h=h_1*h_2*\cdots$.
+
+% ====================================================================
+\section{Precision Oven (\file{frontend/src/lib/precision-oven-dsp.ts})}
+% ====================================================================
+\subsection{The problem: a burnt overtone (\file{frontend/src/lib/delivery.ts})}
+Cooking leaves a recipe-specific tone in the dish. With $f_0$ the fundamental of the
+reference dish (the strongest DFT bin, \fn{dishFundamental}) and the recipe's profile
+$(\rho,a_d)$ (\fn{DELIVERY_PROFILES}):
+\[
+f_d=\operatorname{clip}(\rho f_0,\,10,\,28),\qquad
+x_{\text{served}}[n]=x_{\text{cooked}}[n]+a_d\,\max|x_{\text{cooked}}|\,\sin\!\Bigl(2\pi f_d\frac{n}{N-1}\Bigr)
+\quad(\fn{servedDish}).
+\]
+$\rho$ is chosen so $f_d$ is an integer inside the notch slider's range and at least 1\,Hz
+from every harmonic of $f_0$ (e.g.\ burger $f_0=4$, $f_d=18$ between harmonics 16 and 20);
+$a_d$ rises with the tier (0.8 for Burger and Sandwich, 0.9 for Cake and Noodles, 1.0 for Chicken Fry). Check Dish shows and plays
+$x_{\text{served}}$, the oven receives it, and serving without the oven keeps it.
+
+\subsection{Maximum frequency and the Nyquist rate}
+\fn{findMaxSignalFrequency}: resample the dish to 128 points, apply a Hann window
+$w[n]=\tfrac12(1-\cos\frac{2\pi n}{127})$, FFT, and take the first bin $k$ at which the
+cumulative energy $\sum_{i=1}^{k}|X_i|^2$ reaches 95\,\% of the total (DC excluded);
+with a 128-point window over one second each bin is 1 game Hz wide, so $f_{\max}=\operatorname{clip}(k,2,32)$ game Hz. Minimum safe
+rate $=2f_{\max}$.
+
+\subsection{Sampling and aliasing demonstration --- \fn{analyzeSamplingAndAliasing}}
+\begin{enumerate}
+\item Samples $x_m=x(m/f_s)$ for $m=0..\lfloor f_s\rceil-1$ over the one-second window.
+\item Periodic sinc reconstruction over three periods:
+  $\hat x(t)=\sum_{p=-1}^{1}\sum_m x_m\,\mathrm{sinc}\bigl(f_s(t-\tfrac{m}{f_s}-p)\bigr)$.
+\item Folding of the five strongest harmonics when $f>f_s/2$:
+  $f_{\text{alias}}=|f-\operatorname{round}(f/f_s)f_s|$ (reflected again if still above $f_s/2$).
+\end{enumerate}
+
+\subsection{Spectrum used for tuning --- \fn{computeDiscreteSignalFFT}}
+\[
+N_{\text{FFT}}=\max(64,\,2^{\lceil\log_2 f_s\rceil}),\quad
+x[m]=x(m/f_s)\ (m<f_s),\ \ 0\ \text{otherwise (zero padding)},\quad
+f_k=\frac{k\,f_s}{N_{\text{FFT}}}.
+\]
+No window is applied (the edited spectrum is inverted back). Displayed magnitude
+$|X_k|\cdot 2/f_s$, normalised by $1.25\max$. Radix-2 Cooley--Tukey FFT with bit reversal
+(\fn{cooleyTukeyRadix2}). Bins are classed as Base Warmth $[0,6)$, Crumb $[6,16)$, Top Crisp
+$[16,32]$ game Hz (\fn{getBandAvailability} marks a band unavailable/partial when
+$f_s/2$ is below it).
+
+\subsection{Equaliser --- \fn{tuneOvenFrequencies}}
+\[
+X'_k=X_k\cdot G_{\text{band}(f_k)}\cdot C(f_k)\cdot Q(f_k),\qquad
+C(f)=\begin{cases}1&f\le f_c\\ \max\!\bigl(0.01,e^{-((f-f_c)/4)^2}\bigr)&f>f_c\end{cases},
+\]
+\[
+Q(f)=1-\frac{0.88}{1+\bigl((f-f_n)/1.5\bigr)^2}\quad\text{for }|f-f_n|\le3\ (\text{notch on}),
+\]
+\[
+X'_{N-k}=\overline{X'_k}\qquad(\text{Hermitian symmetry, so the result stays real}).
+\]
+
+\subsection{Reconstruction --- \fn{computeSignalIFFT}}
+IFFT, keep the first $N_s=\lfloor f_s\rceil$ samples, then band-limited periodic interpolation
+with the Dirichlet kernel back to 401 points:
+\[
+\hat x(t)=\sum_{m=0}^{N_s-1}x'_m\,D_{N_s}\!\Bigl(t-\frac{m}{N_s}\Bigr),\qquad
+D_N(\tau)=\begin{cases}\dfrac{\sin(\pi N\tau)}{N\sin(\pi\tau)} & N\ \text{odd}\\[8pt]
+\dfrac{\sin(\pi N\tau)}{N\tan(\pi\tau)} & N\ \text{even}\end{cases}
+\]
+keeping the dish's own amplitude (scaled down only if its peak would exceed $0.95$). With
+untouched controls and $f_s\ge2f_{\max}$ this reproduces the input dish (verified
+$\ge98\,\%$ by \file{frontend/tests/precision-oven-fft.test.ts}); with the notch on $f_d$ it
+reproduces the dish \emph{without} the overtone (about 50--70 $\rightarrow$ 90--98 similarity
+to the target, \file{frontend/tests/delivery.test.ts}).
+
+\subsection{Oven score}
+\begin{align*}
+\text{spectrum match}&=\operatorname{clip}\Bigl(100\bigl(1-\tfrac{\sum_k|c_k-t_k|}{1.5\sum_k t_k}\bigr),0,100\Bigr)\ \ (\fn{computeSpectrumSimilarity})\\
+\text{waveform fidelity}&=\fn{computeSignalSimilarity}(\hat x,\ \text{target})\ \ (\text{Section~\ref{sec:similarity}})\\
+\text{efficiency}&=\begin{cases}100 & f_s\le1.25\cdot2f_{\max}\\
+100\bigl(1-\frac{f_s-2.5f_{\max}}{64-2.5f_{\max}}\bigr)^+ & \text{otherwise}\end{cases}\\
+\text{oven}&=0.40\,\text{spectrum}+0.50\,\text{fidelity}+0.10\,\text{efficiency}.
+\end{align*}
+The unlock step rejects $f_s<2f_{\max}$ and $f_s>64$. \emph{Plate} saves the reconstruction as
+the \texttt{delivered} stage (the dish that goes on to the cart), records the oven score, and
+stores the equaliser \emph{settings} $(f_0, G_{\text{low}}, G_{\text{mid}}, G_{\text{high}}, f_c, f_n,
+\text{notch on})$ for the server.
+
+\textbf{Server} (\fn{apply_oven}, \file{backend/app/delivery.py}): the same overtone is added to
+the server's dish at $\rho f_0^{\text{srv}}$ (its own fundamental in real Hz), then the same
+$G\cdot C\cdot Q$ mask is applied with each FFT bin mapped to game Hz as
+$g=f/f_0^{\text{srv}}\cdot f_0$, so ``the notch sits on the overtone'' means the same on both sides.
+
+% ====================================================================
+\section{System Delivery --- the z-plane (\file{frontend/src/lib/z-system.ts})}
+% ====================================================================
+\begin{longtable}{@{}P{2.6cm}P{5.6cm}P{7.3cm}@{}}
+\toprule
+Preset & $H(z)$ & Poles / zeros / gain \\
+\midrule
+\endhead
+1st-order low-pass & $\dfrac{(1-r)z}{z-r}$;\ $y[n]=(1-r)x[n]+ry[n-1]$ & pole $r$, zero $0$, $g=1-r$ (unity DC gain) \\
+2nd-order resonator & $\dfrac{z^2}{(z-re^{j\omega_0})(z-re^{-j\omega_0})}$ & conjugate poles, double zero at 0, $g=1$; $y[n]=x[n]+2r\cos\omega_0\,y[n-1]-r^2y[n-2]$ \\
+Moving average & $\tfrac16\dfrac{1-z^{-6}}{1-z^{-1}}$ & zeros $e^{j2\pi k/6}$, $k=1..5$; five poles at 0; $g=1/6$ (FIR) \\
+Notch & $\dfrac{(z-e^{j\omega_0})(z-e^{-j\omega_0})}{(z-0.85e^{j\omega_0})(z-0.85e^{-j\omega_0})}$ & zeros on the unit circle, poles at radius 0.85 \\
+\bottomrule
+\end{longtable}
+
+\begin{mathbox}{Frequency response and filtering}
+\begin{itemize}[leftmargin=*]
+\item Magnitude on the unit circle, geometrically (\file{SystemResponsePlotter.tsx}):
+  $|H(e^{j\omega})|=g\,\frac{\prod_i|e^{j\omega}-z_i|}{\prod_j|e^{j\omega}-p_j|}$ (clipped to 4),
+  phase $=\sum\arg(e^{j\omega}-z_i)-\sum\arg(e^{j\omega}-p_j)$, 128 points on $[0,\pi]$.
+\item Dish spectrum: 64-point DFT of the dish; bin $k\le32$ sits at $\omega_k=2\pi k/64$ and is
+  multiplied by $|H(e^{j\omega_k})|$ (an unstable cart shows $\times5$).
+\item Actual filtering (\fn{applySystem}): expand $\prod(z-p_j)$ and $g\prod(z-z_i)$ into real
+  coefficients $a$, $b$ (\fn{expandRoots}), then run the difference equation
+  $y[n]=\sum_k b_kx[n-k]-\sum_{k\ge1}a_ky[n-k]$. This plays as ``Listen equalized dish''.
+\end{itemize}
+\end{mathbox}
+
+\begin{mathbox}{The problem: road vibration (\fn{deliverOnCart}, \file{frontend/src/lib/delivery.ts})}
+The road adds a tone at $f_r$ (recipe profile, defined at the true rate $F_d=8000$\,Hz):
+\[
+\omega_r=\frac{2\pi f_r}{F_d},\qquad
+v[n]=x[n]+a_r\max|x|\cos(\omega_r n),\qquad
+y=H\{v\},\qquad
+\text{served}=\frac{0.95\,y}{\max|y|}.
+\]
+Score $=$ \fn{computeSignalSimilarity}(served, dish before the road). A zero on the unit
+circle at $\omega_r$ removes the tone and leaves the dish; a low-pass pole damps it but also
+dulls the dish; poles outside $|z|=1$ make $y$ grow without bound, which after
+normalisation leaves only ringing.
+
+\textbf{Aliased sensing} (\fn{sensedRoadOmega}): the sensor samples at $f_s$ and reports
+$f_a=|f_r \bmod f_s|$ folded into $[0,f_s/2]$, i.e.\ $\hat\omega=2\pi f_a/f_s$, drawn as the
+orange marker. At 8\,kHz $\hat\omega=\omega_r$; at 1.2\,kHz it is wrong (burger: $2.04\to1.05$),
+so a notch aimed at the marker misses the real vibration (score about 66 instead of 98).
+\end{mathbox}
+
+\textbf{Server} (\fn{deliver_on_cart}, \file{backend/app/delivery.py}): the same tone at the same
+$\omega_r$ (rad/sample), the cart's coefficients from the synced $(\text{preset}, r, \omega_0)$,
+and \fn{scipy.signal.lfilter} for the difference equation.
+
+% ====================================================================
+\section{Similarity metrics}\label{sec:similarity}
+% ====================================================================
+\subsection{Frontend (\fn{computeSignalSimilarity}, \file{frontend/src/lib/dsp.ts})}
+The player's samples are resampled to the target length, then
+\[
+r_{xy}=\frac{\sum(x-\bar x)(y-\bar y)}{\sqrt{\sum(x-\bar x)^2\sum(y-\bar y)^2}},\qquad
+\text{NRMSE}_{\text{sim}}=\operatorname{clip}\Bigl(1-\frac{\sqrt{\tfrac1N\sum(x-y)^2}}{\max y-\min y},0,1\Bigr),
+\]
+\[
+\text{similarity}=100\bigl(0.5\max(0,r_{xy})+0.5\,\text{NRMSE}_{\text{sim}}\bigr).
+\]
+Correlation rewards the right \emph{shape}; NRMSE rewards the right \emph{level}.
+
+\subsection{Server dish score (\fn{metrics.dish_metrics})}
+For the served dish both signals are scaled by the same factor (the reference's peak to
+$0.9$), so a level error such as over-seasoning counts; the station sub-scores compare shapes
+(each normalised to peak $0.9$). Then
+\begin{align*}
+\text{SNR}&=10\log_{10}\frac{\sum t^2}{\sum(t-p)^2}\ \text{dB}, &
+\text{corr}&=\max_\ell\frac{(t\star p)[\ell]}{\|t\|\,\|p\|}\ \ (\text{peak of the cross-correlation}),\\
+\text{spec}&=\frac{\langle T_{\text{dB}},P_{\text{dB}}\rangle}{\|T_{\text{dB}}\|\,\|P_{\text{dB}}\|}, &
+T_{\text{dB}}&=\max\Bigl(20\log_{10}\tfrac{|T|}{\max|T|},-40\Bigr)+40,
+\end{align*}
+with $P_{\text{dB}}$ measured against the \emph{target's} peak as well, so only the 40\,dB that make
+the dish are compared (an absolute $-80$\,dB floor made every dish score $0.98$--$1.00$).
+\[
+\text{dish}=100\Bigl(0.40\operatorname{clip}\tfrac{\text{spec}-0.60}{0.38}+0.35\operatorname{clip}(\text{corr})
++0.25\operatorname{clip}\tfrac{\text{SNR}+5}{30}\Bigr)\quad(\text{each clip to }[0,1]).
+\]
+Perfect dishes measure $\text{spec}=0.984$--$0.996$; broken ones $0.5$--$0.9$.
+
+% ====================================================================
+\section{Scoring, step by step}\label{sec:scoring}
+% ====================================================================
+\subsection{During the run: stage accuracies}
+Each station calls \fn{recordStageAccuracy} (\file{lib/recipes.ts}), which clamps to $[0,100]$
+and stores it on the run session: filtering, mixing, seasoning, marinating, cooking,
+delivery (oven), system (cart). Dials are stored too and pushed to the
+server by \fn{syncSessionParamsToBackend}. The payload fields are
+\fn{seasoning}, \fn{frequency}, \fn{blend}, \fn{marinate}, \fn{appliances}, \fn{bowl},
+the oven settings \fn{oven_f0}, \fn{oven_gains}, \fn{oven_cutoff}, \fn{oven_notch},
+\fn{oven_notch_on}, \fn{oven_fs}, and the cart
+settings \fn{system_preset}, \fn{system_pole_radius}, \fn{system_omega} and
+\fn{system_sampling_hz}. No score is sent: the server computes every one.
+
+\subsection{The reference dish}
+\textbf{Frontend} \fn{getIdealDishSignal}: clean mix of all recipe ingredients
+(\fn{computeCleanMixedSignal}) $\rightarrow$ seasoning with $(A^\star,\alpha^\star)$ $\rightarrow$
+marinating with $s^\star$ $\rightarrow$ convolution with the recipe method at $p=100$.
+\textbf{Server} \fn{judge}: \fn{run_pipeline}(clean ingredient signals,
+\fn{reference_params}(recipe)) --- the same function that builds the player's dish.
+
+\subsection{Server judgement --- \fn{gameplay.judge}}
+\begin{enumerate}
+\item Rebuild the player's dish: regenerate each ingredient from its seed, apply the stored
+  filters, keep only the bowl, run \fn{run_pipeline} with the stored params:
+  mix $\rightarrow$ season ($A$) $\rightarrow$ blend ($\alpha$) $\rightarrow$ marinate ($s$) $\rightarrow$
+  cook (appliances). (The server pipeline still has optional AM and decimation stages; no recipe
+  uses them, so they pass the signal through.)
+\item Finish it (\fn{finish_dish}): add the burnt overtone; if the oven was used apply its
+  equaliser (oven sub-score $=$ dish score after the oven); if the cart was used add the road
+  vibration and filter with $H(z)$ (cart sub-score $=$ dish score after the cart). Serving
+  from Check Dish skips both, so the overtone stays.
+\item $m=$ \fn{dish_metrics}(reference cooked dish, served dish) on a common scale.
+\item Prep average $\bar P$ over washable/contaminated ingredients (all ingredients if none).
+\item Sub-scores: filtering $=\bar P$; mixing $=$ dish score of the two mixes; transformation
+  $=$ dish score of the two marinated signals; cooking $=$ dish score of
+  (player's pre-cooking signal through the recipe's appliances) vs (through the player's).
+\item $\text{raw}=m_{\text{score}}\,(0.72+0.28\,\bar P/100)$: washing scales the dish score, so clean
+  prep cannot carry a ruined dish (with a perfect dish this equals $0.72\,m+0.28\,\bar P$). The
+  finishing stations count through $m$, because they change the served dish itself.
+\item Tolerance curve: $\text{score}=100\,(\text{raw}/100)^{\gamma}$,
+  $\gamma=1/\max(0.3,\text{tolerance})$ (tolerance $0.9$ for Chicken Fry up to $1.15$ for Sandwich:
+  harder recipes are graded more strictly).
+\item Stars: $\ge92\to5$, $\ge80\to4$, $\ge66\to3$, $\ge50\to2$, $\ge32\to1$, else 0.
+\item Notes (\fn{_diagnose}): named mistakes from the parameter errors (over/under-seasoned,
+  blended, marinated, flagged once a dial is more than 5\,\% off its target; wrong appliance
+  chain; over-filtered or still-dirty ingredients) and the finishing stations (how much of the
+  burnt overtone the oven kept, how the cart scaled the road vibration and the dish, an unstable
+  cart, a notch aimed at the aliased sensor reading).
+\end{enumerate}
+
+\subsection{Submission (exactly once)}
+\fn{submitRunToBackend} (\file{lib/recipes.ts}) syncs the params, then \texttt{POST
+/sessions/\{id\}/submit}; concurrent callers share one in-flight request. The server claims the
+session atomically (\texttt{UPDATE \dots\ WHERE status != 'served'}); a second submit gets 409; if
+judging fails the claim is released. A served session can no longer be edited.
+
+\subsection{What the score screen shows (\file{routes/score.tsx})}
+The player dish is the served dish: the cart's output (\texttt{served} stage), else the oven's
+output (\texttt{delivered}), else the cooked dish \emph{with} the burnt overtone. The stage
+average is the mean of filtering, mixing, seasoning, marinating and cooking.
+\begin{align*}
+\text{similarity}&=\text{computeSignalSimilarity}(\text{player dish},\ \text{reference dish})\\
+\text{local}&=0.5\,\text{similarity}+0.5\,\text{stageAvg}\\
+\text{score}_{100}&=\text{server score if available, otherwise local}\\
+\text{base}&=\operatorname{round}(10\cdot\text{score}_{100}\cdot\mu_{\text{diff}}),\qquad
+\mu\in\{0.8,1.0,1.25,1.5\}\\
+\text{time bonus}&=\operatorname{round}\bigl(\min(2\cdot\text{seconds left},300)\cdot\mu_{\text{diff}}\bigr)\\
+\text{total}&=\text{base}+\text{time bonus}.
+\end{align*}
+A stage with no recorded accuracy counts as 0 (except filtering on a recipe with nothing to
+wash, which counts 100). Stars use the server's stars or the same thresholds on
+$\text{score}_{100}$. The total, stars and similarity are stored on the session; the
+Complete page (\file{routes/complete.tsx}) only displays them.
+
+% ====================================================================
+\section{Points, ranks, tiers and leaderboards}
+% ====================================================================
+\subsection{Career points and ranks (\file{backend/app/gameplay.py})}
+\begin{itemize}
+\item \fn{award}: if the new score beats the chef's best on that recipe,
+  $\text{points}=\operatorname{round}(\text{score}\times\text{tier}\times1.5)$ is added; otherwise 0.
+  Runs on a tier the chef has not unlocked earn 0 and do not count for unlocking.
+\item \fn{rank_for}: Dishwasher (0), Prep Cook (250), Line Cook (600), Sous Chef (1100),
+  Head Chef (1800), Signal Master (2600).
+\item \fn{maybe_unlock}: when the chef has cleared $\min(2,\#\text{recipes})$ distinct recipes of
+  their current tier with score $\ge60$, the next tier opens.
+\end{itemize}
+
+\subsection{Server leaderboards (\file{backend/app/routers/leaderboard.py})}
+\begin{description}[style=nextline,leftmargin=0.6cm]
+\item[\texttt{GET /leaderboard?recipe\_id=\&difficulty=\&limit=}] This season's attempts ordered by
+  overall score (then time), de-duplicated to each chef's best, then cut to \texttt{limit}
+  (at most 500). With a difficulty, only attempts of that difficulty; runs from before
+  difficulty was recorded count as Easy.
+\item[\texttt{GET /leaderboard/global}] Chefs who have served a dish, ordered by career points,
+  then best overall score this season; with rank title and dishes served.
+\item[\texttt{GET /stats}] Players, sessions started, and for this season's runs on active recipes:
+  dishes served, average score, and per recipe plays, average, best and five-star rate.
+\item[Seasons] Every attempt records the scoring rules that judged it
+  (\fn{SCORING_VERSION}). Only runs of the current version are ranked, count as personal bests
+  and towards tier unlocks, or enter the statistics; older runs stay stored, and the points and
+  tiers they earned are kept.
+\end{description}
+
+\subsection{On-device leaderboard (\file{frontend/src/lib/leaderboard.ts})}
+The score screen calls \fn{addLeaderboardEntry} with id
+\texttt{run-<recipe>-<difficulty>-<start>}: one entry per chef, recipe and difficulty, keeping
+the higher score. \fn{getLeaderboard} filters by recipe and difficulty and sorts by score. The
+leaderboard page shows the server's rows when it has any, otherwise these; it also re-submits
+a finished run that never reached the server (backend offline) and shows a retry notice.
+
+% ====================================================================
+\section{Security and validation}
+% ====================================================================
+\begin{itemize}
+\item Passwords: scrypt ($N=2^{14},r=8,p=1$, 16-byte salt), constant-time comparison
+  (\file{backend/app/security.py}). A chef created before passwords existed gets one on first
+  sign-in.
+\item Every session endpoint checks the token owns the session (\fn{owned_session}).
+\item DSP endpoints bound every input (sample rate 1--96\,kHz, $\le200\,000$ finite samples,
+  $\le4096$-tap custom impulse, 1--64 speakers).
+\item The SPA file route only serves files inside \texttt{frontend/dist}; CORS allows only the
+  frontend's origins.
+\item The server never trusts client audio: it regenerates ingredients from the seed and
+  rebuilds the dish, including the finishing stations from their settings, so no score is
+  taken from the client.
+\end{itemize}
+
+% ====================================================================
+\section{Function index}
+% ====================================================================
+{\small
+\begin{longtable}{@{}P{5.6cm}P{3.9cm}P{6.0cm}@{}}
+\toprule
+Function & File & Mathematical role \\
+\midrule
+\endhead
+\multicolumn{3}{@{}l}{\textbf{Frontend}}\\
+\fn{evaluate*Wave}, \fn{generate*Samples} & \file{lib/signals.ts} & Ingredient signal models \\
+\fn{ingredientNoise} & \file{lib/signals.ts} & Additive multi-tone noise \\
+\fn{computeSuperpositionCurve} & \file{lib/signals.ts} & 2-D geometric superposition \\
+\fn{getRecipeIngredientSamples} & \file{lib/pipeline.ts} & Ingredient $\rightarrow$ 401 samples \\
+\fn{sampleAt}, \fn{resampleSignal}, \fn{normalizeSamples} & \file{lib/pipeline.ts} & Interpolation, resampling, peak limiting \\
+\fn{computeMixedSignal} & \file{lib/pipeline.ts} & Superposition with $1/\sqrt K$ \\
+\fn{withMixCurve} & \file{lib/pipeline.ts} & Attach bowl curve \\
+\fn{computeSeasonedSignal}, \fn{timeScaleSamples} & \file{lib/pipeline.ts} & $A\,x(\alpha t)$ \\
+\fn{computeMarinatedSignal}, \fn{delayCurve} & \file{lib/pipeline.ts} & $x(t-t_0)$ \\
+\fn{computeConvolvedSignal} & \file{lib/pipeline.ts} & Circular convolution, wet/dry \\
+\fn{carryCurve}, \fn{transformCurve}, \fn{pipelineSignalToPath} & \file{lib/pipeline.ts} & Curve follows each stage (display) \\
+\fn{getIdealDishSignal}, \fn{computeCleanMixedSignal} & \file{lib/pipeline.ts} & Reference dish \\
+\fn{generateStaticCookingKernel} & \file{lib/cooking-audio.ts} & Impulse responses $h[n]$ \\
+\fn{fft}, \fn{applyLowPassFilter}, \fn{convolve} & \file{lib/dsp.ts} & FFT, filtering, convolution \\
+\fn{normalizedCrossCorrelation}, \fn{normalizedRootMeanSquareError}, \fn{computeSignalSimilarity} & \file{lib/dsp.ts} & Similarity \\
+\fn{findMaxSignalFrequency} & \file{lib/precision-oven-dsp.ts} & 95\,\%-energy bandwidth \\
+\fn{analyzeSamplingAndAliasing} & \file{lib/precision-oven-dsp.ts} & Sampling, sinc reconstruction, folding \\
+\fn{computeDiscreteSignalFFT}, \fn{cooleyTukeyRadix2} & \file{lib/precision-oven-dsp.ts} & Zero-padded DFT / FFT \\
+\fn{tuneOvenFrequencies} & \file{lib/precision-oven-dsp.ts} & Band gains, cutoff, notch \\
+\fn{computeSignalIFFT} & \file{lib/precision-oven-dsp.ts} & IFFT + Dirichlet reconstruction \\
+\fn{computeSpectrumSimilarity} & \file{lib/precision-oven-dsp.ts} & Spectral match \\
+\fn{systemPolesZeros}, \fn{applySystem} & \file{lib/z-system.ts} & $H(z)$, difference equation \\
+\fn{servedDish}, \fn{dishFundamental}, \fn{ovenDefectHz} & \file{lib/delivery.ts} & Burnt overtone \\
+\fn{deliverOnCart}, \fn{withRoadVibration}, \fn{sensedRoadOmega} & \file{lib/delivery.ts} & Road vibration, aliased sensing, cart score \\
+\fn{SignalAudioPlayer} & \file{lib/audio.ts} & Sonification \\
+\fn{recordStageAccuracy}, \fn{syncSessionParamsToBackend}, \fn{submitRunToBackend} & \file{lib/recipes.ts} & Accuracies, sync, submission \\
+\fn{addLeaderboardEntry}, \fn{getLeaderboard} & \file{lib/leaderboard.ts} & Local leaderboard \\
+\midrule
+\multicolumn{3}{@{}l}{\textbf{Backend}}\\
+\fn{fft}, \fn{ifft}, \fn{cooley_tukey_fft} & \file{dsp/core.py} & Transforms \\
+\fn{lowpass}, \fn{highpass}, \fn{bandpass}, \fn{notch}, \fn{equalizer}, \fn{chain} & \file{dsp/core.py} & Frequency responses \\
+\fn{build_mask}, \fn{apply_mask}, \fn{filter_signal} & \file{dsp/core.py} & FFT-mask filtering \\
+\fn{time_scale}, \fn{time_shift} & \file{dsp/core.py} & $x(\alpha t)$, $x(t-t_0)$ \\
+\fn{convolve}, \fn{apply_system}, \fn{cascade}, \fn{frequency_response} & \file{dsp/core.py} & LTI systems \\
+\fn{am_modulate}, \fn{decimate} & \file{dsp/core.py} & AM, down-sampling (unused by the current recipes) \\
+\fn{corrupt} & \file{dsp/contamination.py} & Seeded noise \\
+\fn{synth} & \file{dsp/instruments.py} & Ingredient audio \\
+\fn{ir_comb}, \fn{ir_decay}, \fn{ir_resonator}, \fn{ir_moving_average}, \fn{ir_difference} & \file{dsp/systems.py} & Appliance $h[n]$ \\
+\fn{run_pipeline}, \fn{reference_params}, \fn{apply_filter_chain} & \file{dsp/pipeline.py} & The canonical dish pipeline \\
+\fn{prep_quality}, \fn{dish_metrics}, \fn{snr_db}, \fn{spectral_similarity}, \fn{stars} & \file{dsp/metrics.py} & Scores \\
+\fn{bowl_signals}, \fn{compute_stages}, \fn{finish_dish}, \fn{judge}, \fn{award}, \fn{maybe_unlock} & \file{gameplay.py} & Judging and progression \\
+\fn{add_burnt_overtone}, \fn{apply_oven}, \fn{add_road_vibration}, \fn{deliver_on_cart} & \file{delivery.py} & Finishing stations on the server's dish \\
+\bottomrule
+\end{longtable}}
+
+\end{document}

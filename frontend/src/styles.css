@@ -260,6 +260,36 @@
   }
 }
 
+@keyframes cart-wobble {
+  0%,
+  100% {
+    transform: rotate(calc(var(--wobble-deg, 0deg) * -1)) translateX(calc(var(--wobble-deg, 0deg) * -0.4));
+  }
+  50% {
+    transform: rotate(var(--wobble-deg, 0deg)) translateX(calc(var(--wobble-deg, 0deg) * 0.4));
+  }
+}
+
+@keyframes cart-crash {
+  0% {
+    transform: rotate(0deg) translateY(0) scale(1);
+    opacity: 1;
+  }
+  25% {
+    transform: rotate(-18deg) translateY(-4px) scale(1.04);
+  }
+  55% {
+    transform: rotate(24deg) translateY(2px) scale(0.97);
+  }
+  80% {
+    transform: rotate(-45deg) translateY(18px) scale(0.9);
+  }
+  100% {
+    transform: rotate(-95deg) translateY(38px) scale(0.82);
+    opacity: 0.35;
+  }
+}
+
 @utility lab-panel {
   background: var(--gradient-lab);
   color: var(--lab-foreground);

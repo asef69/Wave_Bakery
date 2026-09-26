@@ -5,6 +5,7 @@ import { ChefFourier } from "@/components/game/ChefFourier";
 import { DragTutorialCue } from "@/components/game/DragTutorialCue";
 import { GameButton } from "@/components/game/GameButton";
 import { IngredientGlyph, type IngredientKind } from "@/components/game/IngredientGlyph";
+import { RecipeTimerBadge, TimeExpiredModal } from "@/components/game/RecipeTimer";
 import { SignalAudioPlayer } from "@/lib/audio";
 import {
   computeMixedSignal,
@@ -13,10 +14,21 @@ import {
   recipes,
   recordStageAccuracy,
   savePipelineStageSignal,
+  syncSessionParamsToBackend,
+  updateRecipeRunSession,
   useActiveRecipe,
   useRecipeProgress,
   useSelectedIngredients,
 } from "@/lib/recipes";
+import {
+  getFilteredIngredient,
+  getRecipeIngredientSamples,
+  invalidateDownstreamStages,
+  type PipelineSignal,
+  resampleSignal,
+} from "@/lib/pipeline";
+import { computeSuperpositionPath, parametricPath, samplesToPath } from "@/lib/signals";
+import { getCachedChickenAudio } from "@/lib/chicken-audio";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/mixing")({
@@ -59,16 +71,27 @@ const TRACE_COLORS = [
   "var(--signal)",
 ];
 
-function buildTrayIngredients(selected: IngredientDetail[]): MixIngredient[] {
+function buildTrayIngredients(
+  selected: IngredientDetail[],
+  allRecipeDetails: IngredientDetail[] = selected,
+): MixIngredient[] {
   return selected.map((s, idx) => {
+    const detailIndex = allRecipeDetails.findIndex(
+      (d) => d.name.toLowerCase() === s.name.toLowerCase(),
+    );
+    const resolvedIdx = detailIndex >= 0 ? detailIndex : idx;
     const math = getMathematicalSignal(s.name);
     return {
       name: s.name,
       kind: (s.kind ?? "generic") as IngredientKind,
-      freq: s.freq ?? 2 + (idx % 4) * 1.5,
-      amp: math?.defaultAmplitude ?? (0.5 + (idx % 3) * 0.25),
-      seed: (idx + 1) * 0.85,
-      trace: TRACE_COLORS[idx % TRACE_COLORS.length]!,
+      freq: s.freq ?? 2 + (resolvedIdx % 4) * 1.5,
+      amp: math?.defaultAmplitude ?? 0.5 + (resolvedIdx % 3) * 0.25,
+      // Must match Signal Generation's phase (seed: 0) exactly — see the
+      // identical note in filtering.tsx's activeQueue. A per-index phase
+      // here made every ingredient's individual trace in the Mixing bowl a
+      // rotated version of the shape Generate Signal showed for it.
+      seed: 0,
+      trace: TRACE_COLORS[resolvedIdx % TRACE_COLORS.length]!,
     };
   });
 }
@@ -76,48 +99,6 @@ function buildTrayIngredients(selected: IngredientDetail[]): MixIngredient[] {
 const W = 1000;
 const H = 320;
 const MID = H / 2;
-
-function getMixIngredientValue(ing: MixIngredient, t: number): number {
-  const mathSignal = getMathematicalSignal(ing.name);
-  if (mathSignal) {
-    return mathSignal.evaluate(t, {
-      frequency: ing.freq,
-      amplitude: ing.amp,
-      phase: ing.seed,
-    });
-  }
-  return Math.sin(t * Math.PI * 2 * ing.freq + ing.seed) * ing.amp;
-}
-
-function singlePath(ing: MixIngredient, scale = 0.3) {
-  const pts: string[] = [];
-  for (let x = 0; x <= W; x += 2) {
-    const t = x / W;
-    const val = getMixIngredientValue(ing, t);
-    const y = MID - val * H * scale;
-    pts.push(`${x === 0 ? "M" : "L"}${x} ${y.toFixed(2)}`);
-  }
-  return pts.join(" ");
-}
-
-/** Visual superposition: sums ingredient signal terms (mathematical or sinusoidal). */
-function sumPath(list: MixIngredient[]) {
-  const norm = Math.max(
-    1,
-    list.reduce((s, i) => s + i.amp, 0),
-  );
-  const pts: string[] = [];
-  for (let x = 0; x <= W; x += 2) {
-    const t = x / W;
-    let v = 0;
-    for (const ing of list) {
-      v += getMixIngredientValue(ing, t);
-    }
-    const y = MID - (v / norm) * H * 0.38;
-    pts.push(`${x === 0 ? "M" : "L"}${x} ${y.toFixed(2)}`);
-  }
-  return pts.join(" ");
-}
 
 /** Oscilloscope frame: grid, axes and tick labels. */
 function Scope({ children }: { children: React.ReactNode }) {
@@ -188,21 +169,102 @@ function MixingLab() {
   const [recipe] = useActiveRecipe();
   const [unlockedStep, unlock] = useRecipeProgress();
   const [selectedIngredients] = useSelectedIngredients();
+  const effectiveIngredients = useMemo(
+    () => (selectedIngredients.length > 0 ? selectedIngredients : recipe.ingredientDetails),
+    [selectedIngredients, recipe.ingredientDetails],
+  );
   const trayIngredients = useMemo(
-    () => buildTrayIngredients(selectedIngredients),
-    [selectedIngredients],
+    () => buildTrayIngredients(effectiveIngredients, recipe.ingredientDetails),
+    [effectiveIngredients, recipe.ingredientDetails],
   );
 
-  const [bowl, setBowl] = useState<string[]>([]);
+  const ingredientSamplesMap = useMemo(() => {
+    const map: Record<string, number[]> = {};
+    for (const ing of trayIngredients) {
+      const filtered = getFilteredIngredient(recipe.id, ing.name);
+      if (filtered && filtered.length > 0) {
+        map[ing.name] = filtered;
+      } else {
+        // Must match computeMixedSignal's own fallback noise (used for the
+        // solid "combined" trace) exactly: a washable ingredient that
+        // hasn't been through Filtering yet is still noisy everywhere, not
+        // just in the combined trace. Omitting noise here left this
+        // per-ingredient (dashed) trace clean while the combined trace it's
+        // supposed to equal (for a single-ingredient bowl) was jagged/noisy
+        // — two visibly different curves for what the legend calls the same
+        // signal, reading as "two signals" overlaid instead of one.
+        const detail = recipe.ingredientDetails.find(
+          (d) => d.name.toLowerCase() === ing.name.toLowerCase(),
+        );
+        map[ing.name] = getRecipeIngredientSamples(recipe.id, ing.name, {
+          freq: ing.freq,
+          seed: ing.seed,
+          noise: detail?.washable ? 0.85 : 0.0,
+          sampleCount: 401,
+        });
+      }
+    }
+    return map;
+  }, [recipe.id, recipe.ingredientDetails, trayIngredients]);
+
+  const storedMixed = useMemo(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const key = `wavebakery_pipeline_${recipe.id}_mixed`;
+        const stored = window.localStorage.getItem(key);
+        if (stored) {
+          const parsed = JSON.parse(stored) as PipelineSignal;
+          if (Array.isArray(parsed?.samples) && parsed.samples.length > 0) {
+            return parsed;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return null;
+  }, [recipe.id]);
+
+  const [bowl, setBowl] = useState<string[]>(() => {
+    const ings = storedMixed?.metadata?.["ingredients"];
+    if (ings && Array.isArray(ings)) {
+      return ings as string[];
+    }
+    return [];
+  });
   const [dragging, setDragging] = useState<string | null>(null);
   const [hovering, setHovering] = useState(false);
-  const [mixed, setMixed] = useState(false);
+  const [mixed, setMixed] = useState(() => storedMixed != null);
   const [playing, setPlaying] = useState(false);
-  const [showDragCue, setShowDragCue] = useState(true);
+  const [showDragCue, setShowDragCue] = useState(() => storedMixed == null);
 
   const total = trayIngredients.length;
   const inBowl = trayIngredients.filter((i) => bowl.includes(i.name));
   const allIn = inBowl.length === total;
+
+  const mixedSignal = useMemo(() => {
+    if (inBowl.length === 0) return null;
+    return computeMixedSignal(
+      recipe.id,
+      inBowl.map((i) => i.name),
+    );
+  }, [recipe.id, inBowl]);
+
+  // Once handleMix confirms the backend's real superposition, this holds
+  // those exact samples so the post-mix graph displays the same signal that
+  // was persisted for Seasoning — not the frontend-only preview.
+  const [committedMixedSamples, setCommittedMixedSamples] = useState<number[] | null>(
+    () => storedMixed?.samples ?? null,
+  );
+
+  // The combined trace renders the faithful superposition of ingredients
+  // in the bowl: exact canonical shape for single ingredients (overlapping perfectly),
+  // true 2D parametric superposition for special ingredients, and sample-wise
+  // addition for 1D ingredients.
+  const superpositionPath = useMemo(() => {
+    if (inBowl.length === 0) return "";
+    return computeSuperpositionPath(inBowl, ingredientSamplesMap, W, H);
+  }, [inBowl, ingredientSamplesMap]);
 
   const [player, setPlayer] = useState<SignalAudioPlayer | null>(null);
 
@@ -210,6 +272,21 @@ function MixingLab() {
     return () => {
       if (player) player.destroy();
     };
+  }, [player]);
+
+  useEffect(() => {
+    const handleReset = () => {
+      setBowl([]);
+      setMixed(false);
+      setCommittedMixedSamples(null);
+      setShowDragCue(true);
+      if (player) {
+        player.destroy();
+        setPlayer(null);
+      }
+    };
+    window.addEventListener("wavebakery_stage_reset", handleReset);
+    return () => window.removeEventListener("wavebakery_stage_reset", handleReset);
   }, [player]);
 
   const add = (name: string) => {
@@ -229,18 +306,22 @@ function MixingLab() {
   const reset = () => {
     setBowl([]);
     setMixed(false);
+    setCommittedMixedSamples(null);
     setPlaying(false);
     if (player) player.destroy();
   };
 
   const handlePlayAudio = () => {
-    if (inBowl.length === 0) return;
+    if (!mixedSignal || inBowl.length === 0) return;
     if (player) player.destroy();
-    const sig = computeMixedSignal(recipe.id, inBowl.map((i) => i.name));
+
+    const isOnlyChicken = inBowl.length === 1 && inBowl[0]?.name.toLowerCase() === "chicken";
+    const cachedChicken = getCachedChickenAudio();
     const newPlayer = new SignalAudioPlayer({
-      samples: sig.samples,
-      frequency: sig.frequency,
-      duration: 2.5,
+      samples: mixed && committedMixedSamples ? committedMixedSamples : mixedSignal.samples,
+      frequency: mixedSignal.frequency,
+      duration: isOnlyChicken && cachedChicken ? cachedChicken.duration : 2.5,
+      audioBuffer: isOnlyChicken ? (cachedChicken?.buffer ?? null) : null,
     });
     newPlayer.play();
     setPlayer(newPlayer);
@@ -248,8 +329,7 @@ function MixingLab() {
   };
 
   const handleMix = () => {
-    const mixedSig = computeMixedSignal(recipe.id, inBowl.map((i) => i.name));
-    savePipelineStageSignal(recipe.id, "mixed", mixedSig);
+    if (!mixedSignal) return;
 
     const recipeSet = new Set(recipe.ingredients.map((i) => i.toLowerCase()));
     const bowlSet = new Set(inBowl.map((i) => i.name.toLowerCase()));
@@ -259,6 +339,19 @@ function MixingLab() {
     }
     const mixAcc = Math.round((matchCount / Math.max(1, recipeSet.size)) * 100);
     recordStageAccuracy("mixing", mixAcc);
+
+    // Invalidate downstream stages since mixing output has changed
+    invalidateDownstreamStages(recipe.id, "mixed");
+
+    // computeMixedSignal carries the 2D mixing curve for parametric bowls,
+    // so Seasoning gets this shape.
+    savePipelineStageSignal(recipe.id, "mixed", mixedSignal);
+    setCommittedMixedSamples(mixedSignal.samples);
+
+    // The server mixes exactly this bowl (it used to always mix the whole
+    // recipe, so missing or extra ingredients never affected its score).
+    updateRecipeRunSession({ bowl: inBowl.map((i) => i.name) });
+    syncSessionParamsToBackend(recipe.id).catch(() => {});
 
     setMixed(true);
     setPlaying(false);
@@ -321,6 +414,7 @@ function MixingLab() {
         aria-hidden
       />
 
+      <TimeExpiredModal />
       <div className="relative z-10 mx-auto max-w-[110rem] px-8 py-6">
         {/* TOP HUD */}
         <header className="lab-panel flex flex-wrap items-center justify-between gap-6 px-6 py-4">
@@ -343,7 +437,8 @@ function MixingLab() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-8">
+          <div className="flex flex-wrap items-center gap-6">
+            <RecipeTimerBadge />
             <dl className="font-mono text-[10px] tracking-[0.18em] text-signal/60 uppercase">
               <div className="flex gap-3">
                 <dt>Recipe</dt>
@@ -428,21 +523,53 @@ function MixingLab() {
                         <p className="font-mono text-[9px] tracking-[0.18em] text-signal uppercase">
                           {used ? "✓ in bowl" : "✓ clean"}
                         </p>
-                        <svg
-                          viewBox={`0 0 ${W} ${H}`}
-                          preserveAspectRatio="none"
-                          className="mt-1 h-6 w-full"
-                          aria-hidden
-                        >
-                          <path
-                            d={singlePath(ing)}
-                            fill="none"
-                            stroke={ing.trace}
-                            strokeWidth="12"
-                            strokeDasharray="24 16"
-                            strokeLinecap="round"
-                          />
-                        </svg>
+                        {getMathematicalSignal(ing.name)?.parametricCurve ? (
+                          (() => {
+                            const math = getMathematicalSignal(ing.name)!;
+                            const isClosed = !["patty", "lettuce", "noodle"].some((k) =>
+                              ing.name.toLowerCase().includes(k),
+                            );
+                            return (
+                              <svg
+                                viewBox={isClosed ? "0 0 100 100" : `0 0 ${W} ${H}`}
+                                preserveAspectRatio={isClosed ? "xMidYMid meet" : "none"}
+                                className="mt-1 h-7 w-full"
+                                aria-hidden
+                              >
+                                <path
+                                  d={parametricPath(
+                                    isClosed ? 100 : W,
+                                    isClosed ? 100 : H,
+                                    math.parametricCurve!.generatePoints(isClosed ? 201 : 401),
+                                    isClosed ? 8 : 16,
+                                    isClosed,
+                                  )}
+                                  fill="none"
+                                  stroke={ing.trace}
+                                  strokeWidth={isClosed ? 6 : 10}
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                            );
+                          })()
+                        ) : (
+                          <svg
+                            viewBox={`0 0 ${W} ${H}`}
+                            preserveAspectRatio="none"
+                            className="mt-1 h-6 w-full"
+                            aria-hidden
+                          >
+                            <path
+                              d={samplesToPath(ingredientSamplesMap[ing.name] ?? [], W, H, 0.35)}
+                              fill="none"
+                              stroke={ing.trace}
+                              strokeWidth="12"
+                              strokeDasharray="24 16"
+                              strokeLinecap="round"
+                            />
+                          </svg>
+                        )}
                       </div>
                       {!mixed ? (
                         <button
@@ -592,7 +719,7 @@ function MixingLab() {
                       : "combined signal (solid)"
                     : inBowl.length === 0
                       ? "awaiting ingredients"
-                      : `${inBowl.length} ingredient traces (dashed) + combined signal (solid)`}
+                      : `${inBowl.length} ingredient traces (dashed) + combined signal (dotted)`}
                 </span>
               </div>
 
@@ -605,27 +732,73 @@ function MixingLab() {
                       mixed ? "opacity-0" : "opacity-100",
                     )}
                   >
-                    {inBowl.map((ing, idx) => (
-                      <path
-                        key={ing.name}
-                        d={singlePath(ing)}
-                        fill="none"
-                        stroke={ing.trace}
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeDasharray={idx % 2 === 0 ? "8 6" : "2 5"}
-                        opacity="0.95"
-                      />
-                    ))}
+                    {inBowl.map((ing, idx) => {
+                      const math = getMathematicalSignal(ing.name);
+                      if (math?.parametricCurve) {
+                        const isClosed = !["patty", "lettuce", "noodle"].some((k) =>
+                          ing.name.toLowerCase().includes(k),
+                        );
+                        if (!isClosed) {
+                          // Open parametric ribbon/ruffle curve (Noodles, Lettuce, Beef Patty) spanning the oscilloscope
+                          const pts = math.parametricCurve.generatePoints(601);
+                          return (
+                            <path
+                              key={ing.name}
+                              d={parametricPath(W, H, pts, 24, false)}
+                              fill="none"
+                              stroke={ing.trace}
+                              strokeWidth="3.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeDasharray={idx % 2 === 0 ? "10 6" : "4 6"}
+                              opacity="0.95"
+                            />
+                          );
+                        }
+
+                        // Closed parametric contours (Egg, Tomato, Onion, Sauce)
+                        const pts = math.parametricCurve.generatePoints(601);
+                        return (
+                          <path
+                            key={ing.name}
+                            d={parametricPath(W, H, pts, 24, true)}
+                            fill="none"
+                            stroke={ing.trace}
+                            strokeWidth="3.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeDasharray={idx % 2 === 0 ? "10 6" : "4 6"}
+                            opacity="0.95"
+                          />
+                        );
+                      }
+
+                      // 1D wave ingredients
+                      return (
+                        <path
+                          key={ing.name}
+                          d={samplesToPath(ingredientSamplesMap[ing.name] ?? [], W, H, 0.35)}
+                          fill="none"
+                          stroke={ing.trace}
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeDasharray={idx % 2 === 0 ? "8 6" : "2 5"}
+                          opacity="0.95"
+                        />
+                      );
+                    })}
                   </g>
-                  {/* superposition — solid, dominant before and after MIX */}
-                  {inBowl.length > 0 ? (
+
+                  {/* combined/mixed signal — dotted before MIX, solid after MIX */}
+                  {superpositionPath && inBowl.length > 0 ? (
                     <path
-                      d={sumPath(inBowl)}
+                      d={superpositionPath}
                       fill="none"
                       stroke="var(--trace-mixed)"
                       strokeWidth={mixed ? 5 : 4.5}
+                      strokeDasharray={mixed ? undefined : "6 4"}
                       strokeLinecap="round"
+                      strokeLinejoin="round"
                       className="transition-all duration-700"
                       opacity={1}
                       style={{ filter: "drop-shadow(0 0 8px var(--trace-mixed))" }}

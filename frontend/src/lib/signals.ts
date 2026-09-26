@@ -13,6 +13,29 @@
 
 import { CHICKEN_STATIC_PCM_SAMPLES } from "./chicken-samples";
 
+/**
+ * Contamination noise added to washable ingredients' 1D audio/DSP samples.
+ *
+ * Deliberately a sum of several closely-spaced, non-integer "cycles across
+ * the sample buffer" tones (not a single `sin(t * 12.9898 * 400 + ...)`
+ * term): that older formula multiplies normalized time by ~5196 rad, which
+ * is a digital frequency far above Nyquist — it doesn't look like broadband
+ * noise once FFT'd, it aliases down into one dominant tone that swamps the
+ * ingredient's own harmonic content in the Filtering Lab's spectrum display,
+ * making the "signal vs noise" bars look wrong (one huge spike, everything
+ * else flat) instead of noise genuinely spread above the ideal cutoff.
+ */
+function ingredientNoise(normT: number, phase: number, noiseAmount?: number): number {
+  if (!noiseAmount) return 0;
+  const seedOffset = (phase || 1) * 37.1;
+  const tones = [15.3, 18.7, 22.1, 26.9, 31.4];
+  let n = 0;
+  for (let i = 0; i < tones.length; i++) {
+    n += Math.sin(2 * Math.PI * tones[i]! * normT + seedOffset * (i + 1));
+  }
+  return (n / tones.length) * noiseAmount * 0.85;
+}
+
 export interface MathematicalSignalParams {
   frequency: number;
   amplitude?: number;
@@ -74,10 +97,7 @@ export interface IngredientSignalDefinition {
  * Standard periodic triangular-wave mathematical function:
  * x(t) = A * (2/π) * asin(sin(2πft + φ))
  */
-export function evaluateTriangleWave(
-  t: number,
-  params: MathematicalSignalParams,
-): number {
+export function evaluateTriangleWave(t: number, params: MathematicalSignalParams): number {
   const amp = params.amplitude ?? 1.0;
   const f = params.frequency;
   const phi = params.phase ?? 0;
@@ -85,7 +105,7 @@ export function evaluateTriangleWave(
   const clamped = Math.max(-1, Math.min(1, s));
   const val = amp * (2 / Math.PI) * Math.asin(clamped);
   if (params.noise) {
-    const n = Math.sin(t * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(t, phi, params.noise);
     return val - n;
   }
   return val;
@@ -95,10 +115,7 @@ export function evaluateTriangleWave(
  * Standard periodic square-wave mathematical function:
  * x(t) = A * sgn(sin(2πft + φ))
  */
-export function evaluateSquareWave(
-  t: number,
-  params: MathematicalSignalParams,
-): number {
+export function evaluateSquareWave(t: number, params: MathematicalSignalParams): number {
   const amp = params.amplitude ?? 1.0;
   const f = params.frequency;
   const phi = params.phase ?? 0;
@@ -106,7 +123,7 @@ export function evaluateSquareWave(
   const sign = s >= 0 ? 1 : -1;
   const val = amp * sign;
   if (params.noise) {
-    const n = Math.sin(t * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(t, phi, params.noise);
     return val - n;
   }
   return val;
@@ -161,8 +178,10 @@ export const CHEESE_SIGNAL_DEFINITION: IngredientSignalDefinition = {
   equationDisplay: "x(t) = A · (2/π) · asin(sin(2πft + φ))",
   equationLatex: "x(t) = A \\cdot \\frac{2}{\\pi} \\arcsin(\\sin(2\\pi f t + \\phi))",
   description: "Periodic triangular wave with odd harmonic series (1/n² rolloff)",
-  evaluate: (t, params) => evaluateTriangleWave(t, { amplitude: params.amplitude ?? 1.0, ...params }),
-  generateSamples: (params) => generateTriangleSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
+  evaluate: (t, params) =>
+    evaluateTriangleWave(t, { amplitude: params.amplitude ?? 1.0, ...params }),
+  generateSamples: (params) =>
+    generateTriangleSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
 };
 
 /**
@@ -177,7 +196,8 @@ export const SUGAR_SIGNAL_DEFINITION: IngredientSignalDefinition = {
   equationLatex: "x(t) = A \\cdot \\operatorname{sgn}(\\sin(2\\pi f t + \\phi))",
   description: "Periodic square wave with odd harmonic series (1/n rolloff)",
   evaluate: (t, params) => evaluateSquareWave(t, { amplitude: params.amplitude ?? 1.0, ...params }),
-  generateSamples: (params) => generateSquareSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
+  generateSamples: (params) =>
+    generateSquareSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
 };
 
 /**
@@ -192,9 +212,9 @@ export const SALT_SIGNAL_DEFINITION: IngredientSignalDefinition = {
   equationLatex: "x(t) = A_s \\cdot \\operatorname{sgn}(\\sin(2\\pi f t + \\phi))",
   description: "Small-amplitude periodic square wave with odd harmonic series (As = 0.4)",
   evaluate: (t, params) => evaluateSquareWave(t, { amplitude: params.amplitude ?? 0.4, ...params }),
-  generateSamples: (params) => generateSquareSamples({ amplitude: params.amplitude ?? 0.4, ...params }),
+  generateSamples: (params) =>
+    generateSquareSamples({ amplitude: params.amplitude ?? 0.4, ...params }),
 };
-
 
 /**
  * Bread mathematical signal: Superposition of two sine waves.
@@ -216,7 +236,7 @@ export function evaluateBreadWave(
 ): number {
   const amp = params.amplitude ?? 1.0;
   const f1 = params.f1 ?? (params.frequency || 3);
-  const f2 = params.f2 ?? (f1 * 3);
+  const f2 = params.f2 ?? f1 * 3;
   const a1 = (params.a1 ?? 0.8) * amp;
   const a2 = (params.a2 ?? 0.6) * amp;
 
@@ -226,7 +246,7 @@ export function evaluateBreadWave(
 
   if (params.noise) {
     const phi = params.phase ?? 0;
-    const n = Math.sin(t * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(t, phi, params.noise);
     return val - n;
   }
   return val;
@@ -288,10 +308,7 @@ export function generatePattyParametricPoints(sampleCount = 4001): ParametricPoi
  * Evaluates the vertical coordinate y(t) = 0.7 sin(t) from the exact mathematical signal
  * normalized to standard audio sample range [-1, 1] across parameter span [2π, 8π].
  */
-export function evaluatePattyWave(
-  normT: number,
-  params: MathematicalSignalParams,
-): number {
+export function evaluatePattyWave(normT: number, params: MathematicalSignalParams): number {
   const amp = params.amplitude ?? 1.0;
   const phi = params.phase ?? 0;
   const range = PATTY_T_MAX - PATTY_T_MIN;
@@ -299,7 +316,7 @@ export function evaluatePattyWave(
   const val = amp * (evaluatePattyParametric(t).y / 0.7);
 
   if (params.noise) {
-    const n = Math.sin(normT * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(normT, phi, params.noise);
     return val - n;
   }
   return val;
@@ -333,7 +350,8 @@ export const BREAD_SIGNAL_DEFINITION: IngredientSignalDefinition = {
   equationLatex: "y(t) = 0.8 \\sin(6\\pi t) + 0.6 \\sin(18\\pi t)",
   description: "Superposition: low-frequency 0.8 sin(6πt) + 3x harmonic 0.6 sin(18πt) (3:1 ratio)",
   evaluate: (t, params) => evaluateBreadWave(t, { amplitude: params.amplitude ?? 1.0, ...params }),
-  generateSamples: (params) => generateBreadSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
+  generateSamples: (params) =>
+    generateBreadSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
 };
 
 /**
@@ -345,10 +363,13 @@ export const PATTY_SIGNAL_DEFINITION: IngredientSignalDefinition = {
   waveformType: "parametric",
   defaultAmplitude: 1.0,
   equationDisplay: "x(t) = 2.5 cos(t) + 5 floor(t/(2π)),  y(t) = 0.7 sin(t)  [2π ≤ t ≤ 8π]",
-  equationLatex: "x(t) = 2.5 \\cos(t) + 5 \\operatorname{floor}\\left(\\frac{t}{2\\pi}\\right),\\quad y(t) = 0.7 \\sin(t),\\quad 2\\pi \\le t \\le 8\\pi",
-  description: "Parametric repeated horizontal ovals: x(t) = 2.5 cos(t) + 5 floor(t/(2π)), y(t) = 0.7 sin(t)",
+  equationLatex:
+    "x(t) = 2.5 \\cos(t) + 5 \\operatorname{floor}\\left(\\frac{t}{2\\pi}\\right),\\quad y(t) = 0.7 \\sin(t),\\quad 2\\pi \\le t \\le 8\\pi",
+  description:
+    "Parametric repeated horizontal ovals: x(t) = 2.5 cos(t) + 5 floor(t/(2π)), y(t) = 0.7 sin(t)",
   evaluate: (t, params) => evaluatePattyWave(t, { amplitude: params.amplitude ?? 1.0, ...params }),
-  generateSamples: (params) => generatePattySamples({ amplitude: params.amplitude ?? 1.0, ...params }),
+  generateSamples: (params) =>
+    generatePattySamples({ amplitude: params.amplitude ?? 1.0, ...params }),
   parametricCurve: {
     tMin: PATTY_T_MIN,
     tMax: PATTY_T_MAX,
@@ -399,10 +420,7 @@ export function generateLettuceParametricPoints(sampleCount = 2001): ParametricP
  * Evaluates the vertical coordinate y(t) = 2.2 cos(t) + 0.45 cos(7.5t)
  * normalized to standard audio sample range [-1, 1] across parameter span [-8π, 8π].
  */
-export function evaluateLettuceWave(
-  normT: number,
-  params: MathematicalSignalParams,
-): number {
+export function evaluateLettuceWave(normT: number, params: MathematicalSignalParams): number {
   const amp = params.amplitude ?? 1.0;
   const phi = params.phase ?? 0;
   const range = LETTUCE_T_MAX - LETTUCE_T_MIN;
@@ -411,7 +429,7 @@ export function evaluateLettuceWave(
   const val = amp * ((2.2 * Math.cos(t) + 0.45 * Math.cos(7.5 * t)) / 2.65);
 
   if (params.noise) {
-    const n = Math.sin(normT * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(normT, phi, params.noise);
     return val - n;
   }
   return val;
@@ -439,10 +457,13 @@ export const LETTUCE_SIGNAL_DEFINITION: IngredientSignalDefinition = {
   waveformType: "parametric",
   defaultAmplitude: 1.0,
   equationDisplay: "x(t) = t,  y(t) = 2.2 cos(t) + 0.45 cos(7.5t)  [-8π ≤ t ≤ 8π]",
-  equationLatex: "x(t) = t,\\quad y(t) = 2.2 \\cos(t) + 0.45 \\cos(7.5t),\\quad -8\\pi \\le t \\le 8\\pi",
+  equationLatex:
+    "x(t) = t,\\quad y(t) = 2.2 \\cos(t) + 0.45 \\cos(7.5t),\\quad -8\\pi \\le t \\le 8\\pi",
   description: "Parametric leaf curve: x(t) = t, y(t) = 2.2 cos(t) + 0.45 cos(7.5t) (-8π ≤ t ≤ 8π)",
-  evaluate: (t, params) => evaluateLettuceWave(t, { amplitude: params.amplitude ?? 1.0, ...params }),
-  generateSamples: (params) => generateLettuceSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
+  evaluate: (t, params) =>
+    evaluateLettuceWave(t, { amplitude: params.amplitude ?? 1.0, ...params }),
+  generateSamples: (params) =>
+    generateLettuceSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
   parametricCurve: {
     tMin: LETTUCE_T_MIN,
     tMax: LETTUCE_T_MAX,
@@ -468,10 +489,7 @@ export function evaluateMilkDirect(x: number): number {
   return 1.4 * Math.sin(0.7 * x) + 0.6 * Math.sin(1.3 * x) + 0.3 * Math.sin(2.1 * x + 0.8);
 }
 
-export function evaluateMilkWave(
-  t: number,
-  params: MathematicalSignalParams,
-): number {
+export function evaluateMilkWave(t: number, params: MathematicalSignalParams): number {
   const amp = params.amplitude ?? 1.0;
   const f = params.frequency || 5;
   const phi = params.phase ?? 0;
@@ -483,7 +501,7 @@ export function evaluateMilkWave(
   const val = amp * (rawY / 2.3);
 
   if (params.noise) {
-    const n = Math.sin(t * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(t, phi, params.noise);
     return val - n;
   }
   return val;
@@ -512,9 +530,11 @@ export const MILK_SIGNAL_DEFINITION: IngredientSignalDefinition = {
   defaultAmplitude: 1.0,
   equationDisplay: "y(x) = 1.4 sin(0.7x) + 0.6 sin(1.3x) + 0.3 sin(2.1x + 0.8)",
   equationLatex: "y(x) = 1.4 \\sin(0.7x) + 0.6 \\sin(1.3x) + 0.3 \\sin(2.1x + 0.8)",
-  description: "Scattered liquid ripples: y(x) = 1.4 sin(0.7x) + 0.6 sin(1.3x) + 0.3 sin(2.1x + 0.8)",
+  description:
+    "Scattered liquid ripples: y(x) = 1.4 sin(0.7x) + 0.6 sin(1.3x) + 0.3 sin(2.1x + 0.8)",
   evaluate: (t, params) => evaluateMilkWave(t, { amplitude: params.amplitude ?? 1.0, ...params }),
-  generateSamples: (params) => generateMilkSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
+  generateSamples: (params) =>
+    generateMilkSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
 };
 
 /**
@@ -527,10 +547,7 @@ export const MILK_SIGNAL_DEFINITION: IngredientSignalDefinition = {
  * Produces pointed, organic flame-like peaks and troughs alternating over time,
  * where square waves are generated using the existing evaluateSquareWave function.
  */
-export function evaluateFlourWave(
-  t: number,
-  params: MathematicalSignalParams,
-): number {
+export function evaluateFlourWave(t: number, params: MathematicalSignalParams): number {
   const amp = params.amplitude ?? 1.0;
   const f = params.frequency;
   const phi = params.phase ?? 0;
@@ -543,7 +560,7 @@ export function evaluateFlourWave(
   const val = amp * (sq1 - sq2 * cosTerm);
 
   if (params.noise) {
-    const n = Math.sin(t * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(t, phi, params.noise);
     return val - n;
   }
   return val;
@@ -571,10 +588,12 @@ export const FLOUR_SIGNAL_DEFINITION: IngredientSignalDefinition = {
   waveformType: "flame",
   defaultAmplitude: 1.0,
   equationDisplay: "y(t) = squarewave(t) - squarewave(2t) · cos(2πt)",
-  equationLatex: "y(t) = \\operatorname{squarewave}(t) - \\operatorname{squarewave}(2t) \\cos(2\\pi t)",
+  equationLatex:
+    "y(t) = \\operatorname{squarewave}(t) - \\operatorname{squarewave}(2t) \\cos(2\\pi t)",
   description: "Flame waveform: sgn(sin(2πft)) - sgn(sin(4πft))·cos(2πft)",
   evaluate: (t, params) => evaluateFlourWave(t, { amplitude: params.amplitude ?? 1.0, ...params }),
-  generateSamples: (params) => generateFlourSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
+  generateSamples: (params) =>
+    generateFlourSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
 };
 
 /**
@@ -614,10 +633,7 @@ export function generateNoodleParametricPoints(sampleCount = 601): ParametricPoi
  * Evaluates the vertical coordinate y(t) of the Noodle parametric curve
  * normalized to standard audio sample range [-1, 1] across parameter span [-12π, 12π].
  */
-export function evaluateNoodleWave(
-  normT: number,
-  params: MathematicalSignalParams,
-): number {
+export function evaluateNoodleWave(normT: number, params: MathematicalSignalParams): number {
   const amp = params.amplitude ?? 1.0;
   // Map normalized time t ∈ [0, 1] to parameter θ ∈ [-12π, 12π]
   // 12 full cycles: θ(normT) = -12π + normT * 24π
@@ -626,7 +642,7 @@ export function evaluateNoodleWave(
   const val = amp * Math.cos(theta); // 5 cos(θ) normalized to [-1, 1]
 
   if (params.noise) {
-    const n = Math.sin(normT * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(normT, phi, params.noise);
     return val - n;
   }
   return val;
@@ -657,7 +673,8 @@ export const NOODLE_SIGNAL_DEFINITION: IngredientSignalDefinition = {
   equationLatex: "x(t) = t + 3 \\sin(t),\\quad y(t) = 5 \\cos(t),\\quad -12\\pi \\le t \\le 12\\pi",
   description: "Parametric curve: x(t) = t + 3 sin(t), y(t) = 5 cos(t) (-12π ≤ t ≤ 12π)",
   evaluate: (t, params) => evaluateNoodleWave(t, { amplitude: params.amplitude ?? 1.0, ...params }),
-  generateSamples: (params) => generateNoodleSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
+  generateSamples: (params) =>
+    generateNoodleSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
   parametricCurve: {
     tMin: NOODLE_T_MIN,
     tMax: NOODLE_T_MAX,
@@ -684,10 +701,7 @@ export function evaluateBunDirect(x: number): number {
   return 5 * Math.pow(base, 0.25) + 0.03 * Math.cos(9 * x);
 }
 
-export function evaluateBunWave(
-  t: number,
-  params: MathematicalSignalParams,
-): number {
+export function evaluateBunWave(t: number, params: MathematicalSignalParams): number {
   const amp = params.amplitude ?? 1.0;
   const f = params.frequency || 3;
   const phi = params.phase ?? 0;
@@ -695,13 +709,13 @@ export function evaluateBunWave(
   // Each period of the dome corresponds to T = 20π / 3.
   // With frequency f, domain spans (20π / 3) * f * t.
   // Offset by -10π / 3 so that each dome starts cleanly from its base, arches up, and descends.
-  const x = -(10 * Math.PI) / 3 + (20 * Math.PI / 3) * f * t + phi;
+  const x = -(10 * Math.PI) / 3 + ((20 * Math.PI) / 3) * f * t + phi;
   const rawY = evaluateBunDirect(x);
   // Center in [-1, 1] around mid-level (2.5) for audio buffer headroom and visual display
   const val = amp * ((rawY - 2.5) / 2.5);
 
   if (params.noise) {
-    const n = Math.sin(t * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(t, phi, params.noise);
     return val - n;
   }
   return val;
@@ -732,7 +746,8 @@ export const BUN_SIGNAL_DEFINITION: IngredientSignalDefinition = {
   equationLatex: "y(x) = 5(0.5 + 0.5 \\cos(0.3x))^{0.25} + 0.03 \\cos(9x)",
   description: "Bun dome profile: y(x) = 5(0.5 + 0.5 cos(0.3x))^0.25 + 0.03 cos(9x)",
   evaluate: (t, params) => evaluateBunWave(t, { amplitude: params.amplitude ?? 1.0, ...params }),
-  generateSamples: (params) => generateBunSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
+  generateSamples: (params) =>
+    generateBunSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
 };
 
 /**
@@ -753,15 +768,12 @@ export const BUTTER_X_MIN = -21;
 export const BUTTER_X_MAX = 21;
 
 export function evaluateButterDirect(x: number): number {
-  const modVal = ((x + 9) % 14 + 14) % 14;
+  const modVal = (((x + 9) % 14) + 14) % 14;
   const innerMax = Math.max(Math.abs(modVal - 9) - 4, 0);
   return Math.max(0, 1.2 - 1.2 * innerMax);
 }
 
-export function evaluateButterWave(
-  normT: number,
-  params: MathematicalSignalParams,
-): number {
+export function evaluateButterWave(normT: number, params: MathematicalSignalParams): number {
   const amp = params.amplitude ?? 1.0;
   const phi = params.phase ?? 0;
   const range = BUTTER_X_MAX - BUTTER_X_MIN;
@@ -772,7 +784,7 @@ export function evaluateButterWave(
   const val = amp * (rawY - 0.6);
 
   if (params.noise) {
-    const n = Math.sin(normT * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(normT, phi, params.noise);
     return val - n;
   }
   return val;
@@ -812,10 +824,13 @@ export const BUTTER_SIGNAL_DEFINITION: IngredientSignalDefinition = {
   defaultAmplitude: 1.0,
   domainDisplay: "-21 < x < 21",
   equationDisplay: "y = max(0, 1.2 - 1.2 max(|mod(x+9, 14) - 9| - 4, 0))  [-21 < x < 21]",
-  equationLatex: "y = \\max\\left(0,\\; 1.2 - 1.2\\max\\left(\\left|\\operatorname{mod}(x+9, 14) - 9\\right| - 4,\\; 0\\right)\\right),\\quad -21 < x < 21",
-  description: "Butter trapezoid blocks: y = max(0, 1.2 - 1.2 max(|mod(x+9, 14) - 9| - 4, 0)) (-21 < x < 21)",
+  equationLatex:
+    "y = \\max\\left(0,\\; 1.2 - 1.2\\max\\left(\\left|\\operatorname{mod}(x+9, 14) - 9\\right| - 4,\\; 0\\right)\\right),\\quad -21 < x < 21",
+  description:
+    "Butter trapezoid blocks: y = max(0, 1.2 - 1.2 max(|mod(x+9, 14) - 9| - 4, 0)) (-21 < x < 21)",
   evaluate: (t, params) => evaluateButterWave(t, { amplitude: params.amplitude ?? 1.0, ...params }),
-  generateSamples: (params) => generateButterSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
+  generateSamples: (params) =>
+    generateButterSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
 };
 
 /**
@@ -858,10 +873,7 @@ export function generateTomatoParametricPoints(sampleCount = 1201): ParametricPo
  * Evaluates the vertical coordinate y(t) = -(1.5 + 0.2 sin(t)) sin(t)
  * normalized to standard audio sample range [-1, 1] across parameter span [0, 6π].
  */
-export function evaluateTomatoWave(
-  normT: number,
-  params: MathematicalSignalParams,
-): number {
+export function evaluateTomatoWave(normT: number, params: MathematicalSignalParams): number {
   const amp = params.amplitude ?? 1.0;
   const phi = params.phase ?? 0;
   const range = TOMATO_T_MAX - TOMATO_T_MIN;
@@ -871,7 +883,7 @@ export function evaluateTomatoWave(
   const val = amp * (pt.y / 1.7);
 
   if (params.noise) {
-    const n = Math.sin(normT * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(normT, phi, params.noise);
     return val - n;
   }
   return val;
@@ -899,11 +911,15 @@ export const TOMATO_SIGNAL_DEFINITION: IngredientSignalDefinition = {
   waveformType: "parametric",
   defaultAmplitude: 1.0,
   domainDisplay: "0 ≤ t ≤ 6π",
-  equationDisplay: "x(t) = (2 + 0.2 sin(3t)) cos(t),  y(t) = -(1.5 + 0.2 sin(t)) sin(t)  [0 ≤ t ≤ 6π]",
-  equationLatex: "x(t) = (2 + 0.2 \\sin(3t)) \\cos(t),\\quad y(t) = -(1.5 + 0.2 \\sin(t)) \\sin(t),\\quad 0 \\le t \\le 6\\pi",
-  description: "Parametric tomato contour: x(t) = (2 + 0.2 sin(3t)) cos(t), y(t) = -(1.5 + 0.2 sin(t)) sin(t) (0 ≤ t ≤ 6π)",
+  equationDisplay:
+    "x(t) = (2 + 0.2 sin(3t)) cos(t),  y(t) = -(1.5 + 0.2 sin(t)) sin(t)  [0 ≤ t ≤ 6π]",
+  equationLatex:
+    "x(t) = (2 + 0.2 \\sin(3t)) \\cos(t),\\quad y(t) = -(1.5 + 0.2 \\sin(t)) \\sin(t),\\quad 0 \\le t \\le 6\\pi",
+  description:
+    "Parametric tomato contour: x(t) = (2 + 0.2 sin(3t)) cos(t), y(t) = -(1.5 + 0.2 sin(t)) sin(t) (0 ≤ t ≤ 6π)",
   evaluate: (t, params) => evaluateTomatoWave(t, { amplitude: params.amplitude ?? 1.0, ...params }),
-  generateSamples: (params) => generateTomatoSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
+  generateSamples: (params) =>
+    generateTomatoSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
   parametricCurve: {
     tMin: TOMATO_T_MIN,
     tMax: TOMATO_T_MAX,
@@ -957,10 +973,7 @@ export function generateOnionParametricPoints(sampleCount = 1801): ParametricPoi
  * Evaluates the vertical coordinate y(t) = (0.1 + 0.08t) sin(3t)
  * normalized to standard audio sample range [-1, 1] across parameter span [0, 6π].
  */
-export function evaluateOnionWave(
-  normT: number,
-  params: MathematicalSignalParams,
-): number {
+export function evaluateOnionWave(normT: number, params: MathematicalSignalParams): number {
   const amp = params.amplitude ?? 1.0;
   const phi = params.phase ?? 0;
   const range = ONION_T_MAX - ONION_T_MIN;
@@ -970,7 +983,7 @@ export function evaluateOnionWave(
   const val = amp * (pt.y / maxRadius);
 
   if (params.noise) {
-    const n = Math.sin(normT * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(normT, phi, params.noise);
     return val - n;
   }
   return val;
@@ -999,10 +1012,13 @@ export const ONION_SIGNAL_DEFINITION: IngredientSignalDefinition = {
   defaultAmplitude: 1.0,
   domainDisplay: "0 ≤ t ≤ 6π",
   equationDisplay: "x(t) = (0.1 + 0.08t) cos(3t),  y(t) = (0.1 + 0.08t) sin(3t)  [0 ≤ t ≤ 6π]",
-  equationLatex: "x(t) = (0.1 + 0.08t) \\cos(3t),\\quad y(t) = (0.1 + 0.08t) \\sin(3t),\\quad 0 \\le t \\le 6\\pi",
-  description: "Parametric onion spiral: x(t) = (0.1 + 0.08t) cos(3t), y(t) = (0.1 + 0.08t) sin(3t) (0 ≤ t ≤ 6π)",
+  equationLatex:
+    "x(t) = (0.1 + 0.08t) \\cos(3t),\\quad y(t) = (0.1 + 0.08t) \\sin(3t),\\quad 0 \\le t \\le 6\\pi",
+  description:
+    "Parametric onion spiral: x(t) = (0.1 + 0.08t) cos(3t), y(t) = (0.1 + 0.08t) sin(3t) (0 ≤ t ≤ 6π)",
   evaluate: (t, params) => evaluateOnionWave(t, { amplitude: params.amplitude ?? 1.0, ...params }),
-  generateSamples: (params) => generateOnionSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
+  generateSamples: (params) =>
+    generateOnionSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
   parametricCurve: {
     tMin: ONION_T_MIN,
     tMax: ONION_T_MAX,
@@ -1031,10 +1047,7 @@ export function evaluateCarrotDirect(x: number): number {
   return 5 - Math.pow(inner, 4);
 }
 
-export function evaluateCarrotWave(
-  t: number,
-  params: MathematicalSignalParams,
-): number {
+export function evaluateCarrotWave(t: number, params: MathematicalSignalParams): number {
   const amp = params.amplitude ?? 1.0;
   const f = params.frequency || 4.5;
   const phi = params.phase ?? 0;
@@ -1048,7 +1061,7 @@ export function evaluateCarrotWave(
   const val = amp * ((rawY + 3) / 8);
 
   if (params.noise) {
-    const n = Math.sin(t * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(t, phi, params.noise);
     return val - n;
   }
   return val;
@@ -1090,7 +1103,8 @@ export const CARROT_SIGNAL_DEFINITION: IngredientSignalDefinition = {
   equationLatex: "y = 5 - (1 + \\cos(0.5x))^4",
   description: "Carrot root taper: y = 5 - (1 + cos(0.5x))^4",
   evaluate: (t, params) => evaluateCarrotWave(t, { amplitude: params.amplitude ?? 1.0, ...params }),
-  generateSamples: (params) => generateCarrotSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
+  generateSamples: (params) =>
+    generateCarrotSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
 };
 
 /**
@@ -1109,10 +1123,7 @@ export function evaluateCucumberDirect(x: number): number {
   return 6 * Math.tanh(4 * Math.cos(x));
 }
 
-export function evaluateCucumberWave(
-  t: number,
-  params: MathematicalSignalParams,
-): number {
+export function evaluateCucumberWave(t: number, params: MathematicalSignalParams): number {
   const amp = params.amplitude ?? 1.0;
   const f = params.frequency || 7;
   const phi = params.phase ?? 0;
@@ -1126,7 +1137,7 @@ export function evaluateCucumberWave(
   const val = amp * (rawY / 6);
 
   if (params.noise) {
-    const n = Math.sin(t * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(t, phi, params.noise);
     return val - n;
   }
   return val;
@@ -1167,8 +1178,10 @@ export const CUCUMBER_SIGNAL_DEFINITION: IngredientSignalDefinition = {
   equationDisplay: "y = 6 tanh(4 cos(x))",
   equationLatex: "y = 6 \\tanh(4 \\cos(x))",
   description: "Cucumber saturated wave: y = 6 tanh(4 cos(x))",
-  evaluate: (t, params) => evaluateCucumberWave(t, { amplitude: params.amplitude ?? 1.0, ...params }),
-  generateSamples: (params) => generateCucumberSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
+  evaluate: (t, params) =>
+    evaluateCucumberWave(t, { amplitude: params.amplitude ?? 1.0, ...params }),
+  generateSamples: (params) =>
+    generateCucumberSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
 };
 
 /**
@@ -1212,10 +1225,7 @@ export function generateSauceParametricPoints(sampleCount = 1801): ParametricPoi
  * Evaluates the vertical coordinate y(t) = (2 + sin(5t)) sin(t)
  * normalized to standard audio sample range [-1, 1] across parameter span [0, 6π].
  */
-export function evaluateSauceWave(
-  normT: number,
-  params: MathematicalSignalParams,
-): number {
+export function evaluateSauceWave(normT: number, params: MathematicalSignalParams): number {
   const amp = params.amplitude ?? 1.0;
   const phi = params.phase ?? 0;
   const range = SAUCE_T_MAX - SAUCE_T_MIN;
@@ -1225,7 +1235,7 @@ export function evaluateSauceWave(
   const val = amp * (pt.y / 3);
 
   if (params.noise) {
-    const n = Math.sin(normT * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(normT, phi, params.noise);
     return val - n;
   }
   return val;
@@ -1254,10 +1264,13 @@ export const SAUCE_SIGNAL_DEFINITION: IngredientSignalDefinition = {
   defaultAmplitude: 1.0,
   domainDisplay: "0 ≤ t ≤ 6π",
   equationDisplay: "x(t) = (3 + 2 sin(5t)) cos(t),  y(t) = (2 + sin(5t)) sin(t)  [0 ≤ t ≤ 6π]",
-  equationLatex: "x(t) = (3 + 2 \\sin(5t)) \\cos(t),\\quad y(t) = (2 + \\sin(5t)) \\sin(t),\\quad 0 \\le t \\le 6\\pi",
-  description: "Parametric sauce rosette: x(t) = (3 + 2 sin(5t)) cos(t), y(t) = (2 + sin(5t)) sin(t) (0 ≤ t ≤ 6π)",
+  equationLatex:
+    "x(t) = (3 + 2 \\sin(5t)) \\cos(t),\\quad y(t) = (2 + \\sin(5t)) \\sin(t),\\quad 0 \\le t \\le 6\\pi",
+  description:
+    "Parametric sauce rosette: x(t) = (3 + 2 sin(5t)) cos(t), y(t) = (2 + sin(5t)) sin(t) (0 ≤ t ≤ 6π)",
   evaluate: (t, params) => evaluateSauceWave(t, { amplitude: params.amplitude ?? 1.0, ...params }),
-  generateSamples: (params) => generateSauceSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
+  generateSamples: (params) =>
+    generateSauceSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
   parametricCurve: {
     tMin: SAUCE_T_MIN,
     tMax: SAUCE_T_MAX,
@@ -1312,10 +1325,7 @@ export function generateEggParametricPoints(sampleCount = 1801): ParametricPoint
  * Evaluates the vertical coordinate y(t) = -(2 + 0.2 sin(t)) sin(t)
  * normalized to standard audio sample range [-1, 1] across parameter span [0, 6π].
  */
-export function evaluateEggWave(
-  normT: number,
-  params: MathematicalSignalParams,
-): number {
+export function evaluateEggWave(normT: number, params: MathematicalSignalParams): number {
   const amp = params.amplitude ?? 1.0;
   const phi = params.phase ?? 0;
   const range = EGG_T_MAX - EGG_T_MIN;
@@ -1325,7 +1335,7 @@ export function evaluateEggWave(
   const val = amp * (pt.y / 2.2);
 
   if (params.noise) {
-    const n = Math.sin(normT * 12.9898 * 400 + (phi || 1) * 78.233) * params.noise * 0.485;
+    const n = ingredientNoise(normT, phi, params.noise);
     return val - n;
   }
   return val;
@@ -1353,11 +1363,15 @@ export const EGG_SIGNAL_DEFINITION: IngredientSignalDefinition = {
   waveformType: "parametric",
   defaultAmplitude: 1.0,
   domainDisplay: "0 ≤ t ≤ 6π",
-  equationDisplay: "x(t) = (1.5 + 0.5 sin(t)) cos(t),  y(t) = -(2 + 0.2 sin(t)) sin(t)  [0 ≤ t ≤ 6π]",
-  equationLatex: "x(t) = (1.5 + 0.5 \\sin(t)) \\cos(t),\\quad y(t) = -(2 + 0.2 \\sin(t)) \\sin(t),\\quad 0 \\le t \\le 6\\pi",
-  description: "Parametric egg contour: x(t) = (1.5 + 0.5 sin(t)) cos(t), y(t) = -(2 + 0.2 sin(t)) sin(t) (0 ≤ t ≤ 6π)",
+  equationDisplay:
+    "x(t) = (1.5 + 0.5 sin(t)) cos(t),  y(t) = -(2 + 0.2 sin(t)) sin(t)  [0 ≤ t ≤ 6π]",
+  equationLatex:
+    "x(t) = (1.5 + 0.5 \\sin(t)) \\cos(t),\\quad y(t) = -(2 + 0.2 \\sin(t)) \\sin(t),\\quad 0 \\le t \\le 6\\pi",
+  description:
+    "Parametric egg contour: x(t) = (1.5 + 0.5 sin(t)) cos(t), y(t) = -(2 + 0.2 sin(t)) sin(t) (0 ≤ t ≤ 6π)",
   evaluate: (t, params) => evaluateEggWave(t, { amplitude: params.amplitude ?? 1.0, ...params }),
-  generateSamples: (params) => generateEggSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
+  generateSamples: (params) =>
+    generateEggSamples({ amplitude: params.amplitude ?? 1.0, ...params }),
   parametricCurve: {
     tMin: EGG_T_MIN,
     tMax: EGG_T_MAX,
@@ -1402,9 +1416,11 @@ export const CHICKEN_SIGNAL_DEFINITION: IngredientSignalDefinition = {
   waveformType: "recorded",
   defaultAmplitude: 1.0,
   domainDisplay: "0.00s ≤ t ≤ 2.16s",
-  equationDisplay: "s(t) = PCM_WAV(\"chicken.wav\")[t · 44.1 kHz]",
-  equationLatex: "s(t) = \\operatorname{PCM}_{\\mathrm{WAV}}(\\text{chicken.wav})[t \\cdot 44.1\\,\\mathrm{kHz}],\\quad 0 \\le t \\le 2.16\\,\\mathrm{s}",
-  description: "Real recorded chicken cluck acoustic signal from public/sounds/chicken.wav (44.1 kHz, 16-bit PCM, 95,154 samples)",
+  equationDisplay: 's(t) = PCM_WAV("chicken.wav")[t · 44.1 kHz]',
+  equationLatex:
+    "s(t) = \\operatorname{PCM}_{\\mathrm{WAV}}(\\text{chicken.wav})[t \\cdot 44.1\\,\\mathrm{kHz}],\\quad 0 \\le t \\le 2.16\\,\\mathrm{s}",
+  description:
+    "Real recorded chicken cluck acoustic signal from public/sounds/chicken.wav (44.1 kHz, 16-bit PCM, 95,154 samples)",
   evaluate: (t, params) => {
     const amp = params.amplitude ?? 1.0;
     return amp * evaluateChickenSample(t);
@@ -1447,10 +1463,216 @@ export const MATHEMATICAL_SIGNALS: Record<string, IngredientSignalDefinition> = 
   chicken: CHICKEN_SIGNAL_DEFINITION,
 };
 
-
-
-
 export function getMathematicalSignal(name?: string | null): IngredientSignalDefinition | null {
   if (!name) return null;
-  return MATHEMATICAL_SIGNALS[name] ?? null;
+  if (MATHEMATICAL_SIGNALS[name]) return MATHEMATICAL_SIGNALS[name];
+  const lower = name.toLowerCase().trim();
+  for (const [key, val] of Object.entries(MATHEMATICAL_SIGNALS)) {
+    if (key.toLowerCase() === lower) return val;
+  }
+  return null;
+}
+
+/**
+ * Computes an SVG path data string ('M ... L ...') mapping 2D parametric points
+ * into the specified width/height box with optional equal numerical aspect scaling.
+ */
+export function parametricPath(
+  width: number,
+  height: number,
+  points: Array<{ x: number; y: number }>,
+  padding = 16,
+  equalScale = false,
+): string {
+  if (!points || points.length === 0) return "";
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+
+  for (const p of points) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+
+  const spanX = maxX - minX || 1;
+  const spanY = maxY - minY || 1;
+  const usableWidth = width - 2 * padding;
+  const usableHeight = height - 2 * padding;
+
+  if (equalScale) {
+    const scale = Math.min(usableWidth / spanX, usableHeight / spanY);
+    const midX = (minX + maxX) / 2;
+    const midY = (minY + maxY) / 2;
+    const centerX = width / 2;
+    const centerY = height / 2;
+
+    const pathParts: string[] = [];
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      if (!p) continue;
+      const px = centerX + (p.x - midX) * scale;
+      const py = centerY - (p.y - midY) * scale;
+      pathParts.push(`${i === 0 ? "M" : "L"}${px.toFixed(2)} ${py.toFixed(2)}`);
+    }
+    return pathParts.join(" ");
+  }
+
+  const pathParts: string[] = [];
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    if (!p) continue;
+    const px = padding + ((p.x - minX) / spanX) * usableWidth;
+    const py = padding + ((maxY - p.y) / spanY) * usableHeight;
+    pathParts.push(`${i === 0 ? "M" : "L"}${px.toFixed(2)} ${py.toFixed(2)}`);
+  }
+  return pathParts.join(" ");
+}
+
+/**
+ * Maps 1D discrete time-domain samples to an SVG path string ('M ... L ...').
+ */
+export function samplesToPath(samples: number[], width = 1000, height = 320, scale = 0.35): string {
+  const len = samples.length;
+  if (len === 0) return "";
+  const mid = height / 2;
+  const pts: string[] = [];
+  for (let i = 0; i < len; i++) {
+    const x = (i / (len - 1)) * width;
+    const s = samples[i] ?? 0;
+    const y = mid - s * height * scale;
+    pts.push(`${i === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`);
+  }
+  return pts.join(" ");
+}
+
+/**
+ * Computes the exact mathematical resulting / superposition SVG path for the Mixing stage.
+ *
+ * Requirements:
+ * 1. Single ingredient: exactly matches the individual signal's path (zero phase shift,
+ *    zero horizontal shift, zero amplitude change, zero normalization), visually overlapping.
+ * 2. Multiple 1D ingredients: sample-by-sample discrete superposition mixed[n] = sum(sig_k[n]).
+ * 3. Special/parametric ingredients: geometric superposition
+ *      x_mix(t) = sum(x_k(t)), y_mix(t) = sum(y_k(t))
+ *    preserving the 2D parametric geometry without collapsing into generic 1D waveforms.
+ */
+export interface SuperpositionCurve {
+  points: Array<{ x: number; y: number }>;
+  equalScale: boolean;
+}
+
+/**
+ * The 2D geometric superposition drawn by the Mixing lab when any parametric
+ * ingredient is in the bowl (x_mix = Σx_k, y_mix = Σy_k). Returns null when
+ * the bowl is purely 1D, in which case the mix is an ordinary sample sum.
+ */
+export function computeSuperpositionCurve(
+  inBowlIngredients: Array<{ name: string }>,
+  ingredientSamplesMap: Record<string, number[]>,
+): SuperpositionCurve | null {
+  if (!inBowlIngredients || inBowlIngredients.length === 0) return null;
+
+  const parametricIngredients = inBowlIngredients.filter((ing) => {
+    const math = getMathematicalSignal(ing.name);
+    return Boolean(math?.parametricCurve);
+  });
+  if (parametricIngredients.length === 0) return null;
+
+  if (inBowlIngredients.length === 1) {
+    const ing = inBowlIngredients[0]!;
+    const equalScale = !["patty", "lettuce", "noodle"].some((k) =>
+      ing.name.toLowerCase().includes(k),
+    );
+    return {
+      points: getMathematicalSignal(ing.name)!.parametricCurve!.generatePoints(601),
+      equalScale,
+    };
+  }
+
+  {
+    const sampleCount = 601;
+    const hasOpen = inBowlIngredients.some((ing) =>
+      ["patty", "lettuce", "noodle"].some((k) => ing.name.toLowerCase().includes(k)),
+    );
+    const oneDList = inBowlIngredients.filter(
+      (ing) => !getMathematicalSignal(ing.name)?.parametricCurve,
+    );
+    const isClosed = !hasOpen && oneDList.length === 0;
+
+    const pts: Array<{ x: number; y: number }> = [];
+
+    for (let i = 0; i < sampleCount; i++) {
+      const u = i / (sampleCount - 1);
+      let sumX = 0;
+      let sumY = 0;
+
+      for (const ing of parametricIngredients) {
+        const math = getMathematicalSignal(ing.name)!;
+        const curve = math.parametricCurve!;
+        const t = curve.tMin + u * (curve.tMax - curve.tMin);
+        const pt = curve.evaluate(t);
+        sumX += pt.x;
+        sumY += pt.y;
+      }
+
+      for (const ing of oneDList) {
+        const samples = ingredientSamplesMap[ing.name];
+        if (samples && samples.length > 0) {
+          const exactIdx = u * (samples.length - 1);
+          const idx = Math.floor(exactIdx);
+          const frac = exactIdx - idx;
+          const s0 = samples[idx] ?? 0;
+          const s1 = samples[Math.min(samples.length - 1, idx + 1)] ?? s0;
+          sumY += s0 + frac * (s1 - s0);
+        }
+      }
+
+      pts.push({ x: sumX, y: sumY });
+    }
+
+    return { points: pts, equalScale: isClosed };
+  }
+}
+
+export function computeSuperpositionPath(
+  inBowlIngredients: Array<{ name: string }>,
+  ingredientSamplesMap: Record<string, number[]>,
+  width = 1000,
+  height = 320,
+  backendMixedSamples: number[] | null = null,
+): string {
+  if (!inBowlIngredients || inBowlIngredients.length === 0) return "";
+
+  // Parametric bowls (CASE 1 parametric / CASE 2): 2D geometric superposition.
+  const curve = computeSuperpositionCurve(inBowlIngredients, ingredientSamplesMap);
+  if (curve) return parametricPath(width, height, curve.points, 24, curve.equalScale);
+
+  // CASE 1: exactly one 1D ingredient
+  if (inBowlIngredients.length === 1) {
+    const ing = inBowlIngredients[0]!;
+    const samples =
+      ingredientSamplesMap[ing.name] ?? (backendMixedSamples?.length ? backendMixedSamples : []);
+    return samplesToPath(samples, width, height, 0.35);
+  }
+
+  // CASE 3: Multiple ordinary 1D ingredients (NO parametric ingredients)
+  if (backendMixedSamples && backendMixedSamples.length > 0) {
+    return samplesToPath(backendMixedSamples, width, height, 0.35);
+  }
+
+  const sampleLen = 401;
+  const mixed1D = new Array<number>(sampleLen).fill(0);
+  for (const ing of inBowlIngredients) {
+    const samples = ingredientSamplesMap[ing.name];
+    if (samples) {
+      for (let i = 0; i < sampleLen; i++) {
+        mixed1D[i] = (mixed1D[i] ?? 0) + (samples[i] ?? 0);
+      }
+    }
+  }
+
+  return samplesToPath(mixed1D, width, height, 0.35);
 }

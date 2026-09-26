@@ -8,8 +8,8 @@ filter chain, re-runs the pipeline and computes the score itself.
 from __future__ import annotations
 
 import random
+from datetime import datetime
 
-import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -47,7 +47,8 @@ def _session_payload(db: Session, session: GameSession,
                      player: Player) -> schemas.SessionOut:
     r: Recipe = session.recipe
     best = (db.query(func.max(Attempt.score))
-            .filter(Attempt.player_id == player.id, Attempt.recipe_id == r.id)
+            .filter(Attempt.player_id == player.id, Attempt.recipe_id == r.id,
+                    gameplay.in_season())
             .scalar())
     card = schemas.RecipeCard(
         id=r.id, name=r.name, emoji=r.emoji,
@@ -93,6 +94,13 @@ def _filter_response(db: Session, session: GameSession, item: SessionIngredient,
         accepted=item.accepted)
 
 
+def _require_active(session: GameSession) -> None:
+    """A served or abandoned dish is final: no more edits to it."""
+    if session.status != 'active':
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f'This dish is already {session.status}; start a new one.')
+
+
 def _get_item(session: GameSession, slot: int) -> SessionIngredient:
     for i in session.items:
         if i.slot == slot:
@@ -111,12 +119,13 @@ def start_session(payload: schemas.SessionCreate,
     recipe = db.get(Recipe, payload.recipe_id)
     if recipe is None or not recipe.is_active:
         raise HTTPException(status.HTTP_404_NOT_FOUND, 'No such recipe.')
-    if recipe.tier > player.unlocked_tier:
-        raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            f'Tier {recipe.tier} is locked. Clear earlier tiers first.')
+    # Locked tiers can be played (the client offers every recipe, and a 403
+    # here silently kept those runs off the leaderboard); they just earn no
+    # career points and don't count towards unlocking — see submit().
 
     seed = random.randrange(1, 2 ** 31 - 1)
     session = GameSession(player_id=player.id, recipe_id=recipe.id, seed=seed,
+                          difficulty=payload.difficulty,
                           params=gameplay.default_params(recipe))
     db.add(session)
     db.flush()
@@ -148,6 +157,7 @@ def get_session(session: GameSession = Depends(owned_session),
 @router.delete('/{session_id}', status_code=status.HTTP_204_NO_CONTENT)
 def abandon(session: GameSession = Depends(owned_session),
             db: Session = Depends(get_db)):
+    _require_active(session)
     session.status = 'abandoned'
     db.commit()
 
@@ -161,6 +171,7 @@ def apply_filters(slot: int, payload: schemas.FilterRequest,
                   session: GameSession = Depends(owned_session),
                   db: Session = Depends(get_db)):
     """FFT -> spectral mask -> IFFT, scored for removal and preservation."""
+    _require_active(session)
     item = _get_item(session, slot)
     item.bands = [b.model_dump() for b in payload.bands] or item.bands
     item.tools = [t.model_dump(exclude_none=True) for t in payload.tools]
@@ -174,6 +185,7 @@ def accept_ingredient(slot: int,
                       session: GameSession = Depends(owned_session),
                       db: Session = Depends(get_db)):
     """An ingredient below the cleanliness threshold cannot enter the bowl."""
+    _require_active(session)
     item = _get_item(session, slot)
     resp = _filter_response(db, session, item, False)
     # Rejected for being too dirty OR for being scrubbed to death — the two
@@ -217,6 +229,7 @@ def set_params(payload: schemas.CookParams,
                session: GameSession = Depends(owned_session),
                db: Session = Depends(get_db)):
     """Update the cooking parameters and get every recomputed stage back."""
+    _require_active(session)
     from ..dsp import systems
     for a in payload.appliances:
         if a not in systems.BUILDERS:
@@ -254,31 +267,58 @@ def submit(session: GameSession = Depends(owned_session),
            db: Session = Depends(get_db),
            player: Player = Depends(current_player)):
     """Serve the dish. Everything is recomputed server-side before scoring."""
-    if session.status == 'served':
-        raise HTTPException(status.HTTP_409_CONFLICT, 'This dish has already been served.')
-
-    verdict = gameplay.judge(db, session)
-    recipe: Recipe = session.recipe
-
-    previous_best = (db.query(func.max(Attempt.score))
-                     .filter(Attempt.player_id == player.id,
-                             Attempt.recipe_id == recipe.id).scalar())
-    points = gameplay.award(db, player, recipe, verdict['score'], previous_best)
-
-    m = verdict['metrics']
-    attempt = Attempt(
-        session_id=session.id, player_id=player.id, recipe_id=recipe.id,
-        score=verdict['score'], stars=verdict['stars'],
-        prep_score=verdict['prep_score'], snr_db=m['snr_db'], mse=m['mse'],
-        correlation=m['correlation'], spectral_similarity=m['spectral_similarity'],
-        points_awarded=points, notes=verdict['notes'], params=session.params or {})
-    db.add(attempt)
-
-    session.status = 'served'
-    session.served_at = func.now()
-    db.flush()
-    gameplay.maybe_unlock(db, player)   # after the attempt exists, so it counts
+    # Claim the session atomically: two near-simultaneous submits used to both
+    # pass a plain status check and each write an Attempt (duplicate rows).
+    claimed = (db.query(GameSession)
+               .filter(GameSession.id == session.id, GameSession.status != 'served')
+               .update({GameSession.status: 'served'}, synchronize_session=False))
     db.commit()
+    if not claimed:
+        raise HTTPException(status.HTTP_409_CONFLICT, 'This dish has already been served.')
+    db.refresh(session)
+
+    try:
+        verdict = gameplay.judge(db, session)
+        recipe: Recipe = session.recipe
+
+        # Personal best this season (older runs were judged by other rules).
+        previous_best = (db.query(func.max(Attempt.score))
+                         .filter(Attempt.player_id == player.id,
+                                 Attempt.recipe_id == recipe.id,
+                                 gameplay.in_season()).scalar())
+        # Runs on a tier the chef hasn't unlocked are ranked but earn nothing.
+        tier_unlocked = recipe.tier <= player.unlocked_tier
+        points = (gameplay.award(db, player, recipe, verdict['score'], previous_best)
+                  if tier_unlocked else 0)
+
+        m = verdict['metrics']
+        served_at = datetime.utcnow()
+        total, bonus = gameplay.run_total(
+            verdict['score'], session.difficulty,
+            (served_at - session.created_at).total_seconds())
+        attempt = Attempt(
+            session_id=session.id, player_id=player.id, recipe_id=recipe.id,
+            score=verdict['score'], stars=verdict['stars'],
+            prep_score=verdict['prep_score'], snr_db=m['snr_db'], mse=m['mse'],
+            correlation=m['correlation'], spectral_similarity=m['spectral_similarity'],
+            points_awarded=points, difficulty=session.difficulty,
+            total_score=total, time_bonus=bonus,
+            scoring_version=gameplay.SCORING_VERSION,
+            notes=verdict['notes'], params=session.params or {})
+        db.add(attempt)
+
+        session.served_at = served_at
+        db.flush()
+        if tier_unlocked:
+            gameplay.maybe_unlock(db, player)   # after the attempt exists, so it counts
+        db.commit()
+    except Exception:
+        # Release the claim so the dish can be served again once fixed.
+        db.rollback()
+        db.query(GameSession).filter(GameSession.id == session.id).update(
+            {GameSession.status: 'active'}, synchronize_session=False)
+        db.commit()
+        raise
     db.refresh(attempt)
     db.refresh(player)
 
@@ -293,51 +333,15 @@ def submit(session: GameSession = Depends(owned_session),
         mixing_score=verdict.get('mixing_score'),
         transform_score=verdict.get('transform_score'),
         cooking_score=verdict.get('cooking_score'),
+        delivery_score=verdict.get('delivery_score'),
+        system_score=verdict.get('system_score'),
         snr_db=m['snr_db'], mse=m['mse'],
         correlation=m['correlation'], spectral_similarity=m['spectral_similarity'],
         points_awarded=points, total_points=player.points,
+        total_score=attempt.total_score, time_bonus=attempt.time_bonus,
         unlocked_tier=player.unlocked_tier, rank_title=title,
         notes=verdict['notes'],
         target=schemas.SignalPayload(**gameplay.signal_payload(target_final)),
         player_dish=schemas.SignalPayload(**gameplay.signal_payload(player_final)),
         target_spectrum=schemas.SpectrumPayload(**gameplay.spectrum_payload(target_final)),
         player_spectrum=schemas.SpectrumPayload(**gameplay.spectrum_payload(player_final)))
-
-
-# --------------------------------------------------------------------------
-# phased array beam delivery
-# --------------------------------------------------------------------------
-@router.post('/{session_id}/beam-delivery', response_model=schemas.BeamDeliveryResponse)
-def beam_delivery(payload: schemas.BeamDeliveryRequest,
-                  session: GameSession = Depends(owned_session)):
-    """
-    Validate acoustic beam delivery via linear speaker array phase alignment.
-    Constructive interference steers the dish signal to the target table angle.
-    """
-    from ..dsp import beamforming
-
-    speakers_data = [s.model_dump() for s in payload.speakers]
-    steered = beamforming.calculate_beam_angle(speakers_data)
-    target = payload.target_angle
-    tolerance = 6.0
-    aligned = beamforming.check_beam_alignment(steered, target, tolerance)
-
-    diff = abs(steered - target)
-    accuracy = float(np.clip(100.0 - (diff / max(1.0, abs(target))) * 100.0 * 1.2, 0.0, 100.0))
-
-    pattern = beamforming.generate_beam_pattern(steered)
-    points = [schemas.BeamPointSchema(**p) for p in pattern]
-
-    if aligned:
-        msg = f'Bullseye! The {session.recipe.name} signal rode the acoustic beam directly to the table at {target:+.0f}°!'
-    else:
-        msg = f'Beam steered to {steered:+.0f}°, missing target at {target:+.0f}°. Adjust phase delays to focus interference.'
-
-    return schemas.BeamDeliveryResponse(
-        steered_angle=steered,
-        target_angle=target,
-        is_aligned=aligned,
-        tolerance_degrees=tolerance,
-        beam_pattern=points,
-        accuracy=round(accuracy, 1),
-        message=msg)

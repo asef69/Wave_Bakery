@@ -1,14 +1,21 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { Play, Pause, RotateCcw, Volume2, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Play, Pause, RotateCcw, Volume2, Sparkles, Flame } from "lucide-react";
 
-import { ServeChoiceModal } from "@/components/beamforming/ServeChoiceModal";
+import { ServeChoiceModal } from "@/components/game/ServeChoiceModal";
 import { ChefFourier } from "@/components/game/ChefFourier";
 import { GameButton } from "@/components/game/GameButton";
 import { RecipeTimerBadge, TimeExpiredModal } from "@/components/game/RecipeTimer";
 import { WaveformDisplay } from "@/components/game/WaveformDisplay";
+import { ovenDefectHz, servedDish } from "@/lib/delivery";
 import { CookedSignalAudioPlayer, type PlaybackState } from "@/lib/audio";
-import { useActiveRecipe, useCookedSignal, useRecipeProgress, useRecipeTimer } from "@/lib/recipes";
+import {
+  useActiveRecipe,
+  useCookedSignal,
+  usePipelineStageSignal,
+  useRecipeProgress,
+  useRecipeTimer,
+} from "@/lib/recipes";
 
 export const Route = createFileRoute("/check-dish")({
   head: () => ({
@@ -32,9 +39,20 @@ export const Route = createFileRoute("/check-dish")({
 
 function CheckDishScreen() {
   const [recipe] = useActiveRecipe();
-  const [unlockedStep, unlock] = useRecipeProgress();
+  const [unlockedStep] = useRecipeProgress();
   const { session } = useRecipeTimer();
   const [cookedSignal] = useCookedSignal(recipe.id);
+  // The dish as it leaves the kitchen: cooked + the burnt overtone cooking left
+  // in it (lib/delivery.ts). Serve now and it stays; the Precision Oven removes it.
+  // It gets its own panel: the main plot is the Cooking lab's (x ∗ h) output,
+  // exactly as cooked (it used to show this defect version under that label).
+  const servedSamples = useMemo(
+    () => servedDish(recipe.id, cookedSignal.samples),
+    [recipe.id, cookedSignal.samples],
+  );
+  const defectHz = Math.round(ovenDefectHz(recipe.id));
+  // The Mixing curve (carried through marinating) the dish is drawn along.
+  const [curveRef] = usePipelineStageSignal(recipe.id, "marinated");
 
   const [isServeModalOpen, setIsServeModalOpen] = useState(false);
   const [player, setPlayer] = useState<CookedSignalAudioPlayer | null>(null);
@@ -48,10 +66,6 @@ function CheckDishScreen() {
   });
 
   useEffect(() => {
-    unlock(7);
-  }, [unlock]);
-
-  useEffect(() => {
     const p = new CookedSignalAudioPlayer(cookedSignal, (state) => {
       setPlaybackState(state);
     });
@@ -62,7 +76,21 @@ function CheckDishScreen() {
     };
   }, [cookedSignal]);
 
-  if (unlockedStep < 6) {
+  const [defectPlayer, setDefectPlayer] = useState<CookedSignalAudioPlayer | null>(null);
+  const [defectPlaying, setDefectPlaying] = useState(false);
+  useEffect(() => {
+    const p = new CookedSignalAudioPlayer({ ...cookedSignal, samples: servedSamples }, (state) =>
+      setDefectPlaying(state.isPlaying),
+    );
+    setDefectPlayer(p);
+    return () => {
+      p.destroy();
+    };
+  }, [cookedSignal, servedSamples]);
+
+  // Needs the Cooking lab done (it unlocks 7). This page used to unlock 7
+  // itself on load — even while showing this lock — skipping Cooking.
+  if (unlockedStep < 7) {
     return (
       <main className="relative min-h-screen bg-background">
         <TimeExpiredModal />
@@ -227,6 +255,7 @@ function CheckDishScreen() {
               label={`Output Signal: (Input ∗ ${cookedSignal.methodName})(t)`}
               cursorProgress={playbackState.progress}
               samples={cookedSignal.samples}
+              curveRef={curveRef}
               color="var(--signal)"
             />
           </div>
@@ -238,9 +267,7 @@ function CheckDishScreen() {
               <div className="flex items-center gap-2">
                 <span
                   className={`inline-block h-2.5 w-2.5 rounded-full ${
-                    playbackState.isPlaying
-                      ? "bg-primary animate-ping"
-                      : "bg-muted-foreground/50"
+                    playbackState.isPlaying ? "bg-primary animate-ping" : "bg-muted-foreground/50"
                   }`}
                 />
                 <span className="text-foreground uppercase tracking-wider font-bold">
@@ -255,7 +282,10 @@ function CheckDishScreen() {
                 <span className="font-bold text-primary text-sm">
                   {playbackState.currentTime.toFixed(1)}s
                 </span>
-                <span className="text-muted-foreground"> / {playbackState.duration.toFixed(1)}s</span>
+                <span className="text-muted-foreground">
+                  {" "}
+                  / {playbackState.duration.toFixed(1)}s
+                </span>
               </div>
             </div>
 
@@ -323,13 +353,17 @@ function CheckDishScreen() {
                   <span className="font-bold text-foreground">{fundamentalHz} Hz</span>
                 </div>
                 <div className="rounded-lg border border-border bg-card/80 px-3 py-1.5">
-                  <span className="text-muted-foreground uppercase text-[10px] block">Amplitude</span>
+                  <span className="text-muted-foreground uppercase text-[10px] block">
+                    Amplitude
+                  </span>
                   <span className="font-bold text-foreground">
                     {(cookedSignal.amplitude * 100).toFixed(0)}%
                   </span>
                 </div>
                 <div className="rounded-lg border border-border bg-card/80 px-3 py-1.5">
-                  <span className="text-muted-foreground uppercase text-[10px] block">Harmonics</span>
+                  <span className="text-muted-foreground uppercase text-[10px] block">
+                    Harmonics
+                  </span>
                   <span className="font-bold text-foreground">
                     {cookedSignal.noise > 0 ? "Crackle + Rich" : "Clean Sines"}
                   </span>
@@ -339,12 +373,56 @@ function CheckDishScreen() {
           </div>
         </div>
 
+        {/* Overcooking / Burnt Flavor Signature Section */}
+        <div className="kitchen-card mt-6 border-2 border-amber-500/50 bg-gradient-to-br from-card via-card to-amber-500/5 p-6 shadow-md">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-500/30 pb-3">
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/20 text-amber-400">
+                <Flame className="h-4 w-4 animate-pulse" />
+              </span>
+              <div>
+                <span className="font-mono text-[9px] font-extrabold tracking-wider text-amber-500 uppercase">
+                  🔥 Uh-oh! Slightly Overcooked!
+                </span>
+                <h4 className="font-display text-sm font-extrabold text-foreground uppercase">
+                  Burnt Flavor Signature Detected ({defectHz} Hz)
+                </h4>
+              </div>
+            </div>
+            <GameButton
+              size="sm"
+              variant="secondary"
+              onClick={() => (defectPlaying ? defectPlayer?.pause() : defectPlayer?.replay())}
+              className="uppercase font-bold tracking-wider text-xs border-amber-500/40 hover:bg-amber-500/10 cursor-pointer"
+            >
+              {defectPlaying ? "Pause Audio" : "▶ Hear Burnt Flavor"}
+            </GameButton>
+          </div>
+          <div className="mt-4">
+            <WaveformDisplay
+              height={140}
+              label={`Cooked Dish with Overcooking Artifact: (x ∗ h)(t) + burnt component at ${defectHz} Hz`}
+              samples={servedSamples}
+              curveRef={curveRef}
+              color="var(--primary)"
+            />
+          </div>
+          <p className="mt-3 text-xs sm:text-sm font-mono text-muted-foreground leading-relaxed">
+            The cooking heat was a little too intense! An unwanted{" "}
+            <span className="font-bold text-amber-400">burnt flavor signature</span> has appeared at{" "}
+            <span className="font-bold text-foreground">{defectHz} Hz</span>, sitting between the
+            dish's natural harmonics. Serving now leaves this slightly burnt note in the food. You
+            can take the dish to the <span className="font-bold text-primary">Precision Oven</span>{" "}
+            to suppress this cooking artifact and save the dish!
+          </p>
+        </div>
+
         {/* Footer Navigation & Serving Actions */}
         <div className="mt-10 flex flex-wrap items-end justify-between gap-6">
           <ChefFourier
             size="sm"
             float={false}
-            message="Smells like perfect math! Give that signal a listen before we plate it."
+            message={`The appliance cooked our ingredients via convolution, but the heat got a little too intense! That slightly burnt flavor has a frequency of its own at ${defectHz} Hz. Serve it as-is, or fire up the Precision Oven to save the dish!`}
           />
 
           <div className="flex flex-wrap items-center gap-4">

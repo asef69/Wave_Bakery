@@ -26,11 +26,12 @@ class Contaminant:
         return asdict(self)
 
 
-KINDS = ('white', 'hum', 'hiss', 'burst', 'tone', 'pink')
+KINDS = ('white', 'hiss', 'burst')
 
 
 def corrupt(clean: np.ndarray, difficulty: float, seed: int,
-            sr: int = C.SR) -> tuple[np.ndarray, list[Contaminant]]:
+            sr: int = C.SR, ideal_cutoff: float | None = None,
+            ) -> tuple[np.ndarray, list[Contaminant]]:
     if difficulty <= 0:
         return clean.astype(np.float32, copy=True), []
     rng = np.random.default_rng(seed & 0xFFFFFFFF)
@@ -54,7 +55,14 @@ def corrupt(clean: np.ndarray, difficulty: float, seed: int,
             layer = C.hum(n, amp * 1.4, f0, sr)
             meta = Contaminant('hum', amp, f0 * 0.6, f0 * 5.6, f0)
         elif kind == 'hiss':
-            fc = sr * (0.30 + float(rng.random()) * 0.14)
+            # Anchor the hiss band just above the ingredient's own ideal_cutoff
+            # so there is a real, ingredient-specific cutoff to find. A fixed
+            # high fraction of sr (the old behaviour) put hiss at 6.6-9.7 kHz,
+            # far above the 100-900 Hz cutoff slider — any cutoff below it
+            # removed the hiss identically, so the whole upper half of the
+            # slider scored as a perfect match instead of only the true ideal.
+            fc = (ideal_cutoff * (1.1 + float(rng.random()) * 0.5) if ideal_cutoff
+                  else sr * (0.30 + float(rng.random()) * 0.14))
             layer = C.hiss(n, amp * 1.2, fc, rng, sr)
             meta = Contaminant('hiss', amp, fc * 0.6, sr / 2, fc)
         elif kind == 'burst':

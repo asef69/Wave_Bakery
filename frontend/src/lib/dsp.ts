@@ -1,6 +1,6 @@
 /**
  * Core Mathematical DSP Engine for WaveBakery (CSE220)
- * 
+ *
  * Provides pure mathematical implementations of:
  * - Radix-2 Cooley-Tukey Fast Fourier Transform (FFT) & Inverse FFT (IFFT)
  * - Frequency-Domain Low-Pass Filter with transition band
@@ -320,6 +320,17 @@ export function normalizedRootMeanSquareError(x: number[], y: number[]): number 
 }
 
 /**
+ * True when a pipeline signal is one period of a looping dish: its last
+ * sample repeats the first (within 2 % of the peak — convolution leaves a
+ * rounding-level mismatch on some dishes).
+ */
+export function isOnePeriod(x: number[]): boolean {
+  if (x.length < 3) return false;
+  const peak = x.reduce((m, v) => Math.max(m, Math.abs(v)), 0) || 1;
+  return Math.abs(x[0]! - x[x.length - 1]!) <= 0.02 * peak;
+}
+
+/**
  * Computes composite match percentage between player signal and ideal target signal.
  * Combines Normalized Cross-Correlation (shape fidelity) and NRMSE (amplitude/offset fidelity).
  *
@@ -327,14 +338,25 @@ export function normalizedRootMeanSquareError(x: number[], y: number[]): number 
  * @param targetSamples Discrete samples of ideal target dish
  * @returns Match percentage in [0, 100]%
  */
-export function computeSignalSimilarity(
-  playerSamples: number[],
-  targetSamples: number[],
-): number {
+export function computeSignalSimilarity(playerSamples: number[], targetSamples: number[]): number {
   if (!playerSamples.length || !targetSamples.length) return 0;
 
-  const rXy = normalizedCrossCorrelation(playerSamples, targetSamples);
-  const nrmse = normalizedRootMeanSquareError(playerSamples, targetSamples);
+  let pSamples = playerSamples;
+  if (playerSamples.length !== targetSamples.length) {
+    pSamples = new Array<number>(targetSamples.length);
+    for (let i = 0; i < targetSamples.length; i++) {
+      const t = i / (targetSamples.length - 1);
+      const exact = t * (playerSamples.length - 1);
+      const idx = Math.floor(exact);
+      const frac = exact - idx;
+      const s0 = playerSamples[idx] ?? 0;
+      const s1 = playerSamples[Math.min(playerSamples.length - 1, idx + 1)] ?? s0;
+      pSamples[i] = s0 + frac * (s1 - s0);
+    }
+  }
+
+  const rXy = normalizedCrossCorrelation(pSamples, targetSamples);
+  const nrmse = normalizedRootMeanSquareError(pSamples, targetSamples);
 
   // Shape correlation component (mapped from [-1, 1] to [0, 1])
   const corrScore = Math.max(0, rXy);

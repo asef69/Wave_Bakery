@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { getMathematicalSignal } from "./signals";
 import { getIdealDishSignal, getOrSaveExpectedSignal } from "./pipeline";
 import { api, type SubmitResult } from "./api";
+import { pauseAllActiveAudio, resumeAllActiveAudio } from "./audio";
 
 export * from "./signals";
 export * from "./pipeline";
@@ -70,6 +71,7 @@ export type Recipe = {
   ingredients: string[];
   ingredientDetails: IngredientDetail[];
   difficulty: "Easy" | "Medium" | "Hard";
+  tier?: number;
   pipeline: PipelineStep[];
   progress: "locked" | "new" | "in-progress" | "complete";
   bestScore: number | null;
@@ -95,8 +97,20 @@ export const recipes: Recipe[] = [
     ingredients: ["Bun", "Beef Patty", "Cheese", "Lettuce", "Tomato", "Salt"],
     ingredientDetails: [
       { name: "Bun", instrument: "Mathematical Signal", freq: 3, washable: false, kind: "bun" },
-      { name: "Beef Patty", instrument: "Parametric Signal", freq: 2, washable: false, kind: "patty" },
-      { name: "Cheese", instrument: "Mathematical Signal", freq: 6, washable: false, kind: "cheese" },
+      {
+        name: "Beef Patty",
+        instrument: "Parametric Signal",
+        freq: 2,
+        washable: false,
+        kind: "patty",
+      },
+      {
+        name: "Cheese",
+        instrument: "Mathematical Signal",
+        freq: 6,
+        washable: false,
+        kind: "cheese",
+      },
       {
         name: "Lettuce",
         instrument: "Parametric Signal",
@@ -117,9 +131,9 @@ export const recipes: Recipe[] = [
     ],
     difficulty: "Easy",
     pipeline: ["GENERATE", "FILTER", "MIX", "AMPLITUDE", "TIME SCALE", "CONVOLUTION", "COMPARE"],
-    progress: "complete",
-    bestScore: 940,
-    stars: 3,
+    progress: "new",
+    bestScore: null,
+    stars: 0,
     seasoningTarget: { amplitude: 1.5, frequency: 0.8 },
     marinateTarget: { timeScale: 1.25 },
     cookingMethod: { id: "grill", name: "GRILL", icon: "🔥", ir: "GRILL (sharp spiky taps)" },
@@ -180,8 +194,20 @@ export const recipes: Recipe[] = [
     ingredients: ["Bread", "Chicken", "Cheese", "Lettuce", "Tomato", "Salt", "Sauce"],
     ingredientDetails: [
       { name: "Bread", instrument: "Mathematical Signal", freq: 3, washable: false, kind: "bread" },
-      { name: "Chicken", instrument: "Recorded Signal", freq: 2.5, washable: false, kind: "chicken" },
-      { name: "Cheese", instrument: "Mathematical Signal", freq: 6, washable: false, kind: "cheese" },
+      {
+        name: "Chicken",
+        instrument: "Recorded Signal",
+        freq: 2.5,
+        washable: false,
+        kind: "chicken",
+      },
+      {
+        name: "Cheese",
+        instrument: "Mathematical Signal",
+        freq: 6,
+        washable: false,
+        kind: "cheese",
+      },
       {
         name: "Lettuce",
         instrument: "Parametric Signal",
@@ -203,9 +229,9 @@ export const recipes: Recipe[] = [
     ],
     difficulty: "Easy",
     pipeline: ["GENERATE", "FILTER", "MIX", "AMPLITUDE", "TIME SCALE", "CONVOLUTION", "COMPARE"],
-    progress: "in-progress",
-    bestScore: 610,
-    stars: 2,
+    progress: "new",
+    bestScore: null,
+    stars: 0,
     seasoningTarget: { amplitude: 1.2, frequency: 1.1 },
     marinateTarget: { timeScale: 0.85 },
     cookingMethod: {
@@ -279,7 +305,13 @@ export const recipes: Recipe[] = [
         idealCutoff: 460,
         kind: "egg",
       },
-      { name: "Butter", instrument: "Mathematical Signal", freq: 3, washable: false, kind: "butter" },
+      {
+        name: "Butter",
+        instrument: "Mathematical Signal",
+        freq: 3,
+        washable: false,
+        kind: "butter",
+      },
       { name: "Sugar", instrument: "Mathematical Signal", freq: 5, washable: false, kind: "sugar" },
       { name: "Milk", instrument: "Mathematical Signal", freq: 5, washable: false, kind: "milk" },
     ],
@@ -340,7 +372,13 @@ export const recipes: Recipe[] = [
     servings: "1 steaming bowl",
     ingredients: ["Noodles", "Egg", "Chicken", "Onion", "Salt"],
     ingredientDetails: [
-      { name: "Noodles", instrument: "Parametric Signal", freq: 3, washable: false, kind: "noodles" },
+      {
+        name: "Noodles",
+        instrument: "Parametric Signal",
+        freq: 3,
+        washable: false,
+        kind: "noodles",
+      },
       {
         name: "Egg",
         instrument: "Parametric Signal",
@@ -349,7 +387,13 @@ export const recipes: Recipe[] = [
         idealCutoff: 460,
         kind: "egg",
       },
-      { name: "Chicken", instrument: "Recorded Signal", freq: 2.5, washable: false, kind: "chicken" },
+      {
+        name: "Chicken",
+        instrument: "Recorded Signal",
+        freq: 2.5,
+        washable: false,
+        kind: "chicken",
+      },
       {
         name: "Onion",
         instrument: "Parametric Signal",
@@ -424,7 +468,13 @@ export const recipes: Recipe[] = [
     servings: "1 basket",
     ingredients: ["Chicken", "Flour", "Egg", "Salt", "Butter"],
     ingredientDetails: [
-      { name: "Chicken", instrument: "Recorded Signal", freq: 2.5, washable: false, kind: "chicken" },
+      {
+        name: "Chicken",
+        instrument: "Recorded Signal",
+        freq: 2.5,
+        washable: false,
+        kind: "chicken",
+      },
       { name: "Flour", instrument: "Mathematical Signal", freq: 2, washable: false, kind: "flour" },
       {
         name: "Egg",
@@ -435,7 +485,13 @@ export const recipes: Recipe[] = [
         kind: "egg",
       },
       { name: "Salt", instrument: "Mathematical Signal", freq: 12, washable: false, kind: "salt" },
-      { name: "Butter", instrument: "Mathematical Signal", freq: 3, washable: false, kind: "butter" },
+      {
+        name: "Butter",
+        instrument: "Mathematical Signal",
+        freq: 3,
+        washable: false,
+        kind: "butter",
+      },
     ],
     difficulty: "Hard",
     pipeline: ["GENERATE", "MIX", "AMPLITUDE", "TIME SCALE", "CONVOLUTION", "COMPARE"],
@@ -494,21 +550,102 @@ export const progressLabel: Record<Recipe["progress"], string> = {
   complete: "Perfected",
 };
 
-let currentActiveRecipeId = "burger";
+export const BEST_SCORES_KEY = "wavebakery_recipe_best_scores";
 
-export function getActiveRecipe(): Recipe {
+export function getRecipeBestScores(): Record<string, number> {
   if (typeof window !== "undefined") {
     try {
-      const stored = window.localStorage.getItem("wavebakery_active_recipe");
+      const stored = window.localStorage.getItem(BEST_SCORES_KEY);
       if (stored) {
-        const found = recipes.find((r) => r.id === stored);
-        if (found) return found;
+        const parsed = JSON.parse(stored);
+        if (typeof parsed === "object" && parsed !== null) {
+          return parsed as Record<string, number>;
+        }
       }
     } catch {
       // ignore
     }
   }
-  return recipes.find((r) => r.id === currentActiveRecipeId) ?? recipes[0]!;
+  return {};
+}
+
+export function getRecipeBestScore(recipeId: string): number | null {
+  const scores = getRecipeBestScores();
+  const val = scores[recipeId];
+  return typeof val === "number" && !isNaN(val) ? val : null;
+}
+
+export function saveRecipeBestScore(recipeId: string, score: number): number {
+  if (typeof window !== "undefined") {
+    try {
+      const scores = getRecipeBestScores();
+      const current = scores[recipeId];
+      const rounded = Math.round(score);
+      if (current === undefined || rounded > current) {
+        scores[recipeId] = rounded;
+        window.localStorage.setItem(BEST_SCORES_KEY, JSON.stringify(scores));
+        window.dispatchEvent(new Event("wavebakery_best_scores_changed"));
+        window.dispatchEvent(new Event("wavebakery_recipe_changed"));
+        return rounded;
+      }
+      return current;
+    } catch {
+      // ignore
+    }
+  }
+  return Math.round(score);
+}
+
+export function useRecipeBestScores(): Record<string, number> {
+  const [scores, setScores] = useState<Record<string, number>>(() => getRecipeBestScores());
+
+  useEffect(() => {
+    const handler = () => {
+      setScores(getRecipeBestScores());
+    };
+    window.addEventListener("wavebakery_best_scores_changed", handler);
+    window.addEventListener("storage", handler);
+    return () => {
+      window.removeEventListener("wavebakery_best_scores_changed", handler);
+      window.removeEventListener("storage", handler);
+    };
+  }, []);
+
+  return scores;
+}
+
+export function enrichRecipeWithBestScore(recipe: Recipe, scores?: Record<string, number>): Recipe {
+  const bestScores = scores ?? getRecipeBestScores();
+  const bestScore = bestScores[recipe.id] ?? null;
+  const stars = bestScore !== null ? (bestScore >= 900 ? 3 : bestScore >= 700 ? 2 : 1) : 0;
+  const progress: Recipe["progress"] =
+    bestScore !== null ? (bestScore >= 900 ? "complete" : "in-progress") : "new";
+  return {
+    ...recipe,
+    bestScore,
+    stars,
+    progress,
+  };
+}
+
+let currentActiveRecipeId = "burger";
+
+export function getActiveRecipe(): Recipe {
+  let baseRecipe = recipes[0]!;
+  if (typeof window !== "undefined") {
+    try {
+      const stored = window.localStorage.getItem("wavebakery_active_recipe");
+      if (stored) {
+        const found = recipes.find((r) => r.id === stored);
+        if (found) baseRecipe = found;
+      }
+    } catch {
+      // ignore
+    }
+  } else {
+    baseRecipe = recipes.find((r) => r.id === currentActiveRecipeId) ?? recipes[0]!;
+  }
+  return enrichRecipeWithBestScore(baseRecipe);
 }
 
 export function setActiveRecipe(id: string) {
@@ -531,9 +668,11 @@ export function useActiveRecipe(): [Recipe, (id: string) => void] {
       setRecipeState(getActiveRecipe());
     };
     window.addEventListener("wavebakery_recipe_changed", handler);
+    window.addEventListener("wavebakery_best_scores_changed", handler);
     window.addEventListener("storage", handler);
     return () => {
       window.removeEventListener("wavebakery_recipe_changed", handler);
+      window.removeEventListener("wavebakery_best_scores_changed", handler);
       window.removeEventListener("storage", handler);
     };
   }, []);
@@ -546,17 +685,47 @@ export function useActiveRecipe(): [Recipe, (id: string) => void] {
   return [recipe, setRecipe];
 }
 
-export const STAGE_ORDER = [
-  { id: "generate", label: "Generate Signal", path: "/generate", step: 1 },
-  { id: "filter", label: "Filter Lab", path: "/filtering", step: 2 },
-  { id: "mix", label: "Mixing Lab", path: "/mixing", step: 3 },
-  { id: "season", label: "Seasoning Lab", path: "/transform", step: 4 },
-  { id: "marinate", label: "Marinating Lab", path: "/marinate", step: 5 },
-  { id: "cook", label: "Cooking Lab", path: "/cooking", step: 6 },
-  { id: "check-dish", label: "Check Dish", path: "/check-dish", step: 7 },
-  { id: "score", label: "Final Comparison", path: "/score", step: 8 },
-  { id: "complete", label: "Complete", path: "/complete", step: 9 },
-] as const;
+export function getRecipeStationFlow(
+  recipe?: Recipe,
+): { id: string; label: string; path: string }[] {
+  const r = recipe ?? getActiveRecipe();
+  const steps: { id: string; label: string; path: string }[] = [
+    { id: "generate", label: "Generate Signal", path: "/generate" },
+    { id: "filter", label: "Filter Lab", path: "/filtering" },
+    { id: "mix", label: "Mixing Lab", path: "/mixing" },
+    { id: "season", label: "Seasoning Lab", path: "/transform" },
+    { id: "marinate", label: "Marinating Lab", path: "/marinate" },
+  ];
+
+  steps.push(
+    { id: "cook", label: "Cooking Lab", path: "/cooking" },
+    { id: "system", label: "System Delivery", path: "/system-delivery" },
+    { id: "score", label: "Final Comparison", path: "/score" },
+    { id: "complete", label: "Complete", path: "/complete" },
+  );
+
+  return steps;
+}
+
+export function getNextStationPath(currentPath: string, recipe?: Recipe): string {
+  const r = recipe ?? getActiveRecipe();
+  const flow = getRecipeStationFlow(r);
+  const idx = flow.findIndex((s) => s.path === currentPath);
+  if (idx >= 0 && idx + 1 < flow.length) {
+    return flow[idx + 1]!.path;
+  }
+  return "/score";
+}
+
+export function getPrevStationPath(currentPath: string, recipe?: Recipe): string {
+  const r = recipe ?? getActiveRecipe();
+  const flow = getRecipeStationFlow(r);
+  const idx = flow.findIndex((s) => s.path === currentPath);
+  if (idx > 0) {
+    return flow[idx - 1]!.path;
+  }
+  return "/kitchen";
+}
 
 export function getUnlockedStage(recipeId?: string): number {
   if (typeof window !== "undefined") {
@@ -610,8 +779,8 @@ export const DIFFICULTY_CONFIGS: Record<RecipeDifficulty, DifficultyConfig> = {
     id: "easy",
     name: "EASY",
     badge: "EASY",
-    timeSeconds: 300, // 5:00
-    timeDisplay: "5:00",
+    timeSeconds: 420, // 7:00 (+120s)
+    timeDisplay: "7:00",
     description: "Comfortable time to learn the recipe.",
     tag: "Relaxed",
     colorClass: "text-emerald-600 dark:text-emerald-400 border-emerald-500/40 bg-emerald-500/10",
@@ -621,8 +790,8 @@ export const DIFFICULTY_CONFIGS: Record<RecipeDifficulty, DifficultyConfig> = {
     id: "medium",
     name: "MEDIUM",
     badge: "MEDIUM",
-    timeSeconds: 210, // 3:30
-    timeDisplay: "3:30",
+    timeSeconds: 300, // 5:00 (+90s)
+    timeDisplay: "5:00",
     description: "A balanced challenge.",
     tag: "Standard",
     colorClass: "text-amber-600 dark:text-amber-400 border-amber-500/40 bg-amber-500/10",
@@ -632,8 +801,8 @@ export const DIFFICULTY_CONFIGS: Record<RecipeDifficulty, DifficultyConfig> = {
     id: "hard",
     name: "HARD",
     badge: "HARD",
-    timeSeconds: 120, // 2:00
-    timeDisplay: "2:00",
+    timeSeconds: 190, // 3:10 (+70s)
+    timeDisplay: "3:10",
     description: "Fast execution required.",
     tag: "Challenging",
     colorClass: "text-orange-600 dark:text-orange-400 border-orange-500/40 bg-orange-500/10",
@@ -643,14 +812,26 @@ export const DIFFICULTY_CONFIGS: Record<RecipeDifficulty, DifficultyConfig> = {
     id: "masterchef",
     name: "MASTERCHEF",
     badge: "MASTERCHEF",
-    timeSeconds: 60, // 1:00
-    timeDisplay: "1:00",
+    timeSeconds: 120, // 2:00 (+60s)
+    timeDisplay: "2:00",
     description: "No room for hesitation.",
     tag: "Expert",
     colorClass: "text-rose-600 dark:text-rose-400 border-rose-500/40 bg-rose-500/10",
     dotClass: "bg-rose-500",
   },
 };
+
+/** Score multiplier per difficulty — DIFFICULTIES in backend/app/gameplay.py. */
+export const DIFFICULTY_MULTIPLIERS: Record<RecipeDifficulty, number> = {
+  easy: 0.8,
+  medium: 1.0,
+  hard: 1.25,
+  masterchef: 1.5,
+};
+
+export function difficultyMultiplier(difficulty: RecipeDifficulty | undefined): number {
+  return (difficulty && DIFFICULTY_MULTIPLIERS[difficulty]) ?? 1.0;
+}
 
 export interface RecipeRunSession {
   recipeId: string;
@@ -659,6 +840,8 @@ export interface RecipeRunSession {
   startTime: number;
   endTime?: number;
   isCompleted: boolean;
+  finalScore?: number;
+  finalStars?: number;
   backendSessionId?: string;
   backendSeed?: number;
   backendSubmitResult?: SubmitResult;
@@ -673,10 +856,34 @@ export interface RecipeRunSession {
   marinatingAccuracy?: number;
   cookingAccuracy?: number;
   deliveryAccuracy?: number;
+  systemAccuracy?: number;
+  // Settings the server needs to rebuild and score the dish.
+  bowl?: string[];
+  countdownPending?: boolean;
+  isPaused?: boolean;
+  pausedRemaining?: number;
+  pausedAt?: number;
+  systemPreset?: "lowpass1" | "resonator2" | "moving_avg" | "notch";
+  systemPoleRadius?: number;
+  systemSamplingHz?: number;
+  systemOmega?: number;
+  /** Precision Oven equaliser, in game Hz, relative to the dish fundamental f0. */
+  ovenSettings?: {
+    f0: number;
+    gains: [number, number, number];
+    cutoffHz: number;
+    notchHz: number;
+    notchOn: boolean;
+    /** The oven's verified sampling rate: it edits only up to fs/2. */
+    fs?: number;
+  };
 }
 
 export function startRecipeRun(recipeId: string, difficulty: RecipeDifficulty) {
   if (typeof window !== "undefined") {
+    // Reset progress and transient pipeline signals for this recipe to ensure clean isolation
+    resetRecipeProgress(recipeId);
+
     // Ensure target expected signal is precomputed and persisted for the recipe
     getOrSaveExpectedSignal(recipeId);
 
@@ -687,14 +894,17 @@ export function startRecipeRun(recipeId: string, difficulty: RecipeDifficulty) {
       totalSeconds: config.timeSeconds,
       startTime: Date.now(),
       isCompleted: false,
+      countdownPending: false,
+      isPaused: false,
     };
     window.localStorage.setItem("wavebakery_recipe_session", JSON.stringify(session));
     window.dispatchEvent(new Event("wavebakery_session_changed"));
 
-    // Connect to backend session asynchronously
-    const chefName = getChefName() || "Chef Fourier";
-    api.ensureAuthenticated(chefName)
-      .then(() => api.createSession(recipeId))
+    // Connect to backend session asynchronously (only for a signed-in chef;
+    // otherwise the run stays local).
+    api
+      .ensureAuthenticated()
+      .then(() => api.createSession(recipeId, difficulty))
       .then((backendSession) => {
         const stored = window.localStorage.getItem("wavebakery_recipe_session");
         if (stored) {
@@ -710,6 +920,151 @@ export function startRecipeRun(recipeId: string, difficulty: RecipeDifficulty) {
       .catch((err) => {
         console.warn("Could not create backend session (using local fallback):", err);
       });
+  }
+}
+
+/**
+ * Pauses active recipe gameplay: freezes the timer and pauses active audio.
+ */
+export function pauseRecipeRun() {
+  if (typeof window !== "undefined") {
+    try {
+      const stored = window.localStorage.getItem("wavebakery_recipe_session");
+      if (stored) {
+        const session: RecipeRunSession = JSON.parse(stored);
+        if (!session.isCompleted && !session.countdownPending && !session.isPaused) {
+          const elapsed = Math.floor((Date.now() - session.startTime) / 1000);
+          const remaining = Math.max(0, session.totalSeconds - elapsed);
+          session.isPaused = true;
+          session.pausedRemaining = remaining;
+          session.pausedAt = Date.now();
+          window.localStorage.setItem("wavebakery_recipe_session", JSON.stringify(session));
+          window.dispatchEvent(new Event("wavebakery_session_changed"));
+          pauseAllActiveAudio();
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/**
+ * Resumes recipe gameplay: re-anchors startTime to preserve exact remaining time and resumes audio.
+ */
+export function resumeRecipeRun() {
+  if (typeof window !== "undefined") {
+    try {
+      const stored = window.localStorage.getItem("wavebakery_recipe_session");
+      if (stored) {
+        const session: RecipeRunSession = JSON.parse(stored);
+        if (session.isPaused) {
+          const remaining =
+            typeof session.pausedRemaining === "number"
+              ? session.pausedRemaining
+              : session.totalSeconds;
+          session.isPaused = false;
+          session.startTime = Date.now() - (session.totalSeconds - remaining) * 1000;
+          delete session.pausedRemaining;
+          delete session.pausedAt;
+          window.localStorage.setItem("wavebakery_recipe_session", JSON.stringify(session));
+          window.dispatchEvent(new Event("wavebakery_session_changed"));
+          resumeAllActiveAudio();
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/**
+ * Resets recipe timer to full allocation for current difficulty, holding in paused state until countdown finishes.
+ */
+export function resetRecipeTimerToFull(recipeId?: string) {
+  if (typeof window !== "undefined") {
+    try {
+      const stored = window.localStorage.getItem("wavebakery_recipe_session");
+      if (stored) {
+        const session: RecipeRunSession = JSON.parse(stored);
+        const config = DIFFICULTY_CONFIGS[session.difficulty];
+        session.totalSeconds = config.timeSeconds;
+        session.pausedRemaining = config.timeSeconds;
+        session.startTime = Date.now();
+        session.isPaused = true;
+        session.isCompleted = false;
+        delete session.endTime;
+        window.localStorage.setItem("wavebakery_recipe_session", JSON.stringify(session));
+        window.dispatchEvent(new Event("wavebakery_session_changed"));
+      }
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/**
+ * Resets the current station's transient data and triggers a clean re-mount.
+ */
+export function resetCurrentStage(recipeId?: string, currentPath?: string) {
+  if (typeof window !== "undefined") {
+    try {
+      const activeId = recipeId ?? getRecipeRunSession()?.recipeId ?? getActiveRecipe().id;
+      const path = currentPath ?? window.location.pathname;
+
+      if (path.includes("generate")) {
+        window.localStorage.removeItem(`wavebakery_selected_ingredients_${activeId}`);
+        window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_raw`);
+      } else if (path.includes("filter")) {
+        window.localStorage.removeItem(`wavebakery_filtered_ingredients_${activeId}`);
+        window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_filtered`);
+      } else if (path.includes("chop")) {
+        window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_chop`);
+      } else if (path.includes("mix")) {
+        window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_mixed`);
+      } else if (path.includes("caramelize")) {
+        window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_caramelize`);
+      } else if (path.includes("transform")) {
+        window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_seasoned`);
+      } else if (path.includes("marinate")) {
+        window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_marinated`);
+      } else if (path.includes("cooking")) {
+        window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_cooked`);
+        window.localStorage.removeItem(`wavebakery_cooked_signal_${activeId}`);
+      } else if (path.includes("beam")) {
+        window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_delivered`);
+      } else if (path.includes("system")) {
+        window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_system`);
+      }
+
+      window.dispatchEvent(
+        new CustomEvent("wavebakery_stage_reset", { detail: { recipeId: activeId, path } }),
+      );
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/**
+ * Completes the pre-gameplay 3-2-1-GO countdown, officially starting the recipe run timer.
+ */
+export function completeCountdown() {
+  if (typeof window !== "undefined") {
+    try {
+      const stored = window.localStorage.getItem("wavebakery_recipe_session");
+      if (stored) {
+        const session: RecipeRunSession = JSON.parse(stored);
+        if (session.countdownPending) {
+          session.countdownPending = false;
+          session.startTime = Date.now();
+          window.localStorage.setItem("wavebakery_recipe_session", JSON.stringify(session));
+          window.dispatchEvent(new Event("wavebakery_session_changed"));
+        }
+      }
+    } catch {
+      // ignore
+    }
   }
 }
 
@@ -736,14 +1091,39 @@ export async function syncSessionParamsToBackend(recipeId?: string): Promise<voi
   if (!activeRecipe) return;
 
   const appliance = session.cookingAppliance || activeRecipe.cookingMethod.id;
+  const seasonFreq = session.seasonFreq ?? activeRecipe.seasoningTarget.frequency;
+  // Field names must match backend schemas.CookParams exactly (seasoning,
+  // frequency, blend, marinate, appliances, ...) — pydantic silently drops
+  // unrecognized keys and falls back to defaults instead of erroring, so a
+  // mismatch here means the player's actual dials never reach the score.
   const payload = {
-    season_gain: session.seasonGain ?? activeRecipe.seasoningTarget.amplitude,
-    season_freq: session.seasonFreq ?? activeRecipe.seasoningTarget.frequency,
-    marinate_time: session.marinateTime ?? activeRecipe.marinateTarget.timeScale,
+    seasoning: session.seasonGain ?? activeRecipe.seasoningTarget.amplitude,
+    frequency: seasonFreq,
+    blend: seasonFreq,
+    marinate: session.marinateTime ?? activeRecipe.marinateTarget.timeScale,
     appliances: [appliance],
-    fry_temp: 180,
-    bake_time: 20,
-    boil_power: 80,
+    ...(session.bowl ? { bowl: session.bowl } : {}),
+    // Finishing stations send their SETTINGS; the server applies the same
+    // burnt overtone, oven filter, road vibration and cart H(z) to its own
+    // dish and scores the result (backend/app/delivery.py).
+    ...(session.ovenSettings
+      ? {
+          oven_f0: session.ovenSettings.f0,
+          oven_gains: session.ovenSettings.gains,
+          oven_cutoff: session.ovenSettings.cutoffHz,
+          oven_notch: session.ovenSettings.notchHz,
+          oven_notch_on: session.ovenSettings.notchOn,
+          oven_fs: session.ovenSettings.fs ?? null,
+        }
+      : {}),
+    ...(session.systemPreset
+      ? {
+          system_preset: session.systemPreset,
+          system_pole_radius: session.systemPoleRadius ?? 0,
+          system_omega: session.systemOmega ?? 0,
+          system_sampling_hz: session.systemSamplingHz ?? 8000,
+        }
+      : {}),
   };
 
   try {
@@ -753,8 +1133,62 @@ export async function syncSessionParamsToBackend(recipeId?: string): Promise<voi
   }
 }
 
+// One in-flight submit per backend session, shared by every caller (score
+// screen re-renders, leaderboard retry), so a dish is never served twice.
+const inflightSubmits = new Map<string, Promise<SubmitResult | null>>();
+
+/** The current run's submit if it is still waiting for the server, else null. */
+export function inflightSubmit(): Promise<SubmitResult | null> | null {
+  const sid = getRecipeRunSession()?.backendSessionId;
+  return sid ? (inflightSubmits.get(sid) ?? null) : null;
+}
+
+/**
+ * Serves the current run's dish to the backend and stores the result on the
+ * session. Safe to call repeatedly: returns the stored result if there is
+ * one, joins an in-flight request, and otherwise syncs params then submits.
+ * Returns null when there is no backend session or the server is unreachable
+ * (the run stays unserved, so a later call can retry it).
+ */
+export function submitRunToBackend(recipeId?: string): Promise<SubmitResult | null> {
+  const session = getRecipeRunSession();
+  const sid = session?.backendSessionId;
+  if (!session || !sid) return Promise.resolve(null);
+  if (session.backendSubmitResult) return Promise.resolve(session.backendSubmitResult);
+
+  const existing = inflightSubmits.get(sid);
+  if (existing) return existing;
+
+  const request = syncSessionParamsToBackend(recipeId ?? session.recipeId)
+    .then(() => api.submitSession(sid))
+    .then((result) => {
+      // The server's verdict IS the run's final score. Store it here, not on
+      // whichever page happens to be open: leaving the score screen before
+      // the reply arrived used to leave the Complete page showing 0.
+      const total =
+        result.total_score ??
+        Math.round(result.score * 10 * difficultyMultiplier(session.difficulty));
+      updateRecipeRunSession({
+        backendSubmitResult: result,
+        finalScore: total,
+        finalStars: result.stars,
+      });
+      saveRecipeBestScore(recipeId ?? session.recipeId, total);
+      return result;
+    })
+    .catch((err) => {
+      console.warn("Backend session submit failed (will retry later):", err);
+      return null;
+    })
+    .finally(() => {
+      inflightSubmits.delete(sid);
+    });
+  inflightSubmits.set(sid, request);
+  return request;
+}
+
 export function recordStageAccuracy(
-  stage: "filtering" | "mixing" | "seasoning" | "marinating" | "cooking" | "delivery",
+  stage: "filtering" | "mixing" | "seasoning" | "marinating" | "cooking" | "delivery" | "system",
   accuracy: number,
 ) {
   if (typeof window !== "undefined") {
@@ -769,6 +1203,7 @@ export function recordStageAccuracy(
         else if (stage === "marinating") session.marinatingAccuracy = clamped;
         else if (stage === "cooking") session.cookingAccuracy = clamped;
         else if (stage === "delivery") session.deliveryAccuracy = clamped;
+        else if (stage === "system") session.systemAccuracy = clamped;
 
         window.localStorage.setItem("wavebakery_recipe_session", JSON.stringify(session));
         window.dispatchEvent(new Event("wavebakery_session_changed"));
@@ -779,7 +1214,7 @@ export function recordStageAccuracy(
   }
 }
 
-export function completeRecipeRun() {
+export function completeRecipeRun(recipeId?: string, score?: number) {
   if (typeof window !== "undefined") {
     try {
       const stored = window.localStorage.getItem("wavebakery_recipe_session");
@@ -788,9 +1223,20 @@ export function completeRecipeRun() {
         if (!session.isCompleted) {
           session.isCompleted = true;
           session.endTime = Date.now();
+          if (score != null && !isNaN(score)) {
+            session.finalScore = Math.round(score);
+          }
+          window.localStorage.setItem("wavebakery_recipe_session", JSON.stringify(session));
+          window.dispatchEvent(new Event("wavebakery_session_changed"));
+        } else if (score != null && !isNaN(score) && session.finalScore === undefined) {
+          session.finalScore = Math.round(score);
           window.localStorage.setItem("wavebakery_recipe_session", JSON.stringify(session));
           window.dispatchEvent(new Event("wavebakery_session_changed"));
         }
+      }
+      const targetRecipeId = recipeId ?? getRecipeRunSession()?.recipeId;
+      if (targetRecipeId && score != null && !isNaN(score) && score > 0) {
+        saveRecipeBestScore(targetRecipeId, score);
       }
     } catch {
       // ignore
@@ -817,6 +1263,12 @@ export function useRecipeTimer() {
   const [timeRemaining, setTimeRemaining] = useState<number>(() => {
     const s = getRecipeRunSession();
     if (!s) return 300;
+    if (s.isPaused) {
+      return s.pausedRemaining ?? s.totalSeconds;
+    }
+    if (s.countdownPending) {
+      return s.totalSeconds;
+    }
     if (s.isCompleted && s.endTime) {
       const elapsed = Math.floor((s.endTime - s.startTime) / 1000);
       return Math.max(0, s.totalSeconds - elapsed);
@@ -827,7 +1279,13 @@ export function useRecipeTimer() {
 
   useEffect(() => {
     const handleSessionChange = () => {
-      setSession(getRecipeRunSession());
+      const currentSession = getRecipeRunSession();
+      setSession(currentSession);
+      if (currentSession?.isPaused) {
+        setTimeRemaining(currentSession.pausedRemaining ?? currentSession.totalSeconds);
+      } else if (currentSession?.countdownPending) {
+        setTimeRemaining(currentSession.totalSeconds);
+      }
     };
     window.addEventListener("wavebakery_session_changed", handleSessionChange);
     window.addEventListener("storage", handleSessionChange);
@@ -835,7 +1293,11 @@ export function useRecipeTimer() {
     const interval = setInterval(() => {
       const currentSession = getRecipeRunSession();
       if (currentSession) {
-        if (currentSession.isCompleted && currentSession.endTime) {
+        if (currentSession.isPaused) {
+          setTimeRemaining(currentSession.pausedRemaining ?? currentSession.totalSeconds);
+        } else if (currentSession.countdownPending) {
+          setTimeRemaining(currentSession.totalSeconds);
+        } else if (currentSession.isCompleted && currentSession.endTime) {
           const elapsed = Math.floor((currentSession.endTime - currentSession.startTime) / 1000);
           setTimeRemaining(Math.max(0, currentSession.totalSeconds - elapsed));
         } else {
@@ -853,9 +1315,13 @@ export function useRecipeTimer() {
     };
   }, []);
 
-  const isExpired = session ? !session.isCompleted && timeRemaining <= 0 : false;
-  const isLowTime = timeRemaining <= 45 && timeRemaining > 15;
-  const isCritical = timeRemaining <= 15 && timeRemaining > 0;
+  const isPaused = Boolean(session?.isPaused);
+  const isCountdownPending = Boolean(session?.countdownPending);
+  const isExpired = session
+    ? !session.isCompleted && !isCountdownPending && !isPaused && timeRemaining <= 0
+    : false;
+  const isLowTime = !isCountdownPending && !isPaused && timeRemaining <= 45 && timeRemaining > 15;
+  const isCritical = !isCountdownPending && !isPaused && timeRemaining <= 15 && timeRemaining > 0;
 
   const minutes = Math.floor(timeRemaining / 60);
   const seconds = timeRemaining % 60;
@@ -869,6 +1335,10 @@ export function useRecipeTimer() {
     isLowTime,
     isCritical,
     difficultyConfig: session ? DIFFICULTY_CONFIGS[session.difficulty] : null,
+    isCountdownPending,
+    isPaused,
+    pauseRun: pauseRecipeRun,
+    resumeRun: resumeRecipeRun,
   };
 }
 
@@ -882,7 +1352,16 @@ export function resetRecipeProgress(recipeId?: string) {
       window.localStorage.removeItem(`wavebakery_filtered_ingredients_${activeId}`);
       window.localStorage.removeItem(`wavebakery_cooked_signal_${activeId}`);
 
-      const stages = ["raw", "filtered", "mixed", "seasoned", "marinated", "cooked"];
+      const stages = [
+        "raw",
+        "filtered",
+        "mixed",
+        "seasoned",
+        "marinated",
+        "cooked",
+        "delivered",
+        "served",
+      ];
       for (const stage of stages) {
         window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_${stage}`);
       }
@@ -915,10 +1394,10 @@ export function useRecipeProgress(): [number, (stage: number) => void] {
     };
   }, []);
 
-  const unlock = (newStage: number) => {
+  const unlock = useCallback((newStage: number) => {
     setUnlockedStage(newStage);
     setStageState(getUnlockedStage());
-  };
+  }, []);
 
   return [stage, unlock];
 }
@@ -1100,7 +1579,6 @@ export const ALL_AVAILABLE_INGREDIENTS: IngredientDetail[] = [
     category: "Pantry",
     emoji: "🥫",
   },
-
 ];
 
 export function getSelectedIngredients(recipeId?: string): IngredientDetail[] {
@@ -1253,6 +1731,7 @@ export interface CookedSignalData {
   pos: number;
   timestamp: number;
   samples: number[];
+  metadata?: Record<string, unknown>;
 }
 
 const COOKING_METHOD_CONFIGS: Record<string, { name: string; freq: number; amp: number }> = {
@@ -1310,13 +1789,13 @@ export function computeIngredientSamples(ing: {
         freq,
         amplitude: amp,
         phase: ing.seed !== undefined ? ing.seed : 0,
-        noise: ing.noise !== undefined ? ing.noise : (washable ? 0.75 : 0.0),
+        noise: ing.noise !== undefined ? ing.noise : washable ? 0.75 : 0.0,
         sampleCount: width + 1,
       });
     }
   }
 
-  const noise = ing.noise !== undefined ? ing.noise : (washable ? 0.75 : 0.05);
+  const noise = ing.noise !== undefined ? ing.noise : washable ? 0.75 : 0.05;
   const samples: number[] = [];
   for (let x = 0; x <= width; x += 1) {
     const t = (x / width) * Math.PI * 2 * freq;
@@ -1329,10 +1808,14 @@ export function computeIngredientSamples(ing: {
 
 export function getDefaultCookedSignal(recipeId?: string): CookedSignalData {
   const activeRecipe = recipeId
-    ? recipes.find((r) => r.id === recipeId) ?? getActiveRecipe()
+    ? (recipes.find((r) => r.id === recipeId) ?? getActiveRecipe())
     : getActiveRecipe();
   const methodId = activeRecipe.cookingMethod.id;
-  const cfg = COOKING_METHOD_CONFIGS[methodId] ?? { name: activeRecipe.cookingMethod.name, freq: 6, amp: 0.7 };
+  const cfg = COOKING_METHOD_CONFIGS[methodId] ?? {
+    name: activeRecipe.cookingMethod.name,
+    freq: 6,
+    amp: 0.7,
+  };
   const ideal = getIdealDishSignal(activeRecipe.id);
   const frequency = ideal.frequency;
   const amplitude = 1.0;
@@ -1387,7 +1870,9 @@ export function getCookedSignal(recipeId?: string): CookedSignalData {
   return getDefaultCookedSignal(recipeId);
 }
 
-export function useCookedSignal(recipeId?: string): [CookedSignalData, (signal: CookedSignalData) => void] {
+export function useCookedSignal(
+  recipeId?: string,
+): [CookedSignalData, (signal: CookedSignalData) => void] {
   const [signal, setSignalState] = useState<CookedSignalData>(() => getCookedSignal(recipeId));
 
   useEffect(() => {

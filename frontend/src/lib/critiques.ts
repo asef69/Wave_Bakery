@@ -1,6 +1,6 @@
 /**
  * Dynamic Culinary & DSP Diagnostic System (WaveBakery)
- * Evaluates dish parameters across filtering, mixing, transformation, convolution, and beamforming,
+ * Evaluates dish parameters across filtering, mixing, transformation, convolution and delivery,
  * generating authentic eater critiques and actionable signal-engineering guidance.
  */
 
@@ -68,21 +68,24 @@ export function generateCustomerCritique(metrics: DishMetrics): CustomerCritique
       station: "Washing / Filtering",
       status: "pass",
       culinaryNote: "Produce was perfectly washed; zero sand or grit detected.",
-      dspDiagnosis: "Cutoff frequency precisely suppressed out-of-band high-frequency noise (SNR > 24 dB).",
+      dspDiagnosis:
+        "Cutoff frequency precisely suppressed out-of-band high-frequency noise (SNR > 24 dB).",
     });
   } else if (metrics.filteringAccuracy >= 70) {
     diagnostics.push({
       station: "Washing / Filtering",
       status: "warn",
       culinaryNote: "Slight granular grit in the texture.",
-      dspDiagnosis: "Low-pass filter cutoff was slightly too wide; minor high-frequency chatter persisted.",
+      dspDiagnosis:
+        "Low-pass filter cutoff was slightly too wide; minor high-frequency chatter persisted.",
     });
   } else {
     diagnostics.push({
       station: "Washing / Filtering",
       status: "fail",
       culinaryNote: "Gritty and unwashed vegetables overpowered the palate!",
-      dspDiagnosis: "Excessive noise spectral density remained. Tune filter cutoff closer to fundamental band.",
+      dspDiagnosis:
+        "Excessive noise spectral density remained. Tune filter cutoff closer to fundamental band.",
     });
   }
 
@@ -115,7 +118,10 @@ export function generateCustomerCritique(metrics: DishMetrics): CustomerCritique
     diagnostics.push({
       station: "Seasoning / Gain",
       status: "warn",
-      culinaryNote: metrics.seasoningAccuracy < 70 ? "Severely under-seasoned / bland!" : "Seasoning balance was slightly off.",
+      culinaryNote:
+        metrics.seasoningAccuracy < 70
+          ? "Severely under-seasoned / bland!"
+          : "Seasoning balance was slightly off.",
       dspDiagnosis: "Amplitude scaling factor A diverged from master recipe peak amplitude.",
     });
   }
@@ -133,7 +139,8 @@ export function generateCustomerCritique(metrics: DishMetrics): CustomerCritique
       station: "Cooking / Convolution",
       status: "warn",
       culinaryNote: "The dish felt partially raw or unevenly heated.",
-      dspDiagnosis: "Convolution slider was not swept to 100% depth, leaving impulse response under-integrated.",
+      dspDiagnosis:
+        "Convolution slider was not swept to 100% depth, leaving impulse response under-integrated.",
     });
   }
 
@@ -151,7 +158,8 @@ export function generateCustomerCritique(metrics: DishMetrics): CustomerCritique
         station: "Beam Delivery",
         status: "warn",
         culinaryNote: "Dish was slightly lukewarm due to acoustic dispersion.",
-        dspDiagnosis: "Array factor main lobe deviated from table angle; secondary sidelobes caused power dissipation.",
+        dspDiagnosis:
+          "Array factor main lobe deviated from table angle; secondary sidelobes caused power dissipation.",
       });
     }
   }

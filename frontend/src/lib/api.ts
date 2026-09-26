@@ -3,14 +3,19 @@
  *
  * Connects the frontend with the FastAPI backend running on port 8000.
  * Server owns DSP calculations, state, spectrograms, convolutions,
- * dish judging, score evaluations, and phased array beamforming.
+ * dish judging and score evaluations.
  */
 
+// In dev, always hit the backend directly rather than relying on Vite's
+// `/api` proxy: this dev server (TanStack Start) intercepts `/api/*`
+// requests with its own route-not-found handler before Vite's proxy ever
+// sees them, so a relative path 404s. Hardcoding a match on port "5173"
+// was also fragile — any port already in use (common across dev sessions)
+// bumps Vite to 5174+ and silently breaks every API call, including
+// registration. `import.meta.env.DEV` is true regardless of which port
+// Vite actually picks.
 const API_BASE =
-  typeof window !== "undefined" &&
-  (window.location.port === "5173" || window.location.port === "3000")
-    ? "http://127.0.0.1:8000/api"
-    : "/api";
+  typeof import.meta !== "undefined" && import.meta.env?.DEV ? "http://127.0.0.1:8000/api" : "/api";
 
 const TOKEN_KEY = "wavekitchen_player_token";
 
@@ -72,7 +77,13 @@ export interface SessionItemOut {
   voice: string;
   f0: number;
   components: Array<{ freq: number; amp: number }>;
-  contaminants: Array<{ kind: string; amp: number; band_lo: number; band_hi: number; freq?: number }>;
+  contaminants: Array<{
+    kind: string;
+    amp: number;
+    band_lo: number;
+    band_hi: number;
+    freq?: number;
+  }>;
   prep_score: number;
   accepted: boolean;
   dirty: SignalPayload;
@@ -86,8 +97,6 @@ export interface GameSessionOut {
   status: "in_prep" | "cooked" | "served" | "abandoned";
   params: Record<string, unknown>;
   items: SessionItemOut[];
-  requires_caramelize: boolean;
-  requires_chop: boolean;
 }
 
 export interface FilterBand {
@@ -135,6 +144,31 @@ export interface FilterResponse {
   accepted: boolean;
 }
 
+// Must match backend schemas.CookParams field-for-field: pydantic silently
+// drops unrecognized keys and falls back to defaults instead of raising an
+// error, so a mismatch here means player input silently never reaches the
+// score. All fields optional since the backend fills in defaults for any
+// left out.
+export interface CookParams {
+  seasoning?: number;
+  blend?: number;
+  frequency?: number;
+  marinate?: number;
+  appliances?: string[];
+  cooking_method?: string | null;
+  bowl?: string[] | null;
+  oven_f0?: number | null;
+  oven_gains?: [number, number, number] | null;
+  oven_cutoff?: number | null;
+  oven_notch?: number | null;
+  oven_notch_on?: boolean | null;
+  oven_fs?: number | null;
+  system_preset?: "lowpass1" | "resonator2" | "moving_avg" | "notch" | null;
+  system_pole_radius?: number | null;
+  system_omega?: number | null;
+  system_sampling_hz?: number | null;
+}
+
 export interface StagesOut {
   mixed: SignalPayload;
   seasoned: SignalPayload;
@@ -172,12 +206,17 @@ export interface SubmitResult {
   mixing_score?: number;
   transform_score?: number;
   cooking_score?: number;
+  delivery_score?: number | null;
+  system_score?: number | null;
   snr_db: number;
   mse: number;
   correlation: number;
   spectral_similarity: number;
   points_awarded: number;
   total_points: number;
+  /** Overall score (dish x 10 x difficulty + time bonus), timed on the server. */
+  total_score?: number;
+  time_bonus?: number;
   unlocked_tier: number;
   rank_title: string;
   notes: string[];
@@ -187,26 +226,59 @@ export interface SubmitResult {
   player_spectrum: SpectrumPayload;
 }
 
-export interface SpeakerState {
-  id: number;
-  phase: number;
-  amplitude?: number;
-  is_active?: boolean;
+export interface LeaderboardRow {
+  rank: number;
+  player_id: string;
+  handle: string;
+  /** Dish score, 0-100. */
+  score: number;
+  /** Overall score, as the score screen shows it (what the board ranks on). */
+  total_score?: number;
+  stars: number;
+  recipe_id: string;
+  recipe_name: string;
+  difficulty?: string | null;
+  created_at: string;
 }
 
-export interface BeamDeliveryRequest {
-  speakers: SpeakerState[];
-  target_angle: number;
+export interface GlobalRankRow {
+  rank: number;
+  player_id: string;
+  handle: string;
+  points: number;
+  rank_title: string;
+  dishes_served: number;
+  best_score: number;
 }
 
-export interface BeamDeliveryResponse {
-  steered_angle: number;
-  target_angle: number;
-  is_aligned: boolean;
-  tolerance_degrees: number;
-  beam_pattern: Array<{ angle: number; intensity: number }>;
-  accuracy: number;
-  message: string;
+export interface RecipeStats {
+  recipe_id: string;
+  recipe_name: string;
+  tier: number;
+  plays: number;
+  average_score: number;
+  best_score: number;
+  five_star_rate: number;
+}
+
+export interface GlobalStats {
+  players: number;
+  sessions_started: number;
+  dishes_served: number;
+  average_score: number;
+  hardest_recipe: string | null;
+  easiest_recipe: string | null;
+  recipes: RecipeStats[];
+}
+
+export interface PlayerHistoryRow {
+  attempt_id: string;
+  recipe_id: string;
+  recipe_name: string;
+  score: number;
+  stars: number;
+  points_awarded: number;
+  created_at: string;
 }
 
 class ApiClient {
@@ -222,16 +294,16 @@ class ApiClient {
     this.token = token;
     if (typeof window !== "undefined") {
       if (token) {
-        localStorage.setItem(TOKEN_KEY, token);
+        window.localStorage.setItem(TOKEN_KEY, token);
       } else {
-        localStorage.removeItem(TOKEN_KEY);
+        window.localStorage.removeItem(TOKEN_KEY);
       }
     }
   }
 
   public getToken(): string | null {
     if (!this.token && typeof window !== "undefined") {
-      this.token = localStorage.getItem(TOKEN_KEY);
+      this.token = window.localStorage.getItem(TOKEN_KEY);
     }
     return this.token;
   }
@@ -265,21 +337,25 @@ class ApiClient {
   }
 
   // Auth & Players
-  async ensureAuthenticated(handle = "Chef Fourier"): Promise<string> {
+  /**
+   * Returns the signed-in chef's token, or throws if nobody is signed in.
+   * Signing in needs a password now, so this no longer auto-registers or
+   * logs in by name (which let anyone act as any chef).
+   */
+  async ensureAuthenticated(): Promise<string> {
     const existing = this.getToken();
     if (existing) {
       try {
         await this.getPlayerMe();
         return existing;
       } catch {
-        // Token invalid or expired on server, re-authenticate below
+        this.setToken(null);
       }
     }
-    const res = await this.authOrRegisterPlayer(handle);
-    return res.token;
+    throw new Error("Not signed in: sign in as a chef to save runs to the server.");
   }
 
-  async registerPlayer(handle: string) {
+  async registerPlayer(handle: string, password: string) {
     const res = await this.request<{
       token: string;
       id: string;
@@ -290,13 +366,13 @@ class ApiClient {
       rank_emoji: string;
     }>("/players", {
       method: "POST",
-      body: JSON.stringify({ handle }),
+      body: JSON.stringify({ handle, password }),
     });
     this.setToken(res.token);
     return res;
   }
 
-  async loginPlayer(handle: string) {
+  async loginPlayer(handle: string, password: string) {
     const res = await this.request<{
       token: string;
       id: string;
@@ -307,13 +383,13 @@ class ApiClient {
       rank_emoji: string;
     }>("/players/login", {
       method: "POST",
-      body: JSON.stringify({ handle }),
+      body: JSON.stringify({ handle, password }),
     });
     this.setToken(res.token);
     return res;
   }
 
-  async authOrRegisterPlayer(handle: string) {
+  async authOrRegisterPlayer(handle: string, password: string) {
     const res = await this.request<{
       token: string;
       id: string;
@@ -324,7 +400,7 @@ class ApiClient {
       rank_emoji: string;
     }>("/players/auth-or-register", {
       method: "POST",
-      body: JSON.stringify({ handle }),
+      body: JSON.stringify({ handle, password }),
     });
     this.setToken(res.token);
     return res;
@@ -364,6 +440,10 @@ class ApiClient {
     }>("/players/me");
   }
 
+  async getPlayerHistory(limit = 25): Promise<PlayerHistoryRow[]> {
+    return this.request<PlayerHistoryRow[]>(`/players/me/history?limit=${limit}`);
+  }
+
   // Catalogue
   async getRecipes(): Promise<RecipeOut[]> {
     return this.request<RecipeOut[]>("/recipes");
@@ -377,15 +457,15 @@ class ApiClient {
     return this.request<IngredientOut[]>("/ingredients");
   }
 
-  async getAppliances(): Promise<any[]> {
-    return this.request<any[]>("/appliances");
+  async getAppliances(): Promise<unknown[]> {
+    return this.request<unknown[]>("/appliances");
   }
 
   // Sessions
-  async createSession(recipeId: string): Promise<GameSessionOut> {
+  async createSession(recipeId: string, difficulty?: string): Promise<GameSessionOut> {
     return this.request<GameSessionOut>("/sessions", {
       method: "POST",
-      body: JSON.stringify({ recipe_id: recipeId }),
+      body: JSON.stringify({ recipe_id: recipeId, difficulty }),
     });
   }
 
@@ -393,21 +473,31 @@ class ApiClient {
     return this.request<GameSessionOut>(`/sessions/${sessionId}`);
   }
 
-  async filterIngredient(sessionId: string, slot: number, payload: FilterRequest): Promise<FilterResponse> {
+  async filterIngredient(
+    sessionId: string,
+    slot: number,
+    payload: FilterRequest,
+  ): Promise<FilterResponse> {
     return this.request<FilterResponse>(`/sessions/${sessionId}/ingredients/${slot}/filter`, {
       method: "POST",
       body: JSON.stringify(payload),
     });
   }
 
-  async acceptIngredient(sessionId: string, slot: number): Promise<{ status: string; prep_score: number }> {
-    return this.request<{ status: string; prep_score: number }>(`/sessions/${sessionId}/ingredients/${slot}/accept`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    });
+  async acceptIngredient(
+    sessionId: string,
+    slot: number,
+  ): Promise<{ status: string; prep_score: number }> {
+    return this.request<{ status: string; prep_score: number }>(
+      `/sessions/${sessionId}/ingredients/${slot}/accept`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    );
   }
 
-  async setParams(sessionId: string, params: Record<string, unknown>): Promise<StagesOut> {
+  async setParams(sessionId: string, params: CookParams): Promise<StagesOut> {
     return this.request<StagesOut>(`/sessions/${sessionId}/params`, {
       method: "PUT",
       body: JSON.stringify(params),
@@ -428,17 +518,24 @@ class ApiClient {
     });
   }
 
-  async beamDelivery(sessionId: string, payload: BeamDeliveryRequest): Promise<BeamDeliveryResponse> {
-    return this.request<BeamDeliveryResponse>(`/sessions/${sessionId}/beam-delivery`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+  // Leaderboard
+  async getLeaderboard(
+    recipeId?: string,
+    limit = 20,
+    difficulty?: string,
+  ): Promise<LeaderboardRow[]> {
+    const q = new URLSearchParams({ limit: String(limit) });
+    if (recipeId) q.set("recipe_id", recipeId);
+    if (difficulty) q.set("difficulty", difficulty);
+    return this.request<LeaderboardRow[]>(`/leaderboard?${q.toString()}`);
   }
 
-  // Leaderboard
-  async getLeaderboard(recipeId?: string) {
-    const q = recipeId ? `?recipe_id=${recipeId}` : "";
-    return this.request<any[]>(`/leaderboard${q}`);
+  async getGlobalRanking(limit = 20): Promise<GlobalRankRow[]> {
+    return this.request<GlobalRankRow[]>(`/leaderboard/global?limit=${limit}`);
+  }
+
+  async getStats(): Promise<GlobalStats> {
+    return this.request<GlobalStats>("/stats");
   }
 
   // Authoritative Direct DSP Services
@@ -531,26 +628,6 @@ class ApiClient {
     });
   }
 
-  async calculateBeamforming(payload: {
-    speakers: Array<{ id: number; phase: number; amplitude?: number; is_active?: boolean }>;
-    target_angle?: number;
-    window_type?: string;
-  }) {
-    return this.request<{
-      steered_angle: number;
-      target_angle: number;
-      is_aligned: boolean;
-      transmission_efficiency_pct: number;
-      peak_sidelobe_level_db: number;
-      window_weights: number[];
-      beam_pattern: Array<{ angle: number; intensity: number }>;
-      table_spillovers: Array<{ table_id: number; table_name: string; spillover_intensity_pct: number }>;
-    }>("/dsp/beamforming", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-  }
-
   async evaluateCritique(payload: {
     recipe_id: string;
     similarity: number;
@@ -582,7 +659,9 @@ class ApiClient {
 
   // Health
   async getHealth() {
-    return this.request<{ status: string; version: string; sample_rate: number; frame: number }>("/health");
+    return this.request<{ status: string; version: string; sample_rate: number; frame: number }>(
+      "/health",
+    );
   }
 }
 

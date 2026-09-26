@@ -9,6 +9,10 @@ import {
   evaluateTriangleWave,
   evaluateSquareWave,
   MATHEMATICAL_SIGNALS,
+  computeSuperpositionPath,
+  samplesToPath,
+  parametricPath,
+  getMathematicalSignal,
 } from "@/lib/signals";
 
 describe("T2: Mathematical Signal Ingredients", () => {
@@ -87,5 +91,130 @@ describe("T2: Mathematical Signal Ingredients", () => {
         expect(Math.abs(s)).toBeLessThanOrEqual(5.0);
       }
     }
+  });
+
+  describe("Mixing Superposition Visualization", () => {
+    const W = 1000;
+    const H = 320;
+    const mock1DSamples: Record<string, number[]> = {
+      Bread: Array.from({ length: 401 }, (_, i) => Math.sin((i / 400) * 4 * Math.PI)),
+      Cheese: Array.from({ length: 401 }, (_, i) => 0.5 * Math.sin((i / 400) * 8 * Math.PI)),
+      Salt: Array.from({ length: 401 }, (_, i) => 0.2 * Math.sin((i / 400) * 20 * Math.PI)),
+    };
+
+    it("1. Single ingredient produces EXACTLY the individual signal's path", () => {
+      // 1D signal: Bread
+      const pathBread = computeSuperpositionPath([{ name: "Bread" }], mock1DSamples, W, H);
+      const expectedBread = samplesToPath(mock1DSamples["Bread"]!, W, H, 0.35);
+      expect(pathBread).toBe(expectedBread);
+
+      // Closed parametric signal: Egg
+      const pathEgg = computeSuperpositionPath([{ name: "Egg" }], mock1DSamples, W, H);
+      const eggMath = getMathematicalSignal("Egg")!;
+      const expectedEgg = parametricPath(
+        W,
+        H,
+        eggMath.parametricCurve!.generatePoints(601),
+        24,
+        true,
+      );
+      expect(pathEgg).toBe(expectedEgg);
+
+      // Open parametric signal: Noodles
+      const pathNoodles = computeSuperpositionPath([{ name: "Noodles" }], mock1DSamples, W, H);
+      const noodleMath = getMathematicalSignal("Noodles")!;
+      const expectedNoodles = parametricPath(
+        W,
+        H,
+        noodleMath.parametricCurve!.generatePoints(601),
+        24,
+        false,
+      );
+      expect(pathNoodles).toBe(expectedNoodles);
+    });
+
+    it("2. Multiple ordinary 1D signals compute discrete sample-by-sample superposition", () => {
+      const pathMixed = computeSuperpositionPath(
+        [{ name: "Bread" }, { name: "Cheese" }],
+        mock1DSamples,
+        W,
+        H,
+      );
+      const expectedSum = mock1DSamples["Bread"]!.map((b, i) => b + mock1DSamples["Cheese"]![i]!);
+      const expectedPath = samplesToPath(expectedSum, W, H, 0.35);
+      expect(pathMixed).toBe(expectedPath);
+    });
+
+    it("3. Special parametric ingredient combinations preserve 2D geometry", () => {
+      const combos = [
+        { name1: "Egg", name2: "Onion" },
+        { name1: "Egg", name2: "Tomato" },
+        { name1: "Tomato", name2: "Sauce" },
+        { name1: "Noodles", name2: "Egg" },
+        { name1: "Onion", name2: "Tomato" },
+        { name1: "Beef Patty", name2: "Tomato" },
+        { name1: "Sauce", name2: "Noodles" },
+      ];
+
+      for (const { name1, name2 } of combos) {
+        const path = computeSuperpositionPath(
+          [{ name: name1 }, { name: name2 }],
+          mock1DSamples,
+          W,
+          H,
+        );
+
+        // Verify valid SVG path
+        expect(path.startsWith("M")).toBe(true);
+        const segmentCount = path.split(" L").length;
+        expect(segmentCount).toBe(601);
+
+        // Verify it does not equal either single ingredient
+        const single1 = computeSuperpositionPath([{ name: name1 }], mock1DSamples, W, H);
+        const single2 = computeSuperpositionPath([{ name: name2 }], mock1DSamples, W, H);
+        expect(path).not.toBe(single1);
+        expect(path).not.toBe(single2);
+      }
+    });
+
+    it("4. Adding 1st produces that ingredient; adding 2nd changes it to the sum; removing 2nd restores 1st", () => {
+      // Step 1: Add Egg
+      const path1 = computeSuperpositionPath([{ name: "Egg" }], mock1DSamples, W, H);
+      const eggMath = getMathematicalSignal("Egg")!;
+      const expectedEgg = parametricPath(
+        W,
+        H,
+        eggMath.parametricCurve!.generatePoints(601),
+        24,
+        true,
+      );
+      expect(path1).toBe(expectedEgg);
+
+      // Step 2: Add Tomato
+      const path2 = computeSuperpositionPath(
+        [{ name: "Egg" }, { name: "Tomato" }],
+        mock1DSamples,
+        W,
+        H,
+      );
+      expect(path2).not.toBe(path1);
+
+      // Step 3: Remove Tomato (back to Egg)
+      const path3 = computeSuperpositionPath([{ name: "Egg" }], mock1DSamples, W, H);
+      expect(path3).toBe(expectedEgg);
+    });
+
+    it("5. Mixing parametric and 1D ingredient preserves parametric geometry modulated by 1D signal", () => {
+      const pathEggSalt = computeSuperpositionPath(
+        [{ name: "Egg" }, { name: "Salt" }],
+        mock1DSamples,
+        W,
+        H,
+      );
+      expect(pathEggSalt.startsWith("M")).toBe(true);
+      expect(pathEggSalt.split(" L").length).toBe(601);
+      const singleEgg = computeSuperpositionPath([{ name: "Egg" }], mock1DSamples, W, H);
+      expect(pathEggSalt).not.toBe(singleEgg);
+    });
   });
 });

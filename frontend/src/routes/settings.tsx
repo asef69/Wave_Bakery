@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { LogOut } from "lucide-react";
 
 import { ChefFourier } from "@/components/game/ChefFourier";
@@ -7,6 +7,7 @@ import { ChefNameModal } from "@/components/game/ChefNameModal";
 import { LogoutModal } from "@/components/game/LogoutModal";
 import { GameButton } from "@/components/game/GameButton";
 import { useChefName } from "@/lib/recipes";
+import { useSoundSettings } from "@/lib/sound";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
@@ -49,24 +50,40 @@ const defaultSettings: SettingsState = {
 };
 
 function SettingsScreen() {
-  const [settings, setSettings] = useState<SettingsState>(defaultSettings);
+  const [soundSettings, setSoundSettings] = useSoundSettings();
+  const [settings, setSettings] = useState<SettingsState>(() => ({
+    ...defaultSettings,
+    masterVolume: soundSettings.volume,
+  }));
   const [showResetNotice, setShowResetNotice] = useState(false);
   const [chefName, saveChefName] = useChefName();
   const [isNameModalOpen, setIsNameModalOpen] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const [theme, setTheme] = useTheme();
 
+  // Sync external volume updates
+  useEffect(() => {
+    setSettings((prev) =>
+      prev.masterVolume !== soundSettings.volume
+        ? { ...prev, masterVolume: soundSettings.volume }
+        : prev,
+    );
+  }, [soundSettings.volume]);
+
   const updateSetting = <K extends keyof SettingsState>(key: K, value: SettingsState[K]) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
+    if (key === "masterVolume") {
+      setSoundSettings({ volume: Number(value) });
+    }
   };
 
   const handleReset = () => {
     setSettings(defaultSettings);
+    setSoundSettings({ volume: 80, soundEnabled: true });
     setTheme("light");
     setShowResetNotice(true);
     setTimeout(() => setShowResetNotice(false), 3000);
   };
-
 
   return (
     <main className="relative min-h-screen bg-background pb-16">
@@ -81,10 +98,7 @@ function SettingsScreen() {
         allowCancel={true}
       />
 
-      <LogoutModal
-        isOpen={isLogoutModalOpen}
-        onClose={() => setIsLogoutModalOpen(false)}
-      />
+      <LogoutModal isOpen={isLogoutModalOpen} onClose={() => setIsLogoutModalOpen(false)} />
 
       <div className="lab-grid pointer-events-none absolute inset-0 opacity-[0.06]" aria-hidden />
 
@@ -360,7 +374,8 @@ function SettingsScreen() {
 
             <div className="mt-6 space-y-4">
               <p className="text-xs sm:text-sm font-semibold text-muted-foreground">
-                Choose your kitchen atmosphere. Light theme is the classic sunlit bakery, and Dark theme provides an electric midnight signal lab with high contrast.
+                Choose your kitchen atmosphere. Light theme is the classic sunlit bakery, and Dark
+                theme provides an electric midnight signal lab with high contrast.
               </p>
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

@@ -254,7 +254,7 @@ const art: Record<MachineId, () => ReactElement> = {
 };
 
 export function MachineArt({ id }: { id: MachineId }) {
-  const Art = art[id];
+  const Art = art[id] || CookArt;
   return (
     <svg viewBox="0 0 160 150" className="h-full w-full overflow-visible" aria-hidden>
       <ellipse cx={80} cy={140} rx={58} ry={8} fill="oklch(0.4 0.06 42)" opacity={0.22} />

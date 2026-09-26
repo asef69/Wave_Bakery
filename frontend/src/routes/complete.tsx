@@ -6,9 +6,11 @@ import { ChefFourier } from "@/components/game/ChefFourier";
 import { DishGlyph } from "@/components/game/DishGlyph";
 import { GameButton } from "@/components/game/GameButton";
 import { SignalAudioPlayer } from "@/lib/audio";
-import { getSavedLeaderboardEntries, saveCurrentDishScoreToLeaderboard } from "@/lib/leaderboard";
+import { servedDish } from "@/lib/delivery";
+import { getPipelineStageSignal, hasPipelineStageSignal } from "@/lib/pipeline";
 import {
   completeRecipeRun,
+  submitRunToBackend,
   useActiveRecipe,
   useChefName,
   useCookedSignal,
@@ -35,28 +37,63 @@ export const Route = createFileRoute("/complete")({
 
 function CompleteScreen() {
   const [recipe] = useActiveRecipe();
-  const { difficultyConfig, formattedTime } = useRecipeTimer();
+  const { session, difficultyConfig, formattedTime } = useRecipeTimer();
   const [chefName] = useChefName();
   const [cookedSignal] = useCookedSignal(recipe.id);
   const [player, setPlayer] = useState<SignalAudioPlayer | null>(null);
 
+  // The run's score is the server's verdict (stored on the session by
+  // submitRunToBackend), or the score screen's local total when there is no
+  // server run. This page read the session once, so arriving before the
+  // server replied showed "Final score: 0" (and saved 0 as the run's score).
+  const thisRun = session?.recipeId === recipe.id ? session : null;
+  const [submitFailed, setSubmitFailed] = useState(false);
+  const awaitingServer =
+    !!thisRun?.backendSessionId && !thisRun.backendSubmitResult && !submitFailed;
+  const finalScore = thisRun?.backendSubmitResult?.total_score ?? thisRun?.finalScore ?? null;
+  const stars = thisRun?.backendSubmitResult?.stars ?? thisRun?.finalStars ?? null;
+  const starsDisplay =
+    stars == null ? "— — — — —" : "★ ".repeat(stars) + "☆ ".repeat(Math.max(0, 5 - stars));
+
+  // Join (or start) the submit; it is deduplicated, so this never serves twice.
   useEffect(() => {
-    completeRecipeRun();
-    saveCurrentDishScoreToLeaderboard({ recipeId: recipe.id });
+    if (!awaitingServer) return;
+    let live = true;
+    submitRunToBackend(recipe.id).then((result) => {
+      if (live && !result) setSubmitFailed(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, [awaitingServer, recipe.id]);
+
+  // Close the run once its score is settled (or the server is unreachable,
+  // so the leaderboard can offer a retry).
+  useEffect(() => {
+    if (thisRun && !thisRun.isCompleted && !awaitingServer) {
+      completeRecipeRun(recipe.id, finalScore ?? undefined);
+    }
+  }, [thisRun, awaitingServer, recipe.id, finalScore]);
+
+  // The dish that was actually served (cart, else oven, else with the burnt overtone).
+  const servedSamples = (() => {
+    if (hasPipelineStageSignal(recipe.id, "served"))
+      return getPipelineStageSignal(recipe.id, "served").samples;
+    if (hasPipelineStageSignal(recipe.id, "delivered"))
+      return getPipelineStageSignal(recipe.id, "delivered").samples;
+    return servedDish(recipe.id, cookedSignal.samples);
+  })();
+
+  useEffect(() => {
     return () => {
       if (player) player.destroy();
     };
-  }, [player, recipe.id]);
-
-  const latestEntry = getSavedLeaderboardEntries().find((e) => e.recipeId === recipe.id);
-  const finalScore = latestEntry?.score ?? 940;
-  const accuracy = latestEntry?.accuracy ?? 94;
-  const starsDisplay = accuracy >= 90 ? "★ ★ ★" : accuracy >= 75 ? "★ ★ ☆" : "★ ☆ ☆";
+  }, [player]);
 
   const handlePlayAudio = () => {
     if (player) player.destroy();
     const p = new SignalAudioPlayer({
-      samples: cookedSignal.samples,
+      samples: servedSamples,
       frequency: cookedSignal.frequency,
       duration: 2.5,
     });
@@ -74,7 +111,7 @@ function CompleteScreen() {
         </h1>
 
         <div className="mt-8 grid items-center gap-8 md:grid-cols-[0.9fr_1.1fr]">
-          <DishGlyph dish={recipe.id as any} />
+          <DishGlyph dish={recipe.id} />
           <div className="text-left">
             <p className="font-mono text-[10px] tracking-[0.22em] text-muted-foreground uppercase">
               Dish served
@@ -83,7 +120,7 @@ function CompleteScreen() {
               {recipe.name}
             </p>
             <p className="mt-3 font-display text-2xl font-extrabold text-foreground">
-              Final score: {finalScore}
+              Final score: {awaitingServer ? "verifying on server…" : (finalScore ?? "—")}
             </p>
             <p className="font-display text-2xl text-primary">{starsDisplay}</p>
 
@@ -112,8 +149,7 @@ function CompleteScreen() {
                 onClick={handlePlayAudio}
                 className="uppercase font-bold tracking-wider"
               >
-                <Volume2 className="mr-2 h-4 w-4" />
-                ▶ Play Served Dish Output
+                <Volume2 className="mr-2 h-4 w-4" />▶ Play Served Dish Output
               </GameButton>
             </div>
 

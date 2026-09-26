@@ -10,6 +10,8 @@ import {
 import { useEffect, type ReactNode } from "react";
 
 import { useTheme } from "@/lib/theme";
+import { loadChickenAudio } from "@/lib/chicken-audio";
+import { installButtonClickSfx } from "@/lib/sfx";
 import appCss from "../styles.css?url";
 
 function NotFoundComponent() {
@@ -70,6 +72,17 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
 }
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
+  // Every screen in this game reads its actual content (active recipe,
+  // selected ingredients, progress, filtered/mixed/seasoned signals, ...)
+  // from localStorage, which the server can never see. SSR-ing these routes
+  // renders a stateless default on the server and the real state on the
+  // client, which is a guaranteed hydration mismatch on every navigation —
+  // React then discards and regenerates the mismatched subtree, which is
+  // exactly why fresh page loads intermittently showed stale/wrong-looking
+  // content (e.g. a synthetic fallback spectrum in the Filtering Lab)
+  // instead of the real, localStorage-derived render. This is a client-only
+  // game with no server-renderable content, so it should not be SSR'd at all.
+  ssr: false,
   head: () => ({
     meta: [
       { charSet: "utf-8" },
@@ -145,6 +158,13 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   useTheme();
 
+  useEffect(() => {
+    loadChickenAudio("/sounds/chicken.wav").catch(() => {});
+  }, []);
+
+  // Sound effect only: a short click on every activated button.
+  useEffect(() => installButtonClickSfx(), []);
+
   return (
     <QueryClientProvider client={queryClient}>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
@@ -152,4 +172,3 @@ function RootComponent() {
     </QueryClientProvider>
   );
 }
-

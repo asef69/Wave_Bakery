@@ -3,8 +3,8 @@ import { useState } from "react";
 import { BookOpen, Package, ArrowRight, UtensilsCrossed, LogOut } from "lucide-react";
 
 import kitchenBg from "@/assets/kitchen-bg.jpg";
+import { ChefAuthModal } from "@/components/game/ChefAuthModal";
 import { ChefFourier } from "@/components/game/ChefFourier";
-import { LogoutModal } from "@/components/game/LogoutModal";
 import { GameButton } from "@/components/game/GameButton";
 import { useChefName } from "@/lib/recipes";
 
@@ -31,16 +31,12 @@ export const Route = createFileRoute("/kitchen-hub")({
 
 function KitchenHubScreen() {
   const [chefName] = useChefName();
-  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const navigate = useNavigate();
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-background">
-      <LogoutModal
-        isOpen={isLogoutModalOpen}
-        onClose={() => setIsLogoutModalOpen(false)}
-        onLoggedOut={() => navigate({ to: "/menu" })}
-      />
+      <ChefAuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} />
 
       {/* Background Room Imagery & Warm Atmosphere */}
       <img
@@ -71,7 +67,7 @@ function KitchenHubScreen() {
                   <span>👨‍🍳 Chef {chefName}</span>
                   <button
                     type="button"
-                    onClick={() => setIsLogoutModalOpen(true)}
+                    onClick={() => setIsAuthModalOpen(true)}
                     className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/25 text-primary hover:bg-rose-500 hover:text-white transition-colors cursor-pointer"
                     title="Log Out / Switch Chef"
                     aria-label="Log Out"
@@ -93,11 +89,11 @@ function KitchenHubScreen() {
             {chefName && (
               <button
                 type="button"
-                onClick={() => setIsLogoutModalOpen(true)}
+                onClick={() => setIsAuthModalOpen(true)}
                 className="inline-flex items-center gap-1.5 rounded-full border border-rose-500/40 bg-rose-500/10 px-3.5 py-1.5 font-mono text-xs font-bold text-rose-400 uppercase transition-all hover:bg-rose-500 hover:text-white cursor-pointer shadow-xs active:scale-95"
               >
                 <LogOut className="h-3.5 w-3.5" />
-                <span>Log Out</span>
+                <span>Profile / Switch</span>
               </button>
             )}
             <div className="hidden sm:flex items-center gap-2 rounded-full border border-border/70 bg-card/70 px-4 py-2 font-mono text-[11px] text-muted-foreground uppercase shadow-md backdrop-blur-md">
@@ -121,7 +117,6 @@ function KitchenHubScreen() {
                 className="absolute inset-x-4 top-2 h-1 rounded-full bg-white/40 dark:bg-white/15 opacity-70"
                 aria-hidden
               />
-
 
               {/* Physical Hardbound Recipe Book Resting On Top */}
               <Link to="/recipe-book" className="group block cursor-pointer focus:outline-none">

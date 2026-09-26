@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Pause, Play, RotateCcw } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ChefFourier } from "@/components/game/ChefFourier";
 import { DragTutorialCue } from "@/components/game/DragTutorialCue";
@@ -9,8 +9,11 @@ import { LabShell } from "@/components/game/LabShell";
 import { SignalAudioPlayer, type PlaybackState } from "@/lib/audio";
 import {
   computeMarinatedSignal,
+  getNextStationPath,
+  getRecipeRunSession,
   recipes,
   recordStageAccuracy,
+  resampleSignal,
   savePipelineStageSignal,
   syncSessionParamsToBackend,
   updateRecipeRunSession,
@@ -18,6 +21,7 @@ import {
   usePipelineStageSignal,
   useRecipeProgress,
 } from "@/lib/recipes";
+import { invalidateDownstreamStages, pipelineSignalToPath } from "@/lib/pipeline";
 
 export const Route = createFileRoute("/marinate")({
   head: () => ({
@@ -46,27 +50,45 @@ const MAX_TIME = 2.0;
 const STEP_TIME = 0.05;
 const TOL = 0.08;
 
-function marinatedSamplesToPath(samples: number[], width: number, height: number): string {
-  const mid = height / 2;
-  const len = samples.length;
-  if (len === 0) return "";
-  const pts: string[] = [];
-  for (let i = 0; i < len; i++) {
-    const x = (i / (len - 1)) * width;
-    const s = samples[i] ?? 0;
-    const y = mid - s * height * 0.35;
-    pts.push(`${i === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`);
-  }
-  return pts.join(" ");
-}
-
 function MarinatingLab() {
   const [recipe] = useActiveRecipe();
   const [unlockedStep, unlock] = useRecipeProgress();
   const [seasonedSignal] = usePipelineStageSignal(recipe.id, "seasoned");
   const targetTime = recipe.marinateTarget.timeScale;
-  const [timeScale, setTimeScale] = useState(MIN_TIME);
-  const [showDragCue, setShowDragCue] = useState(true);
+
+  const storedMarinated = useMemo(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const key = `wavebakery_pipeline_${recipe.id}_marinated`;
+        const stored = window.localStorage.getItem(key);
+        if (stored) {
+          const parsed = JSON.parse(stored) as {
+            metadata?: { timeScale?: number };
+            samples?: number[];
+          };
+          if (Array.isArray(parsed?.samples) && parsed.samples.length > 0) {
+            return parsed;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return null;
+  }, [recipe.id]);
+
+  const initialTimeScale = useMemo(() => {
+    if (typeof storedMarinated?.metadata?.timeScale === "number") {
+      return storedMarinated.metadata.timeScale;
+    }
+    const session = getRecipeRunSession();
+    if (typeof session?.marinateTime === "number") return session.marinateTime;
+    return MIN_TIME;
+  }, [storedMarinated]);
+
+  const [timeScale, setTimeScale] = useState(initialTimeScale);
+  const [showDragCue, setShowDragCue] = useState(() => storedMarinated == null);
+  const userModifiedRef = useRef(false);
 
   const playerMarinated = useMemo(() => {
     return computeMarinatedSignal(seasonedSignal, timeScale);
@@ -114,6 +136,7 @@ function MarinatingLab() {
         progress: 0,
       }));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeScale]);
 
   const handleTogglePlay = () => {
@@ -159,13 +182,22 @@ function MarinatingLab() {
   useEffect(() => {
     if (done || unlockedStep >= 6) {
       if (done) unlock(6);
-      savePipelineStageSignal(recipe.id, "marinated", playerMarinated);
+
+      if (userModifiedRef.current) {
+        invalidateDownstreamStages(recipe.id, "marinated");
+      }
+
       recordStageAccuracy("marinating", accuracy);
       updateRecipeRunSession({
         marinateTime: timeScale,
         marinatingAccuracy: accuracy,
       });
-      syncSessionParamsToBackend(recipe.id);
+
+      savePipelineStageSignal(recipe.id, "marinated", playerMarinated);
+
+      // Shared sync reads the dials just saved to the session and keeps the
+      // other stations' values (a hand-built payload here reset them).
+      syncSessionParamsToBackend(recipe.id).catch(() => {});
     }
   }, [done, unlockedStep, playerMarinated, recipe.id, unlock, accuracy, timeScale]);
 
@@ -229,8 +261,8 @@ function MarinatingLab() {
       chefLine={chefLine}
       backTo="/kitchen"
       backLabel="← Back to Kitchen"
-      nextTo={done ? "/cooking" : undefined}
-      nextLabel="Go to Cooking →"
+      nextTo={done ? getNextStationPath("/marinate", recipe) : undefined}
+      nextLabel="Next Station →"
     >
       {/* HUD */}
       <div className="kitchen-card flex flex-wrap items-center gap-x-8 gap-y-3 px-6 py-4">
@@ -304,7 +336,7 @@ function MarinatingLab() {
               ))}
               {/* target reference waveform (hidden numerical target) */}
               <path
-                d={marinatedSamplesToPath(targetMarinated.samples, width, height)}
+                d={pipelineSignalToPath(targetMarinated, width, height, 0.35)}
                 fill="none"
                 stroke="var(--primary)"
                 strokeWidth="2.4"
@@ -314,7 +346,7 @@ function MarinatingLab() {
               />
               {/* player marinated waveform */}
               <path
-                d={marinatedSamplesToPath(playerMarinated.samples, width, height)}
+                d={pipelineSignalToPath(playerMarinated, width, height, 0.35)}
                 fill="none"
                 stroke="var(--signal)"
                 strokeWidth="3.4"
@@ -353,9 +385,7 @@ function MarinatingLab() {
               <div className="flex items-center gap-2">
                 <span
                   className={`inline-block h-2.5 w-2.5 rounded-full ${
-                    playbackState.isPlaying
-                      ? "bg-signal animate-ping"
-                      : "bg-muted-foreground/40"
+                    playbackState.isPlaying ? "bg-signal animate-ping" : "bg-muted-foreground/40"
                   }`}
                 />
                 <span className="font-mono text-xs font-bold tracking-wider text-foreground uppercase">
@@ -373,7 +403,10 @@ function MarinatingLab() {
                 <span className="font-bold text-signal">
                   {playbackState.currentTime.toFixed(1)}s
                 </span>
-                <span className="text-muted-foreground"> / {playbackState.duration.toFixed(1)}s</span>
+                <span className="text-muted-foreground">
+                  {" "}
+                  / {playbackState.duration.toFixed(1)}s
+                </span>
               </div>
             </div>
 
@@ -503,6 +536,7 @@ function MarinatingLab() {
                 variant="secondary"
                 size="sm"
                 onClick={() => {
+                  userModifiedRef.current = true;
                   setShowDragCue(false);
                   setTimeScale((v) => Math.max(MIN_TIME, +(v - STEP_TIME).toFixed(2)));
                 }}
@@ -516,8 +550,12 @@ function MarinatingLab() {
                 max={MAX_TIME}
                 step={STEP_TIME}
                 value={timeScale}
-                onPointerDown={() => setShowDragCue(false)}
+                onPointerDown={() => {
+                  userModifiedRef.current = true;
+                  setShowDragCue(false);
+                }}
                 onChange={(e) => {
+                  userModifiedRef.current = true;
                   setShowDragCue(false);
                   setTimeScale(Number(e.target.value));
                 }}
@@ -528,6 +566,7 @@ function MarinatingLab() {
                 variant="secondary"
                 size="sm"
                 onClick={() => {
+                  userModifiedRef.current = true;
                   setShowDragCue(false);
                   setTimeScale((v) => Math.min(MAX_TIME, +(v + STEP_TIME).toFixed(2)));
                 }}

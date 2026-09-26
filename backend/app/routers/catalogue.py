@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from .. import schemas
+from .. import gameplay, schemas
 from ..database import get_db
 from ..deps import optional_player
 from ..dsp import core as C
@@ -55,7 +55,7 @@ def recipe_book(db: Session = Depends(get_db),
     if player:
         rows = (db.query(Attempt.recipe_id, func.max(Attempt.score),
                          func.count(Attempt.id))
-                .filter(Attempt.player_id == player.id)
+                .filter(Attempt.player_id == player.id, gameplay.in_season())
                 .group_by(Attempt.recipe_id).all())
         bests = {r: float(s) for r, s, _ in rows}
         plays = {r: int(c) for r, _, c in rows}

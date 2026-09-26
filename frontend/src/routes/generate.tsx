@@ -7,15 +7,24 @@ import { IngredientGlyph } from "@/components/game/IngredientGlyph";
 import { LabShell } from "@/components/game/LabShell";
 import { MiniWave } from "@/components/game/MiniWave";
 import { SignalAudioPlayer } from "@/lib/audio";
+import type { SessionItemOut } from "@/lib/api";
 import {
   ALL_AVAILABLE_INGREDIENTS,
+  api,
   computeIngredientSamples,
   getMathematicalSignal,
+  getRecipeRunSession,
   type IngredientDetail,
   useActiveRecipe,
   useRecipeProgress,
   useSelectedIngredients,
 } from "@/lib/recipes";
+import {
+  loadChickenAudio,
+  getCachedChickenAudio,
+  getChickenStaticSamples,
+  type DecodedChickenAudio,
+} from "@/lib/chicken-audio";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/generate")({
@@ -54,6 +63,36 @@ function GenerateScreen() {
   const [playingClip, setPlayingClip] = useState<string | null>(null);
   const [audioPlayer, setAudioPlayer] = useState<SignalAudioPlayer | null>(null);
 
+  // Active ingredient for the waveform generator preview
+  const activeIng: IngredientDetail = useMemo(() => {
+    return (
+      ALL_AVAILABLE_INGREDIENTS.find(
+        (i) => i.name.toLowerCase() === activeIngredientName.toLowerCase(),
+      ) ?? ALL_AVAILABLE_INGREDIENTS[0]!
+    );
+  }, [activeIngredientName]);
+
+  const isChicken = activeIng.name.toLowerCase() === "chicken" || activeIng.kind === "chicken";
+  const [chickenAudio, setChickenAudio] = useState<DecodedChickenAudio | null>(() =>
+    getCachedChickenAudio(),
+  );
+
+  useEffect(() => {
+    let isCancelled = false;
+    loadChickenAudio("/sounds/chicken.wav")
+      .then((data) => {
+        if (!isCancelled) {
+          setChickenAudio(data);
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to decode chicken.wav in Signal Generation:", err);
+      });
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     return () => {
       if (audioPlayer) audioPlayer.destroy();
@@ -63,11 +102,14 @@ function GenerateScreen() {
   const handlePlayAudio = (clipId: string, samples: number[], freq: number) => {
     if (audioPlayer) audioPlayer.destroy();
     setPlayingClip(clipId);
+    const isChickenAudio = isChicken || clipId.toLowerCase().includes("chicken");
+    const dur = isChickenAudio && chickenAudio ? chickenAudio.duration : 2.5;
     const p = new SignalAudioPlayer(
       {
         samples,
         frequency: freq,
-        duration: 2.5,
+        duration: dur,
+        audioBuffer: isChickenAudio ? (chickenAudio?.buffer ?? null) : null,
       },
       (state) => {
         if (state.isEnded) {
@@ -79,20 +121,51 @@ function GenerateScreen() {
     p.play();
   };
 
-  // Active ingredient for the waveform generator preview
-  const activeIng: IngredientDetail = useMemo(() => {
-    return (
-      ALL_AVAILABLE_INGREDIENTS.find(
-        (i) => i.name.toLowerCase() === activeIngredientName.toLowerCase(),
-      ) ?? ALL_AVAILABLE_INGREDIENTS[0]!
-    );
-  }, [activeIngredientName]);
-
   const activeMathSignal = useMemo(() => {
     return getMathematicalSignal(activeIng.name);
   }, [activeIng]);
 
+  // The backend's real per-slot dirty/clean signal for the active ingredient
+  // — when a session already exists (it does from the moment the recipe run
+  // starts), Generate Signal must show the exact same array that Filtering
+  // will later show and operate on. Without this, the two stations render
+  // the same ingredient from two independent implementations (this page's
+  // local JS math vs. the server's real synthesis + contamination), and any
+  // small divergence between them reads as "a different shape" once you
+  // move from one station to the next.
+  const session = getRecipeRunSession();
+  const backendSessionId = session?.backendSessionId;
+  const slotIndex = recipe.ingredients.findIndex(
+    (n) => n.toLowerCase() === activeIng.name.toLowerCase(),
+  );
+  const [backendItem, setBackendItem] = useState<SessionItemOut | null>(null);
+
+  useEffect(() => {
+    setBackendItem(null);
+    if (!backendSessionId || slotIndex < 0 || isChicken) return;
+    let cancelled = false;
+    api
+      .getSession(backendSessionId)
+      .then((s) => {
+        if (cancelled) return;
+        const item = s.items.find((it) => it.slot === slotIndex) ?? null;
+        setBackendItem(item);
+      })
+      .catch((err) => {
+        console.warn("Backend session fetch error (falling back to client DSP):", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [backendSessionId, slotIndex, isChicken]);
+
   const idealSamples = useMemo(() => {
+    if (isChicken) {
+      return chickenAudio ? chickenAudio.samples : getChickenStaticSamples();
+    }
+    if (backendItem?.clean_preview?.plot && backendItem.clean_preview.plot.length > 0) {
+      return backendItem.clean_preview.plot;
+    }
     return computeIngredientSamples({
       freq: activeIng.freq,
       washable: false,
@@ -100,17 +173,35 @@ function GenerateScreen() {
       seed: 0,
       noise: 0,
     });
-  }, [activeIng]);
+  }, [activeIng, isChicken, chickenAudio, backendItem]);
 
   const activeSamples = useMemo(() => {
+    if (isChicken) {
+      return chickenAudio ? chickenAudio.samples : getChickenStaticSamples();
+    }
+    if (
+      generated &&
+      activeIng.washable &&
+      backendItem?.dirty?.plot &&
+      backendItem.dirty.plot.length > 0
+    ) {
+      return backendItem.dirty.plot;
+    }
+    if (
+      !generated &&
+      backendItem?.clean_preview?.plot &&
+      backendItem.clean_preview.plot.length > 0
+    ) {
+      return backendItem.clean_preview.plot;
+    }
     return computeIngredientSamples({
       freq: activeIng.freq,
       washable: activeIng.washable,
       name: activeIng.name,
       seed: 0,
-      noise: generated ? (activeIng.washable ? 0.88 : 0.0) : 0.1,
+      noise: activeIng.washable ? (generated ? 0.88 : 0.1) : 0.0,
     });
-  }, [activeIng, generated]);
+  }, [activeIng, generated, isChicken, chickenAudio, backendItem]);
 
   // Filtered catalogue list
   const visibleCatalogue = useMemo(() => {
@@ -395,7 +486,9 @@ function GenerateScreen() {
                       </p>
                       <div className="flex items-center gap-1.5">
                         <span className="font-mono text-[9px] tracking-wider text-muted-foreground uppercase">
-                          {getMathematicalSignal(i.name) ? `${getMathematicalSignal(i.name)!.waveformType} wave` : i.instrument}
+                          {getMathematicalSignal(i.name)
+                            ? `${getMathematicalSignal(i.name)!.waveformType} wave`
+                            : i.instrument}
                         </span>
                         {i.washable ? (
                           <span className="rounded bg-primary/20 px-1 py-0.2 font-mono text-[8px] font-bold text-primary uppercase">
@@ -448,7 +541,9 @@ function GenerateScreen() {
                   {activeMathSignal ? "Signal Type" : "Instrument"}
                 </p>
                 <p className="font-display text-lg font-bold text-foreground">
-                  {activeMathSignal ? `${activeMathSignal.waveformType.toUpperCase()} WAVE` : activeIng.instrument}
+                  {activeMathSignal
+                    ? `${activeMathSignal.waveformType.toUpperCase()} WAVE`
+                    : activeIng.instrument}
                 </p>
               </div>
             </div>
@@ -467,14 +562,19 @@ function GenerateScreen() {
                   Ideal Reference Signal
                 </p>
                 <span className="font-mono text-[9px] tracking-[0.14em] text-signal/50 uppercase">
-                  {activeMathSignal ? `${activeMathSignal.waveformType} wave` : activeIng.instrument} ({activeIng.freq} Hz)
+                  {activeMathSignal
+                    ? `${activeMathSignal.waveformType} wave`
+                    : activeIng.instrument}{" "}
+                  ({activeIng.freq} Hz)
                 </span>
               </div>
               <GameButton
                 size="sm"
                 variant="secondary"
                 className="uppercase text-xs"
-                onClick={() => handlePlayAudio(`ideal-${activeIng.name}`, idealSamples, activeIng.freq)}
+                onClick={() =>
+                  handlePlayAudio(`ideal-${activeIng.name}`, idealSamples, activeIng.freq)
+                }
               >
                 {playingClip === `ideal-${activeIng.name}` ? "🔊 Playing..." : "▶ Play Reference"}
               </GameButton>
@@ -483,57 +583,79 @@ function GenerateScreen() {
               className="mt-3 border-0 p-0"
               frequency={activeIng.freq}
               samples={idealSamples}
+              parametricPoints={
+                activeMathSignal?.parametricCurve
+                  ? activeMathSignal.parametricCurve.generatePoints()
+                  : undefined
+              }
+              square={Boolean(activeMathSignal?.parametricCurve)}
               label={`${activeIng.name} · ${activeMathSignal ? `${activeMathSignal.waveformType} wave` : "pure tone"}`}
             />
           </div>
 
-          <div className="lab-panel p-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-mono text-[10px] tracking-[0.24em] text-signal/70 uppercase">
-                  {generated
-                    ? activeIng.washable
-                      ? "Generated Raw Signal (Noisy)"
-                      : "Generated Raw Signal (Clean)"
-                    : "Awaiting Generation"}
-                </p>
-                {generated ? (
-                  <span
-                    className={cn(
-                      "font-mono text-[9px] font-bold uppercase",
-                      activeIng.washable ? "text-primary" : "text-signal",
-                    )}
-                  >
-                    {activeIng.washable ? "Needs Washing" : "Ready to Mix"}
-                  </span>
-                ) : null}
+          {activeIng.washable ? (
+            <div className="lab-panel p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-mono text-[10px] tracking-[0.24em] text-signal/70 uppercase">
+                    {generated ? "Generated Raw Signal (Noisy)" : "Awaiting Generation"}
+                  </p>
+                  {generated ? (
+                    <span className="font-mono text-[9px] font-bold uppercase text-primary">
+                      Needs Washing
+                    </span>
+                  ) : null}
+                </div>
+                <GameButton
+                  size="sm"
+                  variant="lab"
+                  className="uppercase text-xs"
+                  onClick={() =>
+                    handlePlayAudio(`raw-${activeIng.name}`, activeSamples, activeIng.freq)
+                  }
+                >
+                  {playingClip === `raw-${activeIng.name}` ? "🔊 Playing..." : "▶ Play Raw Signal"}
+                </GameButton>
               </div>
-              <GameButton
-                size="sm"
-                variant="lab"
-                className="uppercase text-xs"
-                onClick={() => handlePlayAudio(`raw-${activeIng.name}`, activeSamples, activeIng.freq)}
-              >
-                {playingClip === `raw-${activeIng.name}` ? "🔊 Playing..." : "▶ Play Raw Signal"}
-              </GameButton>
+              <MiniWave
+                className="mt-3 border-0 p-0"
+                frequency={activeIng.freq}
+                samples={activeSamples}
+                parametricPoints={
+                  activeMathSignal?.parametricCurve
+                    ? activeMathSignal.parametricCurve.generatePoints()
+                    : undefined
+                }
+                square={Boolean(activeMathSignal?.parametricCurve)}
+                noise={generated ? 0.88 : 0.1}
+                color="var(--signal-alt)"
+                label={`${activeIng.name} · raw delivery`}
+              />
+              <p className="mt-2 font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase">
+                Noise level: {generated ? "68% · Noisy (Washable)" : "—"}
+              </p>
             </div>
-            <MiniWave
-              className="mt-3 border-0 p-0"
-              frequency={activeIng.freq}
-              samples={activeSamples}
-              noise={generated ? (activeIng.washable ? 0.88 : 0.0) : 0.1}
-              color={generated && !activeIng.washable ? "var(--signal)" : "var(--signal-alt)"}
-              label={`${activeIng.name} · raw delivery`}
-            />
-            <p className="mt-2 font-mono text-[10px] tracking-[0.18em] text-muted-foreground uppercase">
-              Noise level:{" "}
-              {generated
-                ? activeIng.washable
-                  ? "68% · Noisy (Washable)"
-                  : "0% · Clean (Directly Usable)"
-                : "—"}
-            </p>
-          </div>
+          ) : (
+            <div className="lab-panel border border-signal/30 bg-card/60 p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-mono text-[10px] tracking-[0.24em] text-signal-alt uppercase">
+                    Signal Delivery Status
+                  </p>
+                  <span className="font-mono text-[9px] font-extrabold text-signal-alt uppercase">
+                    Direct Clean Signal · Zero Contamination
+                  </span>
+                </div>
+                <span className="rounded-md border border-signal/40 bg-signal/15 px-2.5 py-1 font-mono text-[10px] font-bold text-signal-alt uppercase">
+                  Ready to Mix ✓
+                </span>
+              </div>
+              <p className="mt-3 text-xs text-muted-foreground leading-relaxed">
+                {activeIng.name} is a pantry-ready ingredient with zero field contamination. It
+                generates clean with 0% noise and bypasses the Filtering Lab directly to Mixing.
+              </p>
+            </div>
+          )}
 
           <div className="flex flex-wrap gap-3">
             <GameButton
@@ -547,10 +669,11 @@ function GenerateScreen() {
               <GameButton
                 variant="lab"
                 className="w-full uppercase text-xs sm:w-auto"
-                onClick={() => handlePlayAudio(`active-${activeIng.name}`, activeSamples, activeIng.freq)}
+                onClick={() =>
+                  handlePlayAudio(`active-${activeIng.name}`, activeSamples, activeIng.freq)
+                }
               >
-                <Volume2 className="mr-1.5 h-3.5 w-3.5" />
-                ▶ Play Signal Output
+                <Volume2 className="mr-1.5 h-3.5 w-3.5" />▶ Play Signal Output
               </GameButton>
             )}
           </div>

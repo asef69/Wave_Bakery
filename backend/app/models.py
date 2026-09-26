@@ -113,6 +113,9 @@ class Player(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
     handle: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     token: Mapped[str] = mapped_column(String(64), default=_uuid, index=True)
+    # scrypt hash; NULL only for chefs created before passwords existed —
+    # their first password login sets it (see routers/players.py).
+    password_hash: Mapped[str | None] = mapped_column(String(200), nullable=True)
     points: Mapped[int] = mapped_column(Integer, default=0)
     unlocked_tier: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
@@ -131,6 +134,7 @@ class GameSession(Base):
     recipe_id: Mapped[str] = mapped_column(ForeignKey('recipes.id'), index=True)
     seed: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(16), default='active')  # active|served|abandoned
+    difficulty: Mapped[str | None] = mapped_column(String(16), nullable=True)
     params: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     served_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -180,6 +184,14 @@ class Attempt(Base):
     correlation: Mapped[float] = mapped_column(Float, default=0.0)
     spectral_similarity: Mapped[float] = mapped_column(Float, default=0.0)
     points_awarded: Mapped[int] = mapped_column(Integer, default=0)
+    # The run's overall score, as the score screen shows it: dish x 10 x
+    # difficulty + time bonus (server clock). NULL for runs from before it.
+    total_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    time_bonus: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Which scoring rules produced `score` (gameplay.SCORING_VERSION). Only
+    # current-version runs are ranked; NULL = judged before versions existed.
+    scoring_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    difficulty: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
     notes: Mapped[list] = mapped_column(JSON, default=list)
     params: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, index=True)

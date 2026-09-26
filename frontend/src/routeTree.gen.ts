@@ -29,6 +29,7 @@ import { Route as PantryRouteImport } from './routes/pantry'
 import { Route as RecipeBookRouteImport } from './routes/recipe-book'
 import { Route as ScoreRouteImport } from './routes/score'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as SystemDeliveryRouteImport } from './routes/system-delivery'
 import { Route as TransformRouteImport } from './routes/transform'
 
 const IndexRoute = IndexRouteImport.update({
@@ -131,6 +132,11 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SystemDeliveryRoute = SystemDeliveryRouteImport.update({
+  id: '/system-delivery',
+  path: '/system-delivery',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TransformRoute = TransformRouteImport.update({
   id: '/transform',
   path: '/transform',
@@ -158,6 +164,7 @@ export interface FileRoutesByFullPath {
   '/recipe-book': typeof RecipeBookRoute
   '/score': typeof ScoreRoute
   '/settings': typeof SettingsRoute
+  '/system-delivery': typeof SystemDeliveryRoute
   '/transform': typeof TransformRoute
 }
 export interface FileRoutesByTo {
@@ -181,6 +188,7 @@ export interface FileRoutesByTo {
   '/recipe-book': typeof RecipeBookRoute
   '/score': typeof ScoreRoute
   '/settings': typeof SettingsRoute
+  '/system-delivery': typeof SystemDeliveryRoute
   '/transform': typeof TransformRoute
 }
 export interface FileRoutesById {
@@ -205,6 +213,7 @@ export interface FileRoutesById {
   '/recipe-book': typeof RecipeBookRoute
   '/score': typeof ScoreRoute
   '/settings': typeof SettingsRoute
+  '/system-delivery': typeof SystemDeliveryRoute
   '/transform': typeof TransformRoute
 }
 export interface FileRouteTypes {
@@ -230,6 +239,7 @@ export interface FileRouteTypes {
     | '/recipe-book'
     | '/score'
     | '/settings'
+    | '/system-delivery'
     | '/transform'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -253,6 +263,7 @@ export interface FileRouteTypes {
     | '/recipe-book'
     | '/score'
     | '/settings'
+    | '/system-delivery'
     | '/transform'
   id:
     | '__root__'
@@ -276,6 +287,7 @@ export interface FileRouteTypes {
     | '/recipe-book'
     | '/score'
     | '/settings'
+    | '/system-delivery'
     | '/transform'
   fileRoutesById: FileRoutesById
 }
@@ -300,6 +312,7 @@ export interface RootRouteChildren {
   RecipeBookRoute: typeof RecipeBookRoute
   ScoreRoute: typeof ScoreRoute
   SettingsRoute: typeof SettingsRoute
+  SystemDeliveryRoute: typeof SystemDeliveryRoute
   TransformRoute: typeof TransformRoute
 }
 
@@ -445,6 +458,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/system-delivery': {
+      id: '/system-delivery'
+      path: '/system-delivery'
+      fullPath: '/system-delivery'
+      preLoaderRoute: typeof SystemDeliveryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/transform': {
       id: '/transform'
       path: '/transform'
@@ -476,6 +496,7 @@ const rootRouteChildren: RootRouteChildren = {
   RecipeBookRoute: RecipeBookRoute,
   ScoreRoute: ScoreRoute,
   SettingsRoute: SettingsRoute,
+  SystemDeliveryRoute: SystemDeliveryRoute,
   TransformRoute: TransformRoute,
 }
 export const routeTree = rootRouteImport

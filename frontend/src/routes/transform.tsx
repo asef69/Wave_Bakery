@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Pause, Play, RotateCcw } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ChefFourier } from "@/components/game/ChefFourier";
 import { DragTutorialCue } from "@/components/game/DragTutorialCue";
@@ -9,8 +9,10 @@ import { LabShell } from "@/components/game/LabShell";
 import { SignalAudioPlayer, type PlaybackState } from "@/lib/audio";
 import {
   computeSeasonedSignal,
+  getRecipeRunSession,
   recipes,
   recordStageAccuracy,
+  resampleSignal,
   savePipelineStageSignal,
   syncSessionParamsToBackend,
   updateRecipeRunSession,
@@ -18,6 +20,7 @@ import {
   usePipelineStageSignal,
   useRecipeProgress,
 } from "@/lib/recipes";
+import { invalidateDownstreamStages, pipelineSignalToPath } from "@/lib/pipeline";
 
 export const Route = createFileRoute("/transform")({
   head: () => ({
@@ -41,20 +44,6 @@ export const Route = createFileRoute("/transform")({
 
 const TOL = 0.08;
 
-function seasonedSamplesToPath(samples: number[], width: number, height: number): string {
-  const mid = height / 2;
-  const len = samples.length;
-  if (len === 0) return "";
-  const pts: string[] = [];
-  for (let i = 0; i < len; i++) {
-    const x = (i / (len - 1)) * width;
-    const s = samples[i] ?? 0;
-    const y = mid - s * height * 0.34;
-    pts.push(`${i === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`);
-  }
-  return pts.join(" ");
-}
-
 function SeasoningLab() {
   const [recipe] = useActiveRecipe();
   const [unlockedStep, unlock] = useRecipeProgress();
@@ -62,9 +51,49 @@ function SeasoningLab() {
   const targetAmp = recipe.seasoningTarget.amplitude;
   const targetFreq = recipe.seasoningTarget.frequency;
 
-  const [amp, setAmp] = useState(0.4);
-  const [freq, setFreq] = useState(0.4);
-  const [showDragCue, setShowDragCue] = useState(true);
+  const storedSeasoned = useMemo(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const key = `wavebakery_pipeline_${recipe.id}_seasoned`;
+        const stored = window.localStorage.getItem(key);
+        if (stored) {
+          const parsed = JSON.parse(stored) as {
+            metadata?: { amplitude?: number; freqScale?: number };
+            samples?: number[];
+          };
+          if (Array.isArray(parsed?.samples) && parsed.samples.length > 0) {
+            return parsed;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return null;
+  }, [recipe.id]);
+
+  const initialAmp = useMemo(() => {
+    if (typeof storedSeasoned?.metadata?.amplitude === "number") {
+      return storedSeasoned.metadata.amplitude;
+    }
+    const session = getRecipeRunSession();
+    if (typeof session?.seasonGain === "number") return session.seasonGain;
+    return 1.0;
+  }, [storedSeasoned]);
+
+  const initialFreq = useMemo(() => {
+    if (typeof storedSeasoned?.metadata?.freqScale === "number") {
+      return storedSeasoned.metadata.freqScale;
+    }
+    const session = getRecipeRunSession();
+    if (typeof session?.seasonFreq === "number") return session.seasonFreq;
+    return 1.0;
+  }, [storedSeasoned]);
+
+  const [amp, setAmp] = useState(initialAmp);
+  const [freq, setFreq] = useState(initialFreq);
+  const [showDragCue, setShowDragCue] = useState(() => storedSeasoned == null);
+  const userModifiedRef = useRef(false);
 
   const playerSeasoned = useMemo(() => {
     return computeSeasonedSignal(mixedSignal, amp, freq);
@@ -118,6 +147,7 @@ function SeasoningLab() {
         progress: 0,
       }));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [amp, freq]);
 
   const handleTogglePlay = () => {
@@ -160,17 +190,34 @@ function SeasoningLab() {
     }
   };
 
+  const lastSyncRef = useRef<string | null>(null);
   useEffect(() => {
     if (done || unlockedStep >= 5) {
+      // Saving the signal/session below re-renders this component with fresh
+      // object identities, which would re-fire this effect forever. Only sync
+      // when the player's actual values change.
+      const sig = `${recipe.id}|${done}|${amp}|${freq}|${accuracy}`;
+      if (lastSyncRef.current === sig) return;
+      lastSyncRef.current = sig;
+
       if (done) unlock(5);
-      savePipelineStageSignal(recipe.id, "seasoned", playerSeasoned);
+
+      if (userModifiedRef.current) {
+        invalidateDownstreamStages(recipe.id, "seasoned");
+      }
+
       recordStageAccuracy("seasoning", accuracy);
       updateRecipeRunSession({
         seasonGain: amp,
         seasonFreq: freq,
         seasoningAccuracy: accuracy,
       });
-      syncSessionParamsToBackend(recipe.id);
+
+      savePipelineStageSignal(recipe.id, "seasoned", playerSeasoned);
+
+      // Shared sync reads the dials just saved to the session and keeps the
+      // other stations' values (a hand-built payload here reset them).
+      syncSessionParamsToBackend(recipe.id).catch(() => {});
     }
   }, [done, unlockedStep, playerSeasoned, recipe.id, unlock, accuracy, amp, freq]);
 
@@ -188,8 +235,8 @@ function SeasoningLab() {
               ? "Try increasing the frequency to add more harmonic flavor."
               : "Amplitude controls strength, frequency controls tone. Experiment with both controls!";
 
-  const width = 900;
-  const height = 300;
+  const width = 1000;
+  const height = 320;
 
   if (unlockedStep < 4) {
     return (
@@ -279,40 +326,78 @@ function SeasoningLab() {
             </div>
           </div>
 
-          <div className="relative z-10 mt-5 rounded-2xl border border-signal/25 bg-[oklch(0.19_0.03_250)]/60 p-4">
+          <div className="relative z-10 mt-5 rounded-2xl border border-signal/25 bg-[oklch(0.19_0.03_250)]/60 p-4 overflow-visible">
             <svg
               viewBox={`0 0 ${width} ${height}`}
-              className="h-[300px] w-full"
-              preserveAspectRatio="none"
+              className="relative z-10 h-[24rem] w-full overflow-visible"
             >
               {/* grid */}
-              {Array.from({ length: 13 }).map((_, i) => (
+              {Array.from({ length: 11 }).map((_, i) => (
                 <line
                   key={`v${i}`}
-                  x1={(width / 12) * i}
-                  x2={(width / 12) * i}
+                  x1={(i * width) / 10}
                   y1={0}
+                  x2={(i * width) / 10}
                   y2={height}
-                  stroke="var(--signal)"
-                  strokeWidth={i === 0 ? 1.4 : 0.5}
-                  opacity={i === 0 ? 0.4 : 0.14}
+                  stroke="var(--lab-grid)"
+                  strokeWidth="1"
+                  opacity={i % 5 === 0 ? 0.5 : 0.22}
                 />
               ))}
               {Array.from({ length: 9 }).map((_, i) => (
                 <line
                   key={`h${i}`}
-                  y1={(height / 8) * i}
-                  y2={(height / 8) * i}
                   x1={0}
+                  y1={(i * height) / 8}
                   x2={width}
-                  stroke="var(--signal)"
-                  strokeWidth={i === 4 ? 1.4 : 0.5}
-                  opacity={i === 4 ? 0.45 : 0.14}
+                  y2={(i * height) / 8}
+                  stroke="var(--lab-grid)"
+                  strokeWidth="1"
+                  opacity={i === 4 ? 0.7 : 0.2}
                 />
               ))}
+              <line
+                x1="0"
+                y1={height / 2}
+                x2={width}
+                y2={height / 2}
+                stroke="var(--signal)"
+                strokeWidth="1.5"
+                opacity="0.35"
+              />
+              <text
+                x="8"
+                y="18"
+                fill="var(--signal)"
+                opacity="0.55"
+                fontSize="13"
+                fontFamily="monospace"
+              >
+                +A
+              </text>
+              <text
+                x="8"
+                y={height - 8}
+                fill="var(--signal)"
+                opacity="0.55"
+                fontSize="13"
+                fontFamily="monospace"
+              >
+                −A
+              </text>
+              <text
+                x={width - 46}
+                y={height / 2 - 10}
+                fill="var(--signal)"
+                opacity="0.55"
+                fontSize="13"
+                fontFamily="monospace"
+              >
+                time
+              </text>
               {/* target reference waveform (hidden numerical target) */}
               <path
-                d={seasonedSamplesToPath(targetSeasoned.samples, width, height)}
+                d={pipelineSignalToPath(targetSeasoned, width, height)}
                 fill="none"
                 stroke="var(--primary)"
                 strokeWidth="2.4"
@@ -322,7 +407,7 @@ function SeasoningLab() {
               />
               {/* player seasoned waveform */}
               <path
-                d={seasonedSamplesToPath(playerSeasoned.samples, width, height)}
+                d={pipelineSignalToPath(playerSeasoned, width, height)}
                 fill="none"
                 stroke="var(--signal)"
                 strokeWidth="3.4"
@@ -332,9 +417,9 @@ function SeasoningLab() {
               {/* synchronized playback cursor line */}
               {playbackState.progress > 0 && (
                 <line
-                  x1={playbackState.progress * width}
+                  x1={24 + playbackState.progress * (width - 48)}
                   y1={0}
-                  x2={playbackState.progress * width}
+                  x2={24 + playbackState.progress * (width - 48)}
                   y2={height}
                   stroke="var(--signal)"
                   strokeWidth="2.5"
@@ -356,9 +441,7 @@ function SeasoningLab() {
               <div className="flex items-center gap-2">
                 <span
                   className={`inline-block h-2.5 w-2.5 rounded-full ${
-                    playbackState.isPlaying
-                      ? "bg-signal animate-ping"
-                      : "bg-muted-foreground/40"
+                    playbackState.isPlaying ? "bg-signal animate-ping" : "bg-muted-foreground/40"
                   }`}
                 />
                 <span className="font-mono text-xs font-bold tracking-wider text-foreground uppercase">
@@ -376,7 +459,10 @@ function SeasoningLab() {
                 <span className="font-bold text-signal">
                   {playbackState.currentTime.toFixed(1)}s
                 </span>
-                <span className="text-muted-foreground"> / {playbackState.duration.toFixed(1)}s</span>
+                <span className="text-muted-foreground">
+                  {" "}
+                  / {playbackState.duration.toFixed(1)}s
+                </span>
               </div>
             </div>
 
@@ -470,12 +556,17 @@ function SeasoningLab() {
                 </div>
               ) : null
             }
-            onDragStart={() => setShowDragCue(false)}
+            onDragStart={() => {
+              userModifiedRef.current = true;
+              setShowDragCue(false);
+            }}
             onChange={(v) => {
+              userModifiedRef.current = true;
               setShowDragCue(false);
               setAmp(v);
             }}
             onStep={(d) => {
+              userModifiedRef.current = true;
               setShowDragCue(false);
               setAmp((v) => Math.min(2, Math.max(0.4, +(v + d).toFixed(2))));
             }}
@@ -490,12 +581,17 @@ function SeasoningLab() {
             max={2}
             step={0.05}
             value={freq}
-            onDragStart={() => setShowDragCue(false)}
+            onDragStart={() => {
+              userModifiedRef.current = true;
+              setShowDragCue(false);
+            }}
             onChange={(e) => {
+              userModifiedRef.current = true;
               setShowDragCue(false);
               setFreq(e);
             }}
             onStep={(d) => {
+              userModifiedRef.current = true;
               setShowDragCue(false);
               setFreq((v) => Math.min(2, Math.max(0.4, +(v + d).toFixed(2))));
             }}

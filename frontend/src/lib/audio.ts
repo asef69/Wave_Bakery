@@ -1,4 +1,27 @@
 import { computeCookedSamples, type CookedSignalData } from "@/lib/recipes";
+import {
+  getCachedChickenAudio,
+  getChickenStaticSamples,
+  loadChickenAudio,
+} from "@/lib/chicken-audio";
+import { getPipelineStageSignal } from "@/lib/pipeline";
+import {
+  getSoundSettings,
+  setSoundSettings,
+  useSoundSettings,
+  SOUND_CHANGE_EVENT,
+  SOUND_STORAGE_KEY,
+  type SoundSettings,
+} from "@/lib/sound";
+
+export {
+  getSoundSettings,
+  setSoundSettings,
+  useSoundSettings,
+  SOUND_CHANGE_EVENT,
+  SOUND_STORAGE_KEY,
+  type SoundSettings,
+};
 
 export interface PlaybackState {
   isPlaying: boolean;
@@ -15,6 +38,34 @@ export interface SignalAudioSource {
   duration?: number;
   audioBuffer?: AudioBuffer | null;
   pan?: number; // -1.0 (left) to +1.0 (right)
+  ingredientName?: string;
+}
+
+/**
+ * Playback loops the sample window, jumping from the last sample straight
+ * back to the first. When a signal does not complete whole cycles in the
+ * window (carrot, milk, a delayed/marinated dish, ...) that jump is a
+ * discontinuity heard as a click on every loop — a buzz at the loop rate.
+ * If the seam jump is sharper than any step inside the signal, blend the last
+ * 5% of the window towards the first sample (raised-cosine ramp) so the loop
+ * is continuous. Genuine edges (square waves) are left alone: their seam is
+ * no sharper than their own edges.
+ */
+export function smoothLoopSeam(samples: number[]): number[] {
+  const n = samples.length;
+  if (n < 8) return samples;
+  let maxStep = 0;
+  for (let i = 1; i < n; i++) {
+    maxStep = Math.max(maxStep, Math.abs((samples[i] ?? 0) - (samples[i - 1] ?? 0)));
+  }
+  const seam = (samples[0] ?? 0) - (samples[n - 1] ?? 0);
+  if (Math.abs(seam) <= 1.5 * maxStep) return samples;
+  const rampStart = Math.floor(n * 0.95);
+  return samples.map((v, i) => {
+    if (i < rampStart) return v;
+    const u = (i - rampStart) / (n - 1 - rampStart);
+    return v + seam * (0.5 - 0.5 * Math.cos(Math.PI * u));
+  });
 }
 
 /**
@@ -24,18 +75,22 @@ export interface SignalAudioSource {
  * the visual waveform cursor.
  */
 export class SignalAudioPlayer {
+  private static activePlayingInstances = new Set<SignalAudioPlayer>();
+
   protected ctx: AudioContext | null = null;
   protected buffer: AudioBuffer | null = null;
   protected sourceNode: AudioBufferSourceNode | null = null;
   protected gainNode: GainNode | null = null;
   protected pannerNode: StereoPannerNode | null = null;
   protected panValue: number = 0;
+  protected baseGain: number = 0.55;
   protected startTime: number = 0;
   protected pauseOffset: number = 0;
   protected duration: number = 3.0; // seconds
   protected isPlaying: boolean = false;
   protected isPaused: boolean = false;
   protected isEnded: boolean = false;
+  public wasPlayingBeforePause: boolean = false;
   protected rafId: number | null = null;
   protected onUpdateCallback: ((state: PlaybackState) => void) | null = null;
 
@@ -46,6 +101,13 @@ export class SignalAudioPlayer {
     this.initAudio(source);
   }
 
+  private handleSoundSettingsChange = () => {
+    if (!this.gainNode) return;
+    const sound = getSoundSettings();
+    const effectiveVol = sound.soundEnabled ? sound.volume / 100 : 0;
+    this.gainNode.gain.value = this.baseGain * effectiveVol;
+  };
+
   private initAudio(source: SignalAudioSource) {
     if (typeof window === "undefined") return;
     try {
@@ -55,7 +117,15 @@ export class SignalAudioPlayer {
       if (!AudioCtx) return;
       this.ctx = new AudioCtx();
       this.gainNode = this.ctx.createGain();
-      this.gainNode.gain.value = 0.55; // comfortable, clear listening level
+
+      const sound = getSoundSettings();
+      const effectiveVol = sound.soundEnabled ? sound.volume / 100 : 0;
+      this.baseGain = 0.55; // comfortable, clear listening level
+      this.gainNode.gain.value = this.baseGain * effectiveVol;
+
+      if (typeof window !== "undefined") {
+        window.addEventListener(SOUND_CHANGE_EVENT, this.handleSoundSettingsChange);
+      }
 
       // Add Stereo Panner if supported
       if (typeof this.ctx.createStereoPanner === "function") {
@@ -67,10 +137,39 @@ export class SignalAudioPlayer {
         this.gainNode.connect(this.ctx.destination);
       }
 
+      // Auto-bind recorded chicken audio if this source represents Chicken
+      const isChicken =
+        source.ingredientName?.toLowerCase() === "chicken" ||
+        source.samples === getChickenStaticSamples() ||
+        (source.samples &&
+          source.samples.length === 1000 &&
+          Math.abs((source.samples[999] ?? 0) - 0.65784) < 1e-4) ||
+        (source.samples &&
+          source.samples.length === 401 &&
+          Math.abs((source.samples[400] ?? 0) - 0.65784) < 1e-2);
+
+      if (!source.audioBuffer && isChicken) {
+        const cached = getCachedChickenAudio();
+        if (cached) {
+          source.audioBuffer = cached.buffer;
+          this.duration = cached.duration;
+        } else {
+          loadChickenAudio()
+            .then((decoded) => {
+              if (this.ctx && !this.isPlaying) {
+                this.buffer = decoded.buffer;
+                this.duration = decoded.duration;
+              }
+            })
+            .catch(() => {});
+        }
+      }
+
       if (source.audioBuffer) {
         this.buffer = source.audioBuffer;
         this.duration = source.audioBuffer.duration;
-        this.gainNode.gain.value = 0.65; // Natural listening level for recorded audio
+        this.baseGain = 0.65; // Natural listening level for recorded audio
+        this.gainNode.gain.value = this.baseGain * effectiveVol;
         return;
       }
 
@@ -79,7 +178,7 @@ export class SignalAudioPlayer {
       this.buffer = this.ctx.createBuffer(1, numSamples, sampleRate);
       const data = this.buffer.getChannelData(0);
 
-      const samples = source.samples;
+      const samples = smoothLoopSeam(source.samples);
       const numCooked = samples.length;
       if (numCooked === 0) return;
 
@@ -116,7 +215,6 @@ export class SignalAudioPlayer {
       // Web Audio unavailable
     }
   }
-
 
   private tick = () => {
     if (!this.isPlaying || !this.ctx) return;
@@ -208,6 +306,8 @@ export class SignalAudioPlayer {
     this.isPlaying = true;
     this.isPaused = false;
     this.isEnded = false;
+    this.wasPlayingBeforePause = false;
+    SignalAudioPlayer.activePlayingInstances.add(this);
 
     if (this.rafId) cancelAnimationFrame(this.rafId);
     this.rafId = requestAnimationFrame(this.tick);
@@ -226,6 +326,9 @@ export class SignalAudioPlayer {
     this.cleanupSource();
     this.isPlaying = false;
     this.isPaused = true;
+    if (!this.wasPlayingBeforePause) {
+      SignalAudioPlayer.activePlayingInstances.delete(this);
+    }
     this.emitState(this.pauseOffset, this.pauseOffset / this.duration);
   }
 
@@ -247,6 +350,12 @@ export class SignalAudioPlayer {
   }
 
   public destroy() {
+    if (typeof window !== "undefined") {
+      window.removeEventListener(SOUND_CHANGE_EVENT, this.handleSoundSettingsChange);
+    }
+    SignalAudioPlayer.activePlayingInstances.delete(this);
+    this.wasPlayingBeforePause = false;
+
     if (this.rafId) {
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
@@ -262,6 +371,34 @@ export class SignalAudioPlayer {
     }
     this.onUpdateCallback = null;
   }
+
+  public static pauseAll() {
+    for (const player of SignalAudioPlayer.activePlayingInstances) {
+      if (player.isPlaying) {
+        player.wasPlayingBeforePause = true;
+        player.pause();
+      }
+    }
+  }
+
+  public static resumeAll() {
+    const sound = getSoundSettings();
+    if (!sound.soundEnabled) return;
+    for (const player of Array.from(SignalAudioPlayer.activePlayingInstances)) {
+      if (player.wasPlayingBeforePause) {
+        player.wasPlayingBeforePause = false;
+        player.play();
+      }
+    }
+  }
+}
+
+export function pauseAllActiveAudio() {
+  SignalAudioPlayer.pauseAll();
+}
+
+export function resumeAllActiveAudio() {
+  SignalAudioPlayer.resumeAll();
 }
 
 /**
@@ -269,6 +406,10 @@ export class SignalAudioPlayer {
  */
 export function playTargetLockSound() {
   if (typeof window === "undefined") return;
+  const sound = getSoundSettings();
+  if (!sound.soundEnabled || sound.volume <= 0) return;
+  const volMult = sound.volume / 100;
+
   try {
     const AudioCtx =
       window.AudioContext ||
@@ -285,7 +426,7 @@ export function playTargetLockSound() {
       osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.07);
 
       gain.gain.setValueAtTime(0, ctx.currentTime + idx * 0.07);
-      gain.gain.linearRampToValueAtTime(0.18, ctx.currentTime + idx * 0.07 + 0.02);
+      gain.gain.linearRampToValueAtTime(0.18 * volMult, ctx.currentTime + idx * 0.07 + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + idx * 0.07 + 0.22);
 
       osc.connect(gain);
@@ -312,6 +453,10 @@ export function playTargetLockSound() {
  */
 export function playLevitationLaunchSound(pan: number = 0) {
   if (typeof window === "undefined") return;
+  const sound = getSoundSettings();
+  if (!sound.soundEnabled || sound.volume <= 0) return;
+  const volMult = sound.volume / 100;
+
   try {
     const AudioCtx =
       window.AudioContext ||
@@ -330,7 +475,7 @@ export function playLevitationLaunchSound(pan: number = 0) {
     osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 1.0);
 
     gain.gain.setValueAtTime(0, ctx.currentTime);
-    gain.gain.linearRampToValueAtTime(0.25, ctx.currentTime + 0.1);
+    gain.gain.linearRampToValueAtTime(0.25 * volMult, ctx.currentTime + 0.1);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.0);
 
     if (panner) {
@@ -363,15 +508,25 @@ export function playLevitationLaunchSound(pan: number = 0) {
  */
 export class CookedSignalAudioPlayer extends SignalAudioPlayer {
   constructor(signal: CookedSignalData, onUpdate?: (state: PlaybackState) => void) {
-    const samples =
-      signal.samples && signal.samples.length > 0
-        ? signal.samples
-        : computeCookedSamples({
-            frequency: signal.frequency,
-            amplitude: signal.amplitude,
-            noise: signal.noise,
-            shift: signal.shift,
-          });
+    let samples = signal.samples && signal.samples.length > 0 ? signal.samples : null;
+    if (!samples && signal.recipeId) {
+      try {
+        const stageSig = getPipelineStageSignal(signal.recipeId, "cooked");
+        if (stageSig && stageSig.samples && stageSig.samples.length > 0) {
+          samples = stageSig.samples;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    if (!samples) {
+      samples = computeCookedSamples({
+        frequency: signal.frequency,
+        amplitude: signal.amplitude,
+        noise: signal.noise,
+        shift: signal.shift,
+      });
+    }
     super({ samples, frequency: signal.frequency, duration: 3.0 }, onUpdate);
   }
 }

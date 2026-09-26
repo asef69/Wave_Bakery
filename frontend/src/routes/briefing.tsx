@@ -27,6 +27,7 @@ import {
   useChefName,
   type Recipe,
   recipes,
+  resetRecipeProgress,
 } from "@/lib/recipes";
 import { cn } from "@/lib/utils";
 
@@ -42,8 +43,7 @@ export const Route = createFileRoute("/briefing")({
       { property: "og:title", content: "Recipe Mission Briefing — WaveBakery" },
       {
         property: "og:description",
-        content:
-          "Study the signal mathematics behind your recipe before entering the kitchen.",
+        content: "Study the signal mathematics behind your recipe before entering the kitchen.",
       },
     ],
   }),
@@ -58,7 +58,8 @@ const CULINARY_DSP_BRIDGES = [
     dsp: "Basis Function Synthesis (Sine/Square/Noise)",
     color: "text-primary",
     bgColor: "bg-primary/10 border-primary/30",
-    description: "Every ingredient possesses a signature frequency and physical waveform structure.",
+    description:
+      "Every ingredient possesses a signature frequency and physical waveform structure.",
   },
   {
     step: "2. Washing",
@@ -67,7 +68,8 @@ const CULINARY_DSP_BRIDGES = [
     dsp: "Low-Pass Anti-Aliasing Filtering",
     color: "text-signal",
     bgColor: "bg-signal/10 border-signal/30",
-    description: "Dirt and grit are high-frequency spectral noise. We filter them out before mixing.",
+    description:
+      "Dirt and grit are high-frequency spectral noise. We filter them out before mixing.",
   },
   {
     step: "3. Mixing",
@@ -76,7 +78,8 @@ const CULINARY_DSP_BRIDGES = [
     dsp: "Linear Superposition x₁(t) + x₂(t)",
     color: "text-emerald-400",
     bgColor: "bg-emerald-500/10 border-emerald-500/30",
-    description: "Harmonic signals superimpose linearly to construct a multi-tone complex flavor spectrum.",
+    description:
+      "Harmonic signals superimpose linearly to construct a multi-tone complex flavor spectrum.",
   },
   {
     step: "4. Seasoning",
@@ -99,11 +102,12 @@ const CULINARY_DSP_BRIDGES = [
   {
     step: "6. Serving",
     icon: Radio,
-    culinary: "Contactless Dining Delivery",
-    dsp: "Phased Array Beamforming AF(θ)",
+    culinary: "Delivery Cart Suspension",
+    dsp: "Z-Plane System H(z) (Notch Filter)",
     color: "text-sky-400",
     bgColor: "bg-sky-500/10 border-sky-500/30",
-    description: "Acoustic waveguides levitate and steer the delicate dish directly to the diner's table.",
+    description:
+      "The cart's suspension filter cancels the road vibration so the dish reaches the diner intact.",
   },
 ];
 
@@ -362,12 +366,19 @@ function RecipeMissionBriefing() {
 
                 <div className="mt-6 flex flex-wrap items-center gap-3">
                   <Link to="/kitchen" className="flex-1">
-                    <GameButton size="lg" className="w-full uppercase font-extrabold tracking-wider">
+                    <GameButton
+                      size="lg"
+                      className="w-full uppercase font-extrabold tracking-wider"
+                    >
                       Enter Kitchen Hub →
                     </GameButton>
                   </Link>
                   <Link to="/generate">
-                    <GameButton size="lg" variant="lab" className="uppercase font-bold tracking-wider">
+                    <GameButton
+                      size="lg"
+                      variant="lab"
+                      className="uppercase font-bold tracking-wider"
+                    >
                       Station 1: Generator ⚡
                     </GameButton>
                   </Link>
@@ -399,7 +410,10 @@ function RecipeMissionBriefing() {
                   return (
                     <div
                       key={item.step}
-                      className={cn("rounded-2xl border p-4.5 shadow-sm transition-all", item.bgColor)}
+                      className={cn(
+                        "rounded-2xl border p-4.5 shadow-sm transition-all",
+                        item.bgColor,
+                      )}
                     >
                       <div className="flex items-center justify-between">
                         <span className="font-mono text-[10px] font-extrabold uppercase text-muted-foreground">
@@ -439,11 +453,13 @@ function RecipeMissionBriefing() {
               >
                 ← Back to Blueprint
               </button>
-              <Link to="/kitchen">
-                <GameButton size="lg" className="uppercase font-extrabold tracking-wider">
-                  Proceed to Kitchen →
-                </GameButton>
-              </Link>
+              <GameButton
+                size="lg"
+                className="uppercase font-extrabold tracking-wider"
+                onClick={() => navigate({ to: "/kitchen" })}
+              >
+                Proceed to Kitchen →
+              </GameButton>
             </div>
           </div>
         )}

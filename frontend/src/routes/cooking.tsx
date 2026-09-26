@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ChefFourier } from "@/components/game/ChefFourier";
 import { DragTutorialCue } from "@/components/game/DragTutorialCue";
@@ -9,6 +9,7 @@ import { MiniWave } from "@/components/game/MiniWave";
 import { SignalAudioPlayer } from "@/lib/audio";
 import {
   computeConvolvedSignal,
+  getRecipeRunSession,
   recipes,
   recordStageAccuracy,
   saveCookedSignal,
@@ -19,6 +20,8 @@ import {
   usePipelineStageSignal,
   useRecipeProgress,
 } from "@/lib/recipes";
+import { invalidateDownstreamStages } from "@/lib/pipeline";
+import { nudgeCookingSfx, startCookingSfx, stopCookingSfx } from "@/lib/sfx";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/cooking")({
@@ -56,13 +59,56 @@ function CookingLab() {
   const requiredMethod = methods.find((m) => m.id === recipe.cookingMethod.id) ?? methods[0]!;
 
   const alreadyCompleted = unlockedStep >= 7;
-  const [method, setMethod] = useState<(typeof methods)[number] | null>(() =>
-    alreadyCompleted ? requiredMethod : null,
-  );
-  const [pos, setPos] = useState(() => (alreadyCompleted ? 100 : 0));
-  const [cooked, setCooked] = useState(() => alreadyCompleted);
-  const [showDragCue, setShowDragCue] = useState(() => !alreadyCompleted);
+
+  const storedCooked = useMemo(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const key = `wavebakery_pipeline_${recipe.id}_cooked`;
+        const stored = window.localStorage.getItem(key);
+        if (stored) {
+          const parsed = JSON.parse(stored) as {
+            metadata?: { methodId?: string; pos?: number };
+            samples?: number[];
+          };
+          if (Array.isArray(parsed?.samples) && parsed.samples.length > 0) {
+            return parsed;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return null;
+  }, [recipe.id]);
+
+  const initialMethod = useMemo(() => {
+    if (storedCooked?.metadata?.methodId) {
+      const found = methods.find((m) => m.id === storedCooked.metadata?.methodId);
+      if (found) return found;
+    }
+    const session = getRecipeRunSession();
+    if (session?.cookingAppliance) {
+      const found = methods.find((m) => m.id === session.cookingAppliance);
+      if (found) return found;
+    }
+    return alreadyCompleted ? requiredMethod : null;
+  }, [storedCooked, alreadyCompleted, requiredMethod]);
+
+  const initialPos = useMemo(() => {
+    if (typeof storedCooked?.metadata?.pos === "number") {
+      return storedCooked.metadata.pos;
+    }
+    const session = getRecipeRunSession();
+    if (typeof session?.cookingPos === "number") return session.cookingPos;
+    return alreadyCompleted ? 100 : 0;
+  }, [storedCooked, alreadyCompleted]);
+
+  const [method, setMethod] = useState<(typeof methods)[number] | null>(initialMethod);
+  const [pos, setPos] = useState(initialPos);
+  const [cooked, setCooked] = useState(() => storedCooked != null || alreadyCompleted);
+  const [showDragCue, setShowDragCue] = useState(() => storedCooked == null && !alreadyCompleted);
   const [player, setPlayer] = useState<SignalAudioPlayer | null>(null);
+  const userModifiedRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -76,6 +122,26 @@ function CookingLab() {
 
   const currentMethod = method ?? requiredMethod;
   const currentPos = pos > 0 ? pos : alreadyCompleted ? 100 : 0;
+
+  // Sound effect only: the method's cooking sound plays while the convolution
+  // slider is held/dragged and stops on release (anywhere) or on leaving.
+  const sfxHeldRef = useRef(false);
+  useEffect(() => {
+    const release = () => {
+      if (!sfxHeldRef.current) return;
+      sfxHeldRef.current = false;
+      stopCookingSfx();
+    };
+    window.addEventListener("pointerup", release);
+    window.addEventListener("pointercancel", release);
+    window.addEventListener("blur", release);
+    return () => {
+      window.removeEventListener("pointerup", release);
+      window.removeEventListener("pointercancel", release);
+      window.removeEventListener("blur", release);
+      stopCookingSfx();
+    };
+  }, []);
 
   const convolvedSignal = useMemo(() => {
     return computeConvolvedSignal(
@@ -108,6 +174,11 @@ function CookingLab() {
   useEffect(() => {
     if (isCookingComplete) {
       unlock(7);
+
+      if (userModifiedRef.current) {
+        invalidateDownstreamStages(recipe.id, "cooked");
+      }
+
       const methodScore = isTargetSelected ? 50 : 15;
       const depthScore = Math.min(50, Math.round((currentPos / 100) * 50));
       recordStageAccuracy("cooking", methodScore + depthScore);
@@ -132,7 +203,15 @@ function CookingLab() {
       });
       syncSessionParamsToBackend(recipe.id);
     }
-  }, [isCookingComplete, currentMethod, currentPos, convolvedSignal, recipe.id, unlock, isTargetSelected]);
+  }, [
+    isCookingComplete,
+    currentMethod,
+    currentPos,
+    convolvedSignal,
+    recipe.id,
+    unlock,
+    isTargetSelected,
+  ]);
 
   const chefLine = !method
     ? recipe.id === "burger"
@@ -146,7 +225,7 @@ function CookingLab() {
             : `This recipe calls for ${requiredMethod.name}! Select the ${requiredMethod.name} impulse response.`
     : isTargetSelected
       ? isCookingComplete
-        ? `Perfect! The ${recipe.name} signal is properly convolved with the ${requiredMethod.name} impulse response.`
+        ? `Cooking complete! The ${requiredMethod.name} impulse response transformed the ingredients into a cooked dish. Next, inspect your dish to check how the cooking heat affected its flavors.`
         : `Great choice! Drag the ${requiredMethod.name} impulse response across the signal to complete cooking.`
       : `Notice how this impulse response changes the signal? But remember, this recipe calls for ${requiredMethod.name}!`;
 
@@ -320,6 +399,7 @@ function CookingLab() {
                 <button
                   key={m.id}
                   onClick={() => {
+                    userModifiedRef.current = true;
                     setMethod(m);
                     setCooked(false);
                   }}
@@ -393,6 +473,7 @@ function CookingLab() {
               className="border-0 p-0"
               label="input signal · marinated"
               samples={marinatedSignal.samples}
+              curveRef={marinatedSignal}
             />
             <span
               className="pointer-events-none absolute top-4 h-20 w-16 rounded-xl border-2 border-primary bg-primary/20 shadow-[0_0_12px_var(--primary)] transition-all duration-75"
@@ -423,10 +504,17 @@ function CookingLab() {
               min={0}
               max={100}
               value={pos}
-              onPointerDown={() => setShowDragCue(false)}
+              onPointerDown={() => {
+                userModifiedRef.current = true;
+                setShowDragCue(false);
+                sfxHeldRef.current = true;
+                startCookingSfx(currentMethod.id);
+              }}
               onChange={(e) => {
+                userModifiedRef.current = true;
                 setShowDragCue(false);
                 setPos(Number(e.target.value));
+                if (!sfxHeldRef.current) nudgeCookingSfx(currentMethod.id);
               }}
               className="mt-3 w-full cursor-grab accent-[oklch(0.72_0.17_50)] active:cursor-grabbing"
               aria-label="Impulse response position"
@@ -439,7 +527,11 @@ function CookingLab() {
           </div>
 
           <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <MiniWave label="Input Signal x(t)" samples={marinatedSignal.samples} />
+            <MiniWave
+              label="Input Signal x(t)"
+              samples={marinatedSignal.samples}
+              curveRef={marinatedSignal}
+            />
             <MiniWave
               label={method ? `Impulse Response h(t) · ${method.name}` : "Impulse Response h(t)"}
               frequency={method?.freq ?? 6}
@@ -449,11 +541,13 @@ function CookingLab() {
             <MiniWave
               label="Convolved Output (x * h)(t)"
               samples={convolvedSignal.samples}
+              curveRef={marinatedSignal}
               color={isTargetSelected ? "var(--signal)" : "var(--signal-alt)"}
             />
             <MiniWave
               label="Target Cooked Signal"
               samples={targetCookedSignal.samples}
+              curveRef={marinatedSignal}
               color="var(--primary)"
             />
           </div>
@@ -475,9 +569,13 @@ function CookingLab() {
               className="uppercase"
               disabled={!method && !alreadyCompleted}
               onClick={() => {
+                userModifiedRef.current = true;
                 if (!method) setMethod(requiredMethod);
                 setPos(100);
                 setCooked(true);
+                // Sound effect only: this convolves in one step, so play the
+                // method's cooking sound briefly as it does.
+                nudgeCookingSfx((method ?? requiredMethod).id, 1500);
               }}
             >
               {isCookingComplete ? "✓ Dish Cooked" : "Cook Dish"}

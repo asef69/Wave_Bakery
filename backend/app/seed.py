@@ -8,67 +8,67 @@ from .models import Appliance, Ingredient, Recipe
 
 INGREDIENTS = [
     # Produce / Washables
-    dict(id='lettuce', name='Lettuce', emoji='🥬', voice='shaker', f0=440.0, color='#5eb35e',
+    dict(id='lettuce', name='Lettuce', emoji='🥬', voice='lettuce', f0=440.0, color='#5eb35e',
          signature='Band-limited noise with sustained series', washable=True, ideal_cutoff=380.0,
          kind='lettuce', category='Produce'),
-    dict(id='tomato', name='Tomato', emoji='🍅', voice='kalimba', f0=262.0, color='#e0483a',
+    dict(id='tomato', name='Tomato', emoji='🍅', voice='tomato', f0=262.0, color='#e0483a',
          signature='A tall stack of harmonics that decay at different rates', washable=True, ideal_cutoff=520.0,
          kind='tomato', category='Produce'),
-    dict(id='onion', name='Onion', emoji='🧅', voice='oboe', f0=587.0, color='#c79ad6',
+    dict(id='onion', name='Onion', emoji='🧅', voice='onion', f0=587.0, color='#c79ad6',
          signature='A near-pure tone plus band-limited breath noise', washable=True, ideal_cutoff=640.0,
          kind='onion', category='Produce'),
-    dict(id='cucumber', name='Cucumber', emoji='🥒', voice='piccolo', f0=450.0, color='#48c774',
+    dict(id='cucumber', name='Cucumber', emoji='🥒', voice='cucumber', f0=450.0, color='#48c774',
          signature='High-register agile woodwind tone with crisp flutter', washable=True, ideal_cutoff=450.0,
          kind='cucumber', category='Produce'),
-    dict(id='carrot', name='Carrot', emoji='🥕', voice='clarinet', f0=500.0, color='#ff8c00',
+    dict(id='carrot', name='Carrot', emoji='🥕', voice='carrot', f0=500.0, color='#ff8c00',
          signature='Hollow woodwind spectrum dominated by odd harmonics', washable=True, ideal_cutoff=500.0,
          kind='carrot', category='Produce'),
 
     # Bakery & Grains
-    dict(id='bun', name='Bun', emoji='🍞', voice='marimba', f0=160.0, color='#d2b48c',
+    dict(id='bun', name='Bun', emoji='🍞', voice='bun', f0=160.0, color='#d2b48c',
          signature='Warm resonant wooden bar strike with fast attack', washable=False, ideal_cutoff=None,
          kind='bun', category='Bakery'),
-    dict(id='bread', name='Bread', emoji='🍞', voice='marimba', f0=160.0, color='#d2b48c',
+    dict(id='bread', name='Bread', emoji='🍞', voice='bread', f0=160.0, color='#d2b48c',
          signature='Tuned woody harmonic bar resonance', washable=False, ideal_cutoff=None,
          kind='bread', category='Bakery'),
-    dict(id='noodles', name='Noodles', emoji='🍜', voice='harp', f0=220.0, color='#f5deb3',
+    dict(id='noodles', name='Noodles', emoji='🍜', voice='noodles', f0=220.0, color='#f5deb3',
          signature='Cascading plucked string harmonics', washable=False, ideal_cutoff=None,
          kind='noodles', category='Bakery'),
-    dict(id='flour', name='Flour', emoji='🌾', voice='organ', f0=130.0, color='#f5f5dc',
+    dict(id='flour', name='Flour', emoji='🌾', voice='flour', f0=130.0, color='#f5f5dc',
          signature='Multi-rank harmonic pipe organ tone', washable=False, ideal_cutoff=None,
          kind='flour', category='Bakery'),
 
     # Proteins & Dairy
-    dict(id='patty', name='Beef Patty', emoji='🥩', voice='drum', f0=90.0, color='#c0553f',
+    dict(id='patty', name='Beef Patty', emoji='🥩', voice='patty', f0=90.0, color='#c0553f',
          signature='One fat low-frequency lobe with a broadband click at attack', washable=False, ideal_cutoff=None,
          kind='patty', category='Protein'),
-    dict(id='meat', name='Meat', emoji='🥩', voice='drum', f0=90.0, color='#c0553f',
+    dict(id='meat', name='Meat', emoji='🥩', voice='patty', f0=90.0, color='#c0553f',
          signature='One fat low-frequency lobe with a broadband click at attack', washable=False, ideal_cutoff=None,
          kind='patty', category='Protein'),
-    dict(id='chicken', name='Chicken', emoji='🍗', voice='drum', f0=110.0, color='#e3a857',
+    dict(id='chicken', name='Chicken', emoji='🍗', voice='chicken', f0=110.0, color='#e3a857',
          signature='Punchy low-mid drum transient', washable=False, ideal_cutoff=None,
          kind='chicken', category='Protein'),
-    dict(id='cheese', name='Cheese', emoji='🧀', voice='flute', f0=330.0, color='#e8b73a',
+    dict(id='cheese', name='Cheese', emoji='🧀', voice='cheese', f0=330.0, color='#e8b73a',
          signature='A plucked string and flute tone with odd harmonics', washable=False, ideal_cutoff=None,
          kind='cheese', category='Dairy'),
-    dict(id='egg', name='Egg', emoji='🥚', voice='kalimba', f0=260.0, color='#ffebcd',
-         signature='Resonant plucked metallic tone', washable=False, ideal_cutoff=None,
+    dict(id='egg', name='Egg', emoji='🥚', voice='egg', f0=260.0, color='#ffebcd',
+         signature='Resonant plucked metallic tone', washable=True, ideal_cutoff=460.0,
          kind='egg', category='Protein'),
-    dict(id='milk', name='Milk', emoji='🥛', voice='flute', f0=300.0, color='#f8f8ff',
+    dict(id='milk', name='Milk', emoji='🥛', voice='milk', f0=300.0, color='#f8f8ff',
          signature='Smooth sustained woodwind tone', washable=False, ideal_cutoff=None,
          kind='milk', category='Dairy'),
-    dict(id='butter', name='Butter', emoji='🧈', voice='bassoon', f0=180.0, color='#ffe4b5',
+    dict(id='butter', name='Butter', emoji='🧈', voice='butter', f0=180.0, color='#ffe4b5',
          signature='Warm reedy low double-reed harmonics', washable=False, ideal_cutoff=None,
          kind='butter', category='Dairy'),
 
     # Pantry
-    dict(id='sugar', name='Sugar', emoji='🍬', voice='glockenspiel', f0=700.0, color='#ffb6c1',
+    dict(id='sugar', name='Sugar', emoji='🍬', voice='sugar', f0=700.0, color='#ffb6c1',
          signature='Bright crystalline bell chime', washable=False, ideal_cutoff=None,
          kind='sugar', category='Pantry'),
-    dict(id='salt', name='Salt', emoji='🧂', voice='triangle', f0=800.0, color='#e6e6fa',
+    dict(id='salt', name='Salt', emoji='🧂', voice='salt', f0=800.0, color='#e6e6fa',
          signature='High ringing metallic sustain', washable=False, ideal_cutoff=None,
          kind='salt', category='Pantry'),
-    dict(id='sauce', name='Sauce', emoji='🥫', voice='clarinet', f0=240.0, color='#dc143c',
+    dict(id='sauce', name='Sauce', emoji='🥫', voice='sauce', f0=240.0, color='#dc143c',
          signature='Rich odd-harmonic woodwind resonance', washable=False, ideal_cutoff=None,
          kind='sauce', category='Pantry'),
     dict(id='garlic', name='Garlic', emoji='🧄', voice='bell', f0=520.0, color='#e9e2cf',
@@ -138,7 +138,7 @@ RECIPES = [
          prep_time='8 mins', servings='1 steaming bowl',
          story='Stretch the time axis, not the noodles. Rinse scallions & onions, mix broth and boil.',
          ingredients=['noodles', 'egg', 'chicken', 'onion', 'salt'],
-         washable_ingredients=['onion'],
+         washable_ingredients=['onion', 'egg'],
          appliances=['boil'], cooking_method='boil',
          seasoning=1.3, blend=1.2, marinate=1.75,
          noise_difficulty=1.0, tolerance=1.0,
@@ -155,33 +155,6 @@ RECIPES = [
          teaches=['Multi-ingredient Coating', 'High Frequency Scaling', 'Brining Time Expansion', 'Dense Fry Convolution']),
 
     # 2. Tutorial & Advanced Progression Dishes
-    dict(id='toast', name='Golden Toast', emoji='🍞', tier=1, difficulty='Easy',
-         tagline='Your first shift. One ingredient, one oven.', page_number=6,
-         prep_time='2 mins', servings='1 slice',
-         story='Your first shift. One ingredient, one oven, one lesson: filtering.',
-         ingredients=['cheese'], washable_ingredients=[],
-         appliances=['bake'], cooking_method='bake',
-         seasoning=1.0, blend=1.0, marinate=0.0,
-         noise_difficulty=0.6, tolerance=1.25,
-         teaches=['FFT', 'Frequency-domain filtering', 'Inverse FFT', 'Convolution']),
-    dict(id='soup', name='Velvet Soup', emoji='🍲', tier=2, difficulty='Medium',
-         tagline='Blend it smooth, then let it ring in the pot.', page_number=7,
-         prep_time='6 mins', servings='1 bowl',
-         story='Blend it smooth, then let it ring in the pot.',
-         ingredients=['mushroom', 'onion', 'garlic'], washable_ingredients=['onion'],
-         appliances=['boil', 'simmer'], cooking_method='boil',
-         seasoning=0.65, blend=0.7, marinate=0.05,
-         noise_difficulty=1.1, tolerance=1.0,
-         teaches=['Time scaling', 'Resonant systems', 'Moving-average smoothing']),
-    dict(id='salad', name='Crisp Salad', emoji='🥗', tier=2, difficulty='Medium',
-         tagline='No heat, all texture. Chop carefully.', page_number=8,
-         prep_time='4 mins', servings='1 bowl',
-         story='No heat, all texture. Chop carefully — the Nyquist inspector is watching.',
-         ingredients=['lettuce', 'tomato', 'pepper'], washable_ingredients=['lettuce', 'tomato'],
-         appliances=['sear'], cooking_method='sear',
-         seasoning=0.9, blend=1.0, marinate=0.02, chop_factor=3,
-         noise_difficulty=1.2, tolerance=1.0,
-         teaches=['Sampling & decimation', 'Aliasing / Nyquist', 'High-pass differencing']),
     dict(id='stirfry', name='Sizzling Stir-Fry', emoji='🍜', tier=3, difficulty='Hard',
          tagline='Fast wok work: compress the signal.', page_number=9,
          prep_time='7 mins', servings='1 plate',
@@ -190,27 +163,9 @@ RECIPES = [
          appliances=['fry', 'smoke'], cooking_method='fry',
          seasoning=1.15, blend=1.4, marinate=0.12,
          noise_difficulty=1.5, tolerance=0.9,
-         teaches=['Time compression', 'Multi-ingredient superposition', 'Diffuse comb systems']),
-    dict(id='creme', name='Crème Brûlée', emoji='🍮', tier=3, difficulty='Hard',
-         tagline='Steam the custard, then caramelise with AM.', page_number=10,
-         prep_time='15 mins', servings='1 ramekin',
-         story='Steam the custard, then caramelise the top with amplitude modulation.',
-         ingredients=['garlic', 'onion', 'cheese'], washable_ingredients=['onion'],
-         appliances=['steam', 'bake'], cooking_method='steam',
-         seasoning=0.75, blend=0.85, marinate=0.16,
-         caramelize_carrier=180.0, caramelize_depth=0.55,
-         noise_difficulty=1.6, tolerance=0.85,
-         teaches=['Amplitude modulation', 'Sideband generation', 'Dual-resonance systems']),
-    dict(id='feast', name="Chef's Grand Feast", emoji='👑', tier=4, difficulty='Masterchef',
-         tagline='Everything you know, at once.', page_number=11,
-         prep_time='20 mins', servings='1 grand banquet',
-         story='Everything you know, at once. Five ingredients, three appliances, no hints.',
-         ingredients=['meat', 'cheese', 'tomato', 'lettuce', 'mushroom'], washable_ingredients=['lettuce', 'tomato'],
-         appliances=['grill', 'smoke', 'bake'], cooking_method='grill',
-         seasoning=0.95, blend=1.25, marinate=0.2,
-         caramelize_carrier=240.0, caramelize_depth=0.4, chop_factor=2,
-         noise_difficulty=1.9, tolerance=0.75,
-         teaches=['Full pipeline', 'System cascading', 'Modulation + sampling combined']),
+         teaches=['Time compression', 'Multi-ingredient superposition', 'Diffuse comb systems'],
+         # Not in the frontend's recipe book, so it can't be played or ranked.
+         is_active=False),
 ]
 
 
@@ -218,17 +173,18 @@ def seed(db: Session, force: bool = False) -> dict:
     counts = {'ingredients': 0, 'appliances': 0, 'recipes': 0}
 
     for row in INGREDIENTS:
-        if force or db.get(Ingredient, row['id']) is None:
-            db.merge(Ingredient(**row))
-            counts['ingredients'] += 1
+        db.merge(Ingredient(**row))
+        counts['ingredients'] += 1
     for row in APPLIANCES:
-        if force or db.get(Appliance, row['id']) is None:
-            db.merge(Appliance(**row))
-            counts['appliances'] += 1
+        db.merge(Appliance(**row))
+        counts['appliances'] += 1
     for row in RECIPES:
-        if force or db.get(Recipe, row['id']) is None:
-            db.merge(Recipe(**row))
-            counts['recipes'] += 1
+        db.merge(Recipe(**row))
+        counts['recipes'] += 1
+    # Recipes removed from the book stay in the database (runs reference
+    # them) but are retired: not listed, playable, ranked or counted.
+    (db.query(Recipe).filter(Recipe.id.notin_([r['id'] for r in RECIPES]))
+     .update({Recipe.is_active: False}, synchronize_session=False))
 
     db.commit()
     return counts

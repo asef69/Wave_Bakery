@@ -93,4 +93,20 @@ describe("T7: Recipe Pipeline Dataflow", () => {
       expect(cached.recipeId).toBe(r.id);
     }
   });
+
+  it("preserves identical samples and alignment when mixing a single ingredient", () => {
+    const singleIngredient = "Bun";
+    const rawBun = getRecipeIngredientSamples(burgerRecipe.id, singleIngredient, {
+      sampleCount: 401,
+      seed: 0, // phase 0, as Generate/Filtering/Mixing display it
+      noise: 0,
+      amplitude: 1.0,
+    });
+    const mixedSingle = computeMixedSignal(burgerRecipe.id, [singleIngredient], 401);
+
+    expect(mixedSingle.samples.length).toBe(rawBun.length);
+    for (let i = 0; i < rawBun.length; i++) {
+      expect(mixedSingle.samples[i]).toBeCloseTo(rawBun[i]!, 5);
+    }
+  });
 });

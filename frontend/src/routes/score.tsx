@@ -1,8 +1,13 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { MessageSquare, CheckCircle2, AlertTriangle, XCircle, Sparkles, Trophy } from "lucide-react";
-
-import { ServeChoiceModal } from "@/components/beamforming/ServeChoiceModal";
+import {
+  MessageSquare,
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  Sparkles,
+  Trophy,
+} from "lucide-react";
 import { ChefFourier } from "@/components/game/ChefFourier";
 import { GameButton } from "@/components/game/GameButton";
 import { MiniWave } from "@/components/game/MiniWave";
@@ -10,20 +15,25 @@ import { RecipeTimerBadge, TimeExpiredModal } from "@/components/game/RecipeTime
 import { SignalAudioPlayer } from "@/lib/audio";
 import { generateCustomerCritique } from "@/lib/critiques";
 import { computeSignalSimilarity } from "@/lib/dsp";
-import { addLeaderboardEntry } from "@/lib/leaderboard";
+import { servedDish } from "@/lib/delivery";
+import { ANONYMOUS_CHEF, addLeaderboardEntry } from "@/lib/leaderboard";
 import {
-  api,
   completeRecipeRun,
+  difficultyMultiplier,
   getIdealDishSignal,
+  saveRecipeBestScore,
   type SubmitResult,
   updateRecipeRunSession,
   useActiveRecipe,
   useChefName,
   useCookedSignal,
+  usePipelineStageSignal,
   useRecipeProgress,
   useRecipeTimer,
+  submitRunToBackend,
 } from "@/lib/recipes";
 import { cn } from "@/lib/utils";
+import { getPipelineStageSignal, hasPipelineStageSignal } from "@/lib/pipeline";
 
 export const Route = createFileRoute("/score")({
   head: () => ({
@@ -43,20 +53,17 @@ export const Route = createFileRoute("/score")({
   component: ScoreScreen,
 });
 
-const DIFFICULTY_MULTIPLIERS = {
-  easy: 0.8,
-  medium: 1.0,
-  hard: 1.25,
-  masterchef: 1.5,
-};
+/** Cap on the time bonus, before difficulty: 30% of a perfect 1000-pt base. */
+const MAX_TIME_BONUS = 300;
 
 function ScoreScreen() {
   const [recipe] = useActiveRecipe();
   const [unlockedStep, unlock] = useRecipeProgress();
   const { session, formattedTime, difficultyConfig } = useRecipeTimer();
   const [chefName] = useChefName();
-  const [isServeModalOpen, setIsServeModalOpen] = useState(false);
   const [cookedSignal] = useCookedSignal(recipe.id);
+  // The Mixing curve (carried through marinating) both dishes are drawn along.
+  const [curveRef] = usePipelineStageSignal(recipe.id, "marinated");
   const targetSignal = useMemo(() => getIdealDishSignal(recipe.id), [recipe.id]);
   const [audioPlayer, setAudioPlayer] = useState<SignalAudioPlayer | null>(null);
 
@@ -64,6 +71,8 @@ function ScoreScreen() {
     () => session?.backendSubmitResult ?? null,
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // The server's verdict is in (or failed): only then is the score final.
+  const [submitSettled, setSubmitSettled] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -84,62 +93,98 @@ function ScoreScreen() {
 
   useEffect(() => {
     unlock(8);
-    completeRecipeRun();
 
-    // Submit to server-authoritative backend
+    // Submit to server-authoritative backend. submitRunToBackend dedupes
+    // in-flight requests: this effect re-runs on every session change, and
+    // each re-run used to fire another submit (2–4 duplicate attempts).
     if (session?.backendSessionId && !backendSubmitResult) {
       setIsSubmitting(true);
-      api.submitSession(session.backendSessionId)
+      submitRunToBackend(recipe.id)
         .then((result) => {
-          setBackendSubmitResult(result);
-          updateRecipeRunSession({ backendSubmitResult: result });
-        })
-        .catch((err) => {
-          console.warn("Backend session submit error (falling back to client scoring):", err);
+          if (result) setBackendSubmitResult(result);
         })
         .finally(() => {
           setIsSubmitting(false);
+          setSubmitSettled(true);
         });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.backendSessionId, backendSubmitResult, unlock]);
 
-  // Compute local fallback signal similarity
+  const deliveredSignal = useMemo(
+    () => getPipelineStageSignal(recipe.id, "delivered"),
+    [recipe.id],
+  );
+
+  // The dish actually served: the cart's output (System Delivery), else the
+  // oven's output, else the cooked dish WITH the burnt overtone cooking left
+  // in it — serving straight from Check Dish keeps that defect.
+  const playerSamples = useMemo(() => {
+    const served = getPipelineStageSignal(recipe.id, "served");
+    if (hasPipelineStageSignal(recipe.id, "served") && served.samples.length > 0) {
+      return served.samples;
+    }
+    if (hasPipelineStageSignal(recipe.id, "delivered") && deliveredSignal.samples.length > 0) {
+      return deliveredSignal.samples;
+    }
+    if (cookedSignal.samples && cookedSignal.samples.length > 0) {
+      return servedDish(recipe.id, cookedSignal.samples);
+    }
+    return backendSubmitResult?.player_dish?.plot ?? targetSignal.samples;
+  }, [recipe.id, deliveredSignal, cookedSignal.samples, backendSubmitResult, targetSignal.samples]);
+
+  const targetSamples = targetSignal.samples;
+
+  // Compute signal similarity directly on player's delivered output vs target
   const rawSimilarity = useMemo(() => {
-    return computeSignalSimilarity(cookedSignal.samples, targetSignal.samples);
-  }, [cookedSignal.samples, targetSignal.samples]);
+    return computeSignalSimilarity(playerSamples, targetSamples);
+  }, [playerSamples, targetSamples]);
 
   const similarity = Math.max(0, Math.min(100, Math.round(rawSimilarity)));
 
-  // Dynamic stage accuracies recorded from session
-  const filteringVal = session?.filteringAccuracy ?? (recipe.washableIngredients.length === 0 ? 100 : similarity);
-  const mixingVal = session?.mixingAccuracy ?? 95;
-  const seasoningVal = session?.seasoningAccuracy ?? 92;
-  const marinatingVal = session?.marinatingAccuracy ?? 90;
-  const cookingVal = session?.cookingAccuracy ?? 94;
+  // Stage accuracies recorded from session. A stage with no recorded
+  // accuracy earns nothing (it used to default to 90–95%, i.e. free points),
+  // except filtering when the recipe has nothing to wash.
+  const filteringVal =
+    session?.filteringAccuracy ?? (recipe.washableIngredients.length === 0 ? 100 : 0);
+  const mixingVal = session?.mixingAccuracy ?? 0;
+  const seasoningVal = session?.seasoningAccuracy ?? 0;
+  const marinatingVal = session?.marinatingAccuracy ?? 0;
+  const cookingVal = session?.cookingAccuracy ?? 0;
   const transformVal = Math.round((seasoningVal + marinatingVal) / 2);
-  const deliveryVal = session?.deliveryAccuracy ?? null;
-  const deliveryBonus = deliveryVal !== null ? Math.round((deliveryVal / 100) * 150) : 0;
+  const deliveryVal = backendSubmitResult?.delivery_score ?? session?.deliveryAccuracy ?? null;
+  const systemVal = backendSubmitResult?.system_score ?? session?.systemAccuracy ?? null;
 
-  // Authoritative server values vs fallback
+  const stageVals = [filteringVal, mixingVal, seasoningVal, marinatingVal, cookingVal];
+  const stageAvg = stageVals.reduce((sum, v) => sum + v, 0) / stageVals.length;
+
+  // Local score on the backend's scale and weights: the core dish, then the
+  // finishing stations (Precision Oven 10%, System Delivery 5%) when played,
+  // taken proportionally from the rest — mirrors gameplay.judge.
+  // The finishing stations act on the dish itself (burnt overtone removed by
+  // the oven, road vibration rejected by the cart), so they count through
+  // `similarity` — no separate weights, same as the server.
+  const localScore = Math.round(similarity * 0.5 + stageAvg * 0.5);
+
+  // Authoritative server score (0–100) when available, else the local one on
+  // the same 0–100 scale — both then go through the same stars and points.
   const displayScore = backendSubmitResult ? Math.round(backendSubmitResult.score) : null;
-  const displayStars = backendSubmitResult
-    ? "★ ".repeat(backendSubmitResult.stars) + "☆ ".repeat(Math.max(0, 5 - backendSubmitResult.stars))
-    : similarity >= 90
-      ? "★ ★ ★"
-      : similarity >= 75
-        ? "★ ★ ☆"
-        : "★ ☆ ☆";
-  const displaySimilarity = backendSubmitResult?.spectral_similarity != null
-    ? Math.max(0, Math.min(100, Math.round(backendSubmitResult.spectral_similarity * 100)))
-    : similarity;
+  const score100 = displayScore ?? localScore;
+  // Same thresholds as the backend's metrics.stars(), so stars always mean
+  // the same thing (the local fallback used to be a different 3-star scale).
+  const starCount =
+    backendSubmitResult?.stars ?? [32, 50, 66, 80, 92].filter((t) => score100 >= t).length;
+  const displayStars = "★ ".repeat(starCount) + "☆ ".repeat(Math.max(0, 5 - starCount));
 
-  const playerSamples = backendSubmitResult?.player_dish?.plot && backendSubmitResult.player_dish.plot.length > 0
-    ? backendSubmitResult.player_dish.plot
-    : cookedSignal.samples;
-
-  const targetSamples = backendSubmitResult?.target?.plot && backendSubmitResult.target.plot.length > 0
-    ? backendSubmitResult.target.plot
-    : targetSignal.samples;
+  // One metric everywhere (panel, critique, leaderboard): the time-domain
+  // match of the dish shown on screen against the target. It used to switch
+  // to the backend's spectral similarity when the Precision Oven was skipped.
+  const displaySimilarity = similarity;
+  // The headline number: the server's dish score (what the leaderboard shows
+  // as "dish N%") once it has judged the run; until then the in-browser match.
+  const headlinePercent = backendSubmitResult
+    ? Math.round(backendSubmitResult.score * 10) / 10
+    : displaySimilarity;
 
   // Generate dynamic customer critique
   const customerCritique = useMemo(() => {
@@ -173,28 +218,43 @@ function ScoreScreen() {
       { label: "Cooking / Convolution", value: backendSubmitResult?.cooking_score ?? cookingVal },
     ];
     if (deliveryVal !== null) {
-      list.push({ label: `Beam Delivery Precision (+${deliveryBonus} pts)`, value: deliveryVal });
+      list.push({ label: "Precision Oven Finishing", value: deliveryVal });
+    }
+    if (systemVal !== null) {
+      list.push({ label: "System Delivery (Z-Plane)", value: systemVal });
     }
     return list;
-  }, [backendSubmitResult, filteringVal, mixingVal, transformVal, cookingVal, deliveryVal, deliveryBonus]);
+  }, [
+    backendSubmitResult,
+    filteringVal,
+    mixingVal,
+    transformVal,
+    cookingVal,
+    deliveryVal,
+    systemVal,
+  ]);
 
-  const stageAvg = (filteringVal + mixingVal + seasoningVal + marinatingVal + cookingVal) / 5;
-  const diffMultiplier = session ? (DIFFICULTY_MULTIPLIERS[session.difficulty] ?? 1.0) : 1.0;
+  const diffMultiplier = difficultyMultiplier(session?.difficulty);
 
   // Remaining time calculation
   const remainingSec = useMemo(() => {
     if (!session) return 0;
-    if (session.endTime) {
-      const elapsed = Math.floor((session.endTime - session.startTime) / 1000);
-      return Math.max(0, session.totalSeconds - elapsed);
-    }
-    return 0;
+    // Before completeRecipeRun stamps endTime, measure up to now; returning 0
+    // here made the first render (and first save) miss the time bonus.
+    const end = session.endTime ?? Date.now();
+    const elapsed = Math.floor((end - session.startTime) / 1000);
+    return Math.max(0, session.totalSeconds - elapsed);
   }, [session]);
 
-  const timeBonus = remainingSec * 2;
-  const totalScore = displayScore !== null
-    ? displayScore
-    : Math.round((similarity * 0.5 + stageAvg * 0.5) * 10 * diffMultiplier) + timeBonus + deliveryBonus;
+  // Time bonus: 2 pts per second left, capped at 30% of a perfect base score
+  // (it was uncapped and could outweigh the cooking), and scaled by
+  // difficulty like the base. The finishing stations are inside score100.
+  // Once the server has judged the run, its total is THE score — the same
+  // number the leaderboard shows (the server times the run on its own clock).
+  // Before that (or offline), the same formula locally.
+  const localTimeBonus = Math.round(Math.min(remainingSec * 2, MAX_TIME_BONUS) * diffMultiplier);
+  const localTotal = Math.round(score100 * 10 * diffMultiplier) + localTimeBonus;
+  const totalScore = backendSubmitResult?.total_score ?? localTotal;
 
   // Dynamic feedback from Chef Fourier based on lowest score
   const chefFeedback = useMemo(() => {
@@ -205,32 +265,75 @@ function ScoreScreen() {
       return `${displaySimilarity}%! That is a scientifically delicious plate. A true Fourier masterwork!`;
     }
     const stages = [
-      { name: "filtering", val: filteringVal, tip: "Some high-frequency chatter remained in filtering. Try tuning the cutoff closer to the ideal mark." },
-      { name: "mixing", val: mixingVal, tip: "Check your bowl ingredients to ensure all required components are properly superimposed." },
-      { name: "seasoning", val: transformVal, tip: "Fine-tune the amplitude and time-scaling sliders to match the target envelope." },
-      { name: "cooking", val: cookingVal, tip: "Ensure you choose the correct cooking impulse response and slide to full convolution depth." },
+      {
+        name: "filtering",
+        val: filteringVal,
+        tip: "Some high-frequency chatter remained in filtering. Try tuning the cutoff closer to the ideal mark.",
+      },
+      {
+        name: "mixing",
+        val: mixingVal,
+        tip: "Check your bowl ingredients to ensure all required components are properly superimposed.",
+      },
+      {
+        name: "seasoning",
+        val: transformVal,
+        tip: "Fine-tune the amplitude and time-scaling sliders to match the target envelope.",
+      },
+      {
+        name: "cooking",
+        val: cookingVal,
+        tip: "Ensure you choose the correct cooking impulse response and slide to full convolution depth.",
+      },
     ];
     stages.sort((a, b) => a.val - b.val);
     const lowest = stages[0];
     return `${displaySimilarity}% similarity. ${lowest?.tip ?? "Keep refining each station to perfect the signal!"}`;
   }, [backendSubmitResult, displaySimilarity, filteringVal, mixingVal, transformVal, cookingVal]);
 
-  // Persist player run to leaderboard
+  // Persist player run to leaderboard + best score + session
+  // Save only the final score: the server's, or the local one when there is
+  // no server run (offline / signed out) or its submit failed. Saving the
+  // provisional local total first let it stick as a "best" when it was higher.
+  const scoreIsFinal = !!backendSubmitResult || !session?.backendSessionId || submitSettled;
+
   useEffect(() => {
-    const diff = session?.difficulty ?? "easy";
-    const startTime = session?.startTime ?? Date.now();
-    const entryId = `run-${recipe.id}-${diff}-${startTime}`;
-    addLeaderboardEntry({
-      id: entryId,
-      chefName: chefName || "Asef",
-      recipeId: recipe.id,
-      difficulty: diff,
-      score: totalScore,
-      accuracy: displaySimilarity,
-      timeRemaining: formattedTime || "0:00",
-      date: "Today",
-    });
-  }, [session, recipe.id, chefName, totalScore, displaySimilarity, formattedTime]);
+    if (scoreIsFinal && totalScore > 0) {
+      saveRecipeBestScore(recipe.id, totalScore);
+      completeRecipeRun(recipe.id, totalScore);
+      // The Complete page shows exactly these (it used its own 3-star
+      // rating and re-saved the leaderboard entry).
+      updateRecipeRunSession({
+        finalScore: totalScore,
+        finalStars: starCount,
+      });
+
+      const diff = session?.difficulty ?? "easy";
+      const startTime = session?.startTime ?? Date.now();
+      const entryId = `run-${recipe.id}-${diff}-${startTime}`;
+      addLeaderboardEntry({
+        id: entryId,
+        // No fallback to a real chef's name for anonymous runs.
+        chefName: chefName || ANONYMOUS_CHEF,
+        recipeId: recipe.id,
+        difficulty: diff,
+        score: totalScore,
+        accuracy: displaySimilarity,
+        timeRemaining: formattedTime || "0:00",
+        date: new Date(startTime).toLocaleDateString(),
+      });
+    }
+  }, [
+    scoreIsFinal,
+    recipe.id,
+    totalScore,
+    starCount,
+    session?.difficulty,
+    session?.startTime,
+    chefName,
+    displaySimilarity,
+    formattedTime,
+  ]);
 
   if (unlockedStep < 7) {
     return (
@@ -275,11 +378,6 @@ function ScoreScreen() {
 
   return (
     <main className="relative min-h-screen bg-background">
-      <ServeChoiceModal
-        isOpen={isServeModalOpen}
-        onClose={() => setIsServeModalOpen(false)}
-        recipeName={recipe.name}
-      />
       <TimeExpiredModal />
       <div className="lab-grid pointer-events-none absolute inset-0 opacity-[0.08]" aria-hidden />
       <div className="relative z-10 mx-auto max-w-6xl px-8 py-10">
@@ -292,7 +390,7 @@ function ScoreScreen() {
               FINAL <span className="text-gradient-warm">COMPARISON</span>
             </h1>
           </div>
-          {session && <RecipeTimerBadge />}
+          {session && <RecipeTimerBadge showPause={false} />}
         </div>
 
         <div className="mt-8 grid gap-5 lg:grid-cols-2">
@@ -312,6 +410,7 @@ function ScoreScreen() {
               className="mt-3 border-0 p-0"
               height={140}
               samples={playerSamples}
+              curveRef={curveRef}
               color="var(--signal-alt)"
             />
           </div>
@@ -331,6 +430,7 @@ function ScoreScreen() {
               className="mt-3 border-0 p-0"
               height={140}
               samples={targetSamples}
+              curveRef={curveRef}
               color="var(--primary)"
             />
           </div>
@@ -340,7 +440,7 @@ function ScoreScreen() {
           <div className="kitchen-card p-6 text-center">
             <div className="flex items-center justify-between">
               <p className="font-mono text-[10px] tracking-[0.22em] text-muted-foreground uppercase">
-                Signal similarity
+                {backendSubmitResult ? "Dish score" : "Signal similarity"}
               </p>
               {backendSubmitResult ? (
                 <span className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 font-mono text-[8px] font-bold text-emerald-400 uppercase">
@@ -352,20 +452,42 @@ function ScoreScreen() {
                 </span>
               ) : null}
             </div>
-            <p className="mt-2 font-display text-6xl font-extrabold text-gradient-warm">{displaySimilarity}%</p>
-            <div className="mt-4 h-4 w-full overflow-hidden rounded-full border border-border bg-secondary">
-              <span className="block h-full bg-[image:var(--gradient-warm)]" style={{ width: `${displaySimilarity}%` }} />
-            </div>
-            <p className="mt-4 font-display text-2xl font-extrabold text-foreground">
-              Overall score: {totalScore}
+            <p className="mt-2 font-display text-6xl font-extrabold text-gradient-warm">
+              {headlinePercent}%
             </p>
-            <p className="font-display text-xl text-primary">{displayStars}</p>
+            <div className="mt-4 h-4 w-full overflow-hidden rounded-full border border-border bg-secondary">
+              <span
+                className="block h-full bg-[image:var(--gradient-warm)]"
+                style={{ width: `${headlinePercent}%` }}
+              />
+            </div>
+            {backendSubmitResult && (
+              <p className="mt-2 font-mono text-[10px] text-muted-foreground uppercase">
+                In-browser signal match: {displaySimilarity}%
+              </p>
+            )}
+            {scoreIsFinal ? (
+              <>
+                <p className="mt-4 font-display text-2xl font-extrabold text-foreground">
+                  Overall score: {totalScore}
+                </p>
+                <p className="font-display text-xl text-primary">{displayStars}</p>
+              </>
+            ) : (
+              // No provisional number: it used to show the browser's estimate
+              // (e.g. 824) and then a different server total on the leaderboard.
+              <p className="mt-4 font-display text-2xl font-extrabold text-muted-foreground animate-pulse">
+                Overall score: verifying…
+              </p>
+            )}
 
             {backendSubmitResult && (
               <div className="mt-4 grid grid-cols-2 gap-2 border-t border-border/60 pt-3 font-mono text-[10px] uppercase text-muted-foreground">
                 <div className="rounded-lg border border-border bg-secondary/60 p-1.5 text-center">
                   <span>SNR</span>
-                  <p className="font-bold text-foreground">{backendSubmitResult.snr_db.toFixed(1)} dB</p>
+                  <p className="font-bold text-foreground">
+                    {backendSubmitResult.snr_db.toFixed(1)} dB
+                  </p>
                 </div>
                 <div className="rounded-lg border border-border bg-secondary/60 p-1.5 text-center">
                   <span>MSE</span>
@@ -426,7 +548,9 @@ function ScoreScreen() {
         <section className="mt-8 kitchen-card p-6 border-2 border-primary/30">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-3">
             <div className="flex items-center gap-3">
-              <span className="text-3xl" aria-hidden>{customerCritique.avatarEmoji}</span>
+              <span className="text-3xl" aria-hidden>
+                {customerCritique.avatarEmoji}
+              </span>
               <div>
                 <p className="font-mono text-[10px] font-extrabold tracking-[0.2em] text-primary uppercase">
                   Diner Taste Verdict · {customerCritique.eaterTitle}
@@ -437,12 +561,16 @@ function ScoreScreen() {
               </div>
             </div>
 
-            <span className={cn(
-              "rounded-full px-3 py-1 font-mono text-xs font-bold uppercase",
-              customerCritique.reaction === "ecstatic" ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40" :
-              customerCritique.reaction === "satisfied" ? "bg-primary/20 text-primary border border-primary/40" :
-              "bg-amber-500/20 text-amber-400 border border-amber-500/40"
-            )}>
+            <span
+              className={cn(
+                "rounded-full px-3 py-1 font-mono text-xs font-bold uppercase",
+                customerCritique.reaction === "ecstatic"
+                  ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
+                  : customerCritique.reaction === "satisfied"
+                    ? "bg-primary/20 text-primary border border-primary/40"
+                    : "bg-amber-500/20 text-amber-400 border border-amber-500/40",
+              )}
+            >
               {customerCritique.headline}
             </span>
           </div>
@@ -457,9 +585,14 @@ function ScoreScreen() {
             </p>
             <div className="mt-2.5 grid gap-3 sm:grid-cols-2">
               {customerCritique.diagnostics.map((d) => (
-                <div key={d.station} className="rounded-xl border border-border bg-card p-3 shadow-2xs text-xs">
+                <div
+                  key={d.station}
+                  className="rounded-xl border border-border bg-card p-3 shadow-2xs text-xs"
+                >
                   <div className="flex items-center justify-between">
-                    <span className="font-display font-extrabold uppercase text-foreground">{d.station}</span>
+                    <span className="font-display font-extrabold uppercase text-foreground">
+                      {d.station}
+                    </span>
                     {d.status === "pass" ? (
                       <span className="inline-flex items-center gap-1 font-mono text-[9px] font-bold text-emerald-400 uppercase">
                         <CheckCircle2 className="h-3.5 w-3.5" /> Optimal
@@ -475,7 +608,9 @@ function ScoreScreen() {
                     )}
                   </div>
                   <p className="mt-1.5 font-semibold text-foreground">{d.culinaryNote}</p>
-                  <p className="mt-1 font-mono text-[10px] text-muted-foreground">{d.dspDiagnosis}</p>
+                  <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+                    {d.dspDiagnosis}
+                  </p>
                 </div>
               ))}
             </div>
@@ -483,11 +618,7 @@ function ScoreScreen() {
         </section>
 
         <div className="mt-10 flex flex-wrap items-end justify-between gap-6">
-          <ChefFourier
-            size="sm"
-            float={false}
-            message={chefFeedback}
-          />
+          <ChefFourier size="sm" float={false} message={chefFeedback} />
           <div className="flex flex-wrap gap-3">
             <Link to="/complete">
               <GameButton

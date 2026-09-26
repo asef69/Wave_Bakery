@@ -1,23 +1,47 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
-import { Award, ChefHat, Clock, Flame, LogOut, Medal, Sparkles, Timer, Trophy, Zap } from "lucide-react";
+import { Fragment, useEffect, useRef, useState } from "react";
+import {
+  Activity,
+  Award,
+  BarChart3,
+  ChefHat,
+  Clock,
+  Flame,
+  Globe,
+  Medal,
+  RefreshCw,
+  Sparkles,
+  Timer,
+  Trophy,
+  Users,
+  Zap,
+} from "lucide-react";
 
+import { ChefAuthModal } from "@/components/game/ChefAuthModal";
 import { ChefFourier } from "@/components/game/ChefFourier";
 import { DishGlyph } from "@/components/game/DishGlyph";
 import { GameButton } from "@/components/game/GameButton";
-import { LogoutModal } from "@/components/game/LogoutModal";
-import { formatChefDisplayName, getLeaderboard, isChefMatch, useLeaderboard } from "@/lib/leaderboard";
-import { DIFFICULTY_CONFIGS, getRecipeRunSession, recipes, useChefName, type RecipeDifficulty } from "@/lib/recipes";
+import { GlobalRankRow, GlobalStats, LeaderboardRow, api } from "@/lib/api";
+import { formatChefDisplayName, isChefMatch, useLeaderboard } from "@/lib/leaderboard";
+import {
+  DIFFICULTY_CONFIGS,
+  getRecipeRunSession,
+  inflightSubmit,
+  recipes,
+  submitRunToBackend,
+  useChefName,
+  type RecipeDifficulty,
+} from "@/lib/recipes";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/leaderboard")({
   head: () => ({
     meta: [
-      { title: "Leaderboard — WaveBakery" },
+      { title: "Leaderboard & Analytics — WaveBakery" },
       {
         name: "description",
         content:
-          "See top chef scores and signal similarity rankings for all recipes and difficulties in WaveBakery.",
+          "Authoritative DSP culinary rankings, global career leaderboards, and dish analytics for WaveBakery.",
       },
       { property: "og:title", content: "Leaderboard — WaveBakery" },
       {
@@ -37,6 +61,55 @@ const difficultyIcons: Record<RecipeDifficulty, typeof Clock> = {
   hard: Zap,
   masterchef: Flame,
 };
+
+/** Rows shown before "See all". */
+const TOP_N = 5;
+/** Everyone: the most the server returns in one request. */
+const ALL_LIMIT = 500;
+
+/**
+ * The rows to show: the top 5, plus the signed-in chef's own row when it is
+ * ranked lower (so you can always find yourself), or every row after "See all".
+ */
+function visibleRows<T>(rows: T[], showAll: boolean, isMine: (row: T) => boolean): T[] {
+  if (showAll || rows.length <= TOP_N) return rows;
+  const top = rows.slice(0, TOP_N);
+  const mine = rows.slice(TOP_N).find(isMine);
+  return mine ? [...top, mine] : top;
+}
+
+function SeeAllToggle({
+  total,
+  showAll,
+  onToggle,
+}: {
+  total: number;
+  showAll: boolean;
+  onToggle: () => void;
+}) {
+  if (total <= TOP_N) return null;
+  return (
+    <div className="flex justify-center border-t border-border/60 bg-secondary/20 px-6 py-4">
+      <GameButton
+        size="sm"
+        variant="secondary"
+        onClick={onToggle}
+        className="uppercase font-bold tracking-wider"
+      >
+        {showAll ? `Show top ${TOP_N} ↑` : `See all (${total}) ↓`}
+      </GameButton>
+    </div>
+  );
+}
+
+/** "…" between the top 5 and your own lower-ranked row. */
+function RankGap() {
+  return (
+    <div className="px-6 py-1.5 text-center font-mono text-xs text-muted-foreground" aria-hidden>
+      ⋯
+    </div>
+  );
+}
 
 function RankBadge({ rank }: { rank: number }) {
   if (rank === 1) {
@@ -68,19 +141,115 @@ function RankBadge({ rank }: { rank: number }) {
 }
 
 function LeaderboardScreen() {
-  const [selectedRecipeId, setSelectedRecipeId] = useState<string>(recipes[0]?.id ?? "burger");
+  const [viewMode, setViewMode] = useState<"recipe" | "global" | "analytics">("recipe");
+  // Open on the recipe just played, not always the first one.
+  const [selectedRecipeId, setSelectedRecipeId] = useState<string>(() => {
+    const played = getRecipeRunSession()?.recipeId;
+    return recipes.some((r) => r.id === played) ? played! : (recipes[0]?.id ?? "burger");
+  });
   const [selectedDifficulty, setSelectedDifficulty] = useState<RecipeDifficulty>(
     () => getRecipeRunSession()?.difficulty ?? "easy",
   );
   const [chefName] = useChefName();
-  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
+  // Backend state
+  const [backendRows, setBackendRows] = useState<LeaderboardRow[] | null>(null);
+  const [globalRows, setGlobalRows] = useState<GlobalRankRow[] | null>(null);
+  const [analytics, setAnalytics] = useState<GlobalStats | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [backendConnected, setBackendConnected] = useState(false);
+  // Top 5 by default; "See all" lists every chef's score.
+  const [showAll, setShowAll] = useState(false);
+  useEffect(() => setShowAll(false), [viewMode, selectedRecipeId, selectedDifficulty]);
+
+  // Local offline fallback
+  const fallbackEntries = useLeaderboard(selectedRecipeId, selectedDifficulty, chefName);
   const selectedRecipe = recipes.find((r) => r.id === selectedRecipeId) ?? recipes[0]!;
-  const entries = useLeaderboard(selectedRecipeId, selectedDifficulty, chefName);
 
-  const playerRankEntry = chefName
-    ? entries.find((e) => isChefMatch(e.chefName, chefName))
-    : entries.find((e) => isChefMatch(e.chefName, "Asef"));
+  // Only the latest request may update the board: switching recipe quickly
+  // used to let a slower, older reply overwrite the new recipe's rows.
+  const requestIdRef = useRef(0);
+  const fetchBackendData = async () => {
+    const requestId = ++requestIdRef.current;
+    const isLatest = () => requestId === requestIdRef.current;
+    setIsLoading(true);
+    // Drop the previous recipe's rows at once; a failed request used to leave
+    // them on screen under the newly selected recipe's name.
+    if (viewMode === "recipe") setBackendRows(null);
+    try {
+      if (viewMode === "recipe") {
+        const rows = await api.getLeaderboard(selectedRecipeId, ALL_LIMIT, selectedDifficulty);
+        if (!isLatest()) return;
+        setBackendRows(rows);
+        setBackendConnected(true);
+      } else if (viewMode === "global") {
+        const rows = await api.getGlobalRanking(ALL_LIMIT);
+        if (!isLatest()) return;
+        setGlobalRows(rows);
+        setBackendConnected(true);
+      } else if (viewMode === "analytics") {
+        const stats = await api.getStats();
+        if (!isLatest()) return;
+        setAnalytics(stats);
+        setBackendConnected(true);
+      }
+    } catch {
+      if (isLatest()) setBackendConnected(false);
+    } finally {
+      if (isLatest()) setIsLoading(false);
+    }
+  };
+
+  // A finished run whose submit never reached the server (backend was down
+  // at the score screen) is still an active session there: serve it now.
+  const [pendingRun, setPendingRun] = useState<{
+    recipeId: string;
+    score?: number | undefined;
+  } | null>(null);
+  const retryPendingSubmit = async () => {
+    const session = getRecipeRunSession();
+    if (!session?.isCompleted || !session.backendSessionId || session.backendSubmitResult) {
+      setPendingRun(null);
+      return;
+    }
+    setPendingRun({ recipeId: session.recipeId, score: session.finalScore });
+    const result = await submitRunToBackend(session.recipeId);
+    if (result) {
+      setPendingRun(null);
+      fetchBackendData();
+    }
+  };
+
+  useEffect(() => {
+    retryPendingSubmit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Arriving straight from the score screen while its submit is still on its
+  // way: reload the board once the server has the run (it used to load
+  // without it and never update).
+  const fetchRef = useRef(fetchBackendData);
+  fetchRef.current = fetchBackendData;
+  useEffect(() => {
+    let live = true;
+    inflightSubmit()?.then((result) => {
+      if (live && result) void fetchRef.current();
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  // A chef who is not signed in only has runs on this device; show them
+  // (separately) even while the server's board is available.
+  const signedIn = Boolean(api.getToken());
+
+  useEffect(() => {
+    fetchBackendData();
+    // fetchBackendData is recreated every render; these are its real inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, selectedRecipeId, selectedDifficulty]);
 
   const currentDiffConfig = DIFFICULTY_CONFIGS[selectedDifficulty];
   const DiffIcon = difficultyIcons[selectedDifficulty];
@@ -103,14 +272,20 @@ function LeaderboardScreen() {
                 <Trophy className="h-3.5 w-3.5" />
               </span>
               <p className="font-mono text-[10px] font-extrabold tracking-[0.28em] text-primary uppercase">
-                Hall of Signal Fame
+                Authoritative DSP Rankings
               </p>
+              {backendConnected && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 font-mono text-[10px] font-bold text-emerald-500">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Live Server
+                </span>
+              )}
             </div>
             <h1 className="mt-1 font-display text-4xl font-extrabold tracking-tight text-foreground uppercase sm:text-5xl">
               LEADER<span className="text-gradient-warm">BOARD</span>
             </h1>
             <p className="mt-1 text-base font-semibold text-muted-foreground">
-              Top signal culinary scores by recipe and difficulty.
+              Official signal culinary scores, global rankings, and kitchen analytics.
             </p>
           </div>
 
@@ -119,81 +294,67 @@ function LeaderboardScreen() {
               size="sm"
               float={false}
               bubbleSide="left"
-              message="Precision and speed: that's how true MasterChefs claim the top podium!"
+              message="Fourier accuracy & spatial beam precision separate amateur cooks from MasterChefs!"
             />
           </div>
         </header>
 
-        {/* CONTROLS BAR: RECIPE + DIFFICULTY FILTER */}
-        <section className="mt-8 grid gap-4 rounded-3xl border border-border bg-card/60 p-5 shadow-sm sm:grid-cols-[1fr_auto]">
-          {/* Recipe Selector */}
-          <div>
-            <label
-              htmlFor="recipeFilter"
-              className="block font-mono text-[10px] font-extrabold tracking-[0.24em] text-muted-foreground uppercase"
+        {/* TOP TAB SWITCHER: RECIPE / GLOBAL / ANALYTICS */}
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex rounded-2xl border border-border bg-card/80 p-1.5 shadow-xs">
+            <button
+              type="button"
+              onClick={() => setViewMode("recipe")}
+              className={cn(
+                "flex items-center gap-2 rounded-xl px-4 py-2 font-display text-xs font-extrabold uppercase transition-all cursor-pointer",
+                viewMode === "recipe"
+                  ? "bg-primary text-primary-foreground shadow-xs"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+              )}
             >
-              Select Recipe
-            </label>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {recipes.map((r) => {
-                const isActive = r.id === selectedRecipeId;
-                return (
-                  <button
-                    key={r.id}
-                    onClick={() => setSelectedRecipeId(r.id)}
-                    className={cn(
-                      "flex items-center gap-2 rounded-xl px-3.5 py-2 font-display text-xs font-extrabold uppercase transition-all duration-150 cursor-pointer",
-                      isActive
-                        ? "bg-[image:var(--gradient-warm)] text-primary-foreground shadow-[0_2px_10px_rgba(0,0,0,0.2)]"
-                        : "border border-border bg-secondary/80 text-muted-foreground hover:bg-secondary hover:text-foreground",
-                    )}
-                  >
-                    <DishGlyph dish={r.id} className="h-5 w-7 shrink-0" />
-                    <span>{r.name}</span>
-                  </button>
-                );
-              })}
-            </div>
+              <Trophy className="h-3.5 w-3.5" />
+              <span>Recipe Ranks</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("global")}
+              className={cn(
+                "flex items-center gap-2 rounded-xl px-4 py-2 font-display text-xs font-extrabold uppercase transition-all cursor-pointer",
+                viewMode === "global"
+                  ? "bg-primary text-primary-foreground shadow-xs"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+              )}
+            >
+              <Globe className="h-3.5 w-3.5" />
+              <span>Global Chefs</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("analytics")}
+              className={cn(
+                "flex items-center gap-2 rounded-xl px-4 py-2 font-display text-xs font-extrabold uppercase transition-all cursor-pointer",
+                viewMode === "analytics"
+                  ? "bg-primary text-primary-foreground shadow-xs"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+              )}
+            >
+              <BarChart3 className="h-3.5 w-3.5" />
+              <span>Kitchen Analytics</span>
+            </button>
           </div>
 
-          {/* Difficulty Selector */}
-          <div className="sm:border-l sm:border-border/70 sm:pl-5">
-            <span className="block font-mono text-[10px] font-extrabold tracking-[0.24em] text-muted-foreground uppercase">
-              Difficulty
-            </span>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {(
-                [
-                  { id: "easy", label: "EASY" },
-                  { id: "medium", label: "MEDIUM" },
-                  { id: "hard", label: "HARD" },
-                  { id: "masterchef", label: "MASTERCHEF" },
-                ] as const
-              ).map((d) => {
-                const isActive = d.id === selectedDifficulty;
-                const Icon = difficultyIcons[d.id];
-                const config = DIFFICULTY_CONFIGS[d.id];
-                return (
-                  <button
-                    key={d.id}
-                    onClick={() => setSelectedDifficulty(d.id)}
-                    className={cn(
-                      "flex items-center gap-1.5 rounded-xl border px-3 py-2 font-mono text-xs font-extrabold tracking-wider uppercase transition-all duration-150 cursor-pointer",
-                      isActive
-                        ? config.colorClass + " shadow-xs font-black ring-1 ring-primary/40"
-                        : "border-border bg-secondary/60 text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    <Icon className="h-3.5 w-3.5" />
-                    <span>{d.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </section>
+          <button
+            type="button"
+            onClick={fetchBackendData}
+            disabled={isLoading}
+            className="flex items-center gap-1.5 rounded-xl border border-border bg-secondary/60 px-3 py-2 font-mono text-xs font-semibold text-muted-foreground hover:bg-secondary hover:text-foreground active:scale-95 transition-all cursor-pointer"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", isLoading && "animate-spin")} />
+            <span>Refresh</span>
+          </button>
+        </div>
 
-        {/* PLAYER STATUS BANNER */}
+        {/* ACTIVE CHEF BANNER */}
         <section className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-primary/30 bg-primary/5 p-4 shadow-xs">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/40 bg-primary/10 text-primary">
@@ -204,135 +365,482 @@ function LeaderboardScreen() {
                 Active Chef Profile
               </p>
               <p className="font-display text-base font-extrabold text-foreground">
-                {formatChefDisplayName(chefName || "Asef")}
+                {formatChefDisplayName(chefName || "Chef Anonymous")}
               </p>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-3 font-mono text-xs">
-            {playerRankEntry ? (
-              <div className="flex items-center gap-2 rounded-xl border border-signal-alt/40 bg-signal-alt/10 px-3 py-1.5 font-bold text-signal-alt">
-                <Sparkles className="h-4 w-4" />
-                <span>
-                  YOUR RANK: #{playerRankEntry.rank} · {playerRankEntry.score} pts ({playerRankEntry.accuracy}% Match)
-                </span>
-              </div>
-            ) : (
-              <div className="rounded-xl border border-border bg-secondary px-3 py-1.5 font-semibold text-muted-foreground">
-                YOUR STATUS: Not ranked in this category yet
-              </div>
-            )}
-
             <button
               type="button"
-              onClick={() => setIsLogoutModalOpen(true)}
-              className="flex items-center gap-1.5 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-1.5 font-mono text-[11px] font-bold text-destructive transition-all hover:bg-destructive/20 cursor-pointer"
-              title="Log out of active chef profile"
+              onClick={() => setIsAuthModalOpen(true)}
+              className="flex items-center gap-1.5 rounded-xl border border-primary/40 bg-primary/10 px-3.5 py-1.5 font-mono text-xs font-bold text-primary transition-all hover:bg-primary hover:text-primary-foreground cursor-pointer"
             >
-              <LogOut className="h-3.5 w-3.5" />
-              <span>Log Out</span>
+              <Users className="h-3.5 w-3.5" />
+              <span>Manage Profile / Switch Chef</span>
             </button>
           </div>
         </section>
 
-        {/* LEADERBOARD ENTRIES LIST */}
-        <section className="mt-6">
-          <div className="kitchen-card overflow-hidden p-0">
-            {/* Category Header */}
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/80 bg-secondary/40 px-6 py-4">
-              <div className="flex items-center gap-2">
-                <DishGlyph dish={selectedRecipe.id} className="h-6 w-8 shrink-0" />
-                <h2 className="font-display text-lg font-extrabold text-foreground uppercase">
-                  {selectedRecipe.name}
-                </h2>
-                <span className="text-muted-foreground">·</span>
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-1 font-mono text-xs font-bold",
-                    currentDiffConfig.colorClass,
-                  )}
-                >
-                  <DiffIcon className="h-3 w-3" />
-                  {currentDiffConfig.badge} ({currentDiffConfig.timeDisplay})
-                </span>
+        {/* VIEW 1: RECIPE LEADERBOARDS */}
+        {viewMode === "recipe" && (
+          <>
+            {/* CONTROLS BAR: RECIPE + DIFFICULTY FILTER */}
+            <section className="mt-6 grid gap-4 rounded-3xl border border-border bg-card/60 p-5 shadow-sm sm:grid-cols-[1fr_auto]">
+              {/* Recipe Selector */}
+              <div>
+                <label className="block font-mono text-[10px] font-extrabold tracking-[0.24em] text-muted-foreground uppercase">
+                  Select Recipe
+                </label>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {recipes.map((r) => {
+                    const isActive = r.id === selectedRecipeId;
+                    return (
+                      <button
+                        key={r.id}
+                        onClick={() => setSelectedRecipeId(r.id)}
+                        className={cn(
+                          "flex items-center gap-2 rounded-xl px-3.5 py-2 font-display text-xs font-extrabold uppercase transition-all duration-150 cursor-pointer",
+                          isActive
+                            ? "bg-[image:var(--gradient-warm)] text-primary-foreground shadow-[0_2px_10px_rgba(0,0,0,0.2)]"
+                            : "border border-border bg-secondary/80 text-muted-foreground hover:bg-secondary hover:text-foreground",
+                        )}
+                      >
+                        <DishGlyph dish={r.id} className="h-5 w-7 shrink-0" />
+                        <span>{r.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-              <p className="font-mono text-[10px] tracking-wider text-muted-foreground uppercase">
-                {entries.length} Entries Recorded
-              </p>
-            </div>
 
-            {/* List or Empty State */}
-            {entries.length > 0 ? (
-              <div className="divide-y divide-border/60">
-                {entries.map((entry) => {
-                  const isCurrentPlayer = isChefMatch(entry.chefName, chefName || "Asef");
+              {/* Difficulty Selector */}
+              <div className="sm:border-l sm:border-border/70 sm:pl-5">
+                <span className="block font-mono text-[10px] font-extrabold tracking-[0.24em] text-muted-foreground uppercase">
+                  Difficulty
+                </span>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {(
+                    [
+                      { id: "easy", label: "EASY" },
+                      { id: "medium", label: "MEDIUM" },
+                      { id: "hard", label: "HARD" },
+                      { id: "masterchef", label: "MASTERCHEF" },
+                    ] as const
+                  ).map((d) => {
+                    const isActive = d.id === selectedDifficulty;
+                    const Icon = difficultyIcons[d.id];
+                    const config = DIFFICULTY_CONFIGS[d.id];
+                    return (
+                      <button
+                        key={d.id}
+                        onClick={() => setSelectedDifficulty(d.id)}
+                        className={cn(
+                          "flex items-center gap-1.5 rounded-xl border px-3 py-2 font-mono text-xs font-extrabold tracking-wider uppercase transition-all duration-150 cursor-pointer",
+                          isActive
+                            ? config.colorClass + " shadow-xs font-black ring-1 ring-primary/40"
+                            : "border-border bg-secondary/60 text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                        <span>{d.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
 
-                  return (
-                    <div
-                      key={entry.id}
+            {/* LEADERBOARD ENTRIES LIST */}
+            <section className="mt-6">
+              <div className="kitchen-card overflow-hidden p-0">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/80 bg-secondary/40 px-6 py-4">
+                  <div className="flex items-center gap-2">
+                    <DishGlyph dish={selectedRecipe.id} className="h-6 w-8 shrink-0" />
+                    <h2 className="font-display text-lg font-extrabold text-foreground uppercase">
+                      {selectedRecipe.name}
+                    </h2>
+                    <span className="text-muted-foreground">·</span>
+                    <span
                       className={cn(
-                        "flex flex-wrap items-center justify-between gap-4 px-6 py-4 transition-colors",
-                        isCurrentPlayer
-                          ? "bg-primary/15 border-l-4 border-l-primary shadow-xs"
-                          : "hover:bg-secondary/30",
+                        "inline-flex items-center gap-1 font-mono text-xs font-bold",
+                        currentDiffConfig.colorClass,
                       )}
                     >
-                      {/* Rank + Chef Name */}
-                      <div className="flex items-center gap-4">
-                        <RankBadge rank={entry.rank} />
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-display text-base font-extrabold text-foreground">
-                              {formatChefDisplayName(entry.chefName)}
-                            </span>
-                            {isCurrentPlayer && (
-                              <span className="rounded-full bg-primary px-2 py-0.5 font-mono text-[9px] font-extrabold text-primary-foreground uppercase shadow-xs">
-                                YOU
-                              </span>
-                            )}
-                          </div>
-                          <p className="font-mono text-[10px] text-muted-foreground">
-                            Time Left: {entry.timeRemaining} · {entry.date}
-                          </p>
-                        </div>
-                      </div>
+                      <DiffIcon className="h-3 w-3" />
+                      {currentDiffConfig.badge} ({currentDiffConfig.timeDisplay})
+                    </span>
+                  </div>
+                  <p className="font-mono text-[10px] tracking-wider text-muted-foreground uppercase">
+                    {backendConnected
+                      ? `${backendRows?.length ?? 0} Authoritative Entries`
+                      : `${fallbackEntries.length} Local Entries (offline)`}
+                  </p>
+                </div>
 
-                      {/* Score & Accuracy */}
-                      <div className="flex items-center gap-6 text-right">
-                        <div>
-                          <p className="font-display text-xl font-extrabold text-gradient-warm">
-                            {entry.score}
-                          </p>
-                          <p className="font-mono text-[10px] text-muted-foreground">
-                            {entry.accuracy}% Match
-                          </p>
-                        </div>
+                {pendingRun && pendingRun.recipeId === selectedRecipeId && (
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-500/40 bg-amber-500/10 px-6 py-3 font-mono text-xs text-amber-500">
+                    <span>
+                      Your latest run{pendingRun.score != null ? ` (${pendingRun.score} pts)` : ""}{" "}
+                      hasn&apos;t reached the server yet — the backend was offline when you
+                      finished.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={retryPendingSubmit}
+                      className="rounded-lg border border-amber-500/50 px-2.5 py-1 font-bold uppercase hover:bg-amber-500/20 cursor-pointer"
+                    >
+                      Retry submit
+                    </button>
+                  </div>
+                )}
+
+                {backendRows && backendRows.length > 0 ? (
+                  <div className="divide-y divide-border/60">
+                    {visibleRows(backendRows, showAll, (e) => isChefMatch(e.handle, chefName)).map(
+                      (entry, idx) => {
+                        const isCurrentPlayer = isChefMatch(entry.handle, chefName);
+
+                        return (
+                          <Fragment key={`${entry.player_id}-${entry.created_at}`}>
+                            {idx === TOP_N && <RankGap />}
+                            <div
+                              className={cn(
+                                "flex flex-wrap items-center justify-between gap-4 px-6 py-4 transition-colors",
+                                isCurrentPlayer
+                                  ? "bg-primary/15 border-l-4 border-l-primary shadow-xs"
+                                  : "hover:bg-secondary/30",
+                              )}
+                            >
+                              <div className="flex items-center gap-4">
+                                <RankBadge rank={entry.rank} />
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-display text-base font-extrabold text-foreground">
+                                      {formatChefDisplayName(entry.handle)}
+                                    </span>
+                                    {isCurrentPlayer && (
+                                      <span className="rounded-full bg-primary px-2 py-0.5 font-mono text-[9px] font-extrabold text-primary-foreground uppercase shadow-xs">
+                                        YOU
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="font-mono text-[10px] text-muted-foreground">
+                                    {"⭐".repeat(entry.stars)} ·{" "}
+                                    {new Date(entry.created_at).toLocaleDateString()}
+                                    {entry.difficulty ? "" : " · difficulty not recorded"}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-6 text-right">
+                                <div>
+                                  <p className="font-display text-xl font-extrabold text-gradient-warm">
+                                    {entry.total_score ?? Math.round(entry.score * 10)}
+                                  </p>
+                                  <p className="font-mono text-[10px] text-muted-foreground">
+                                    Authoritative Score · dish {entry.score}%
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          </Fragment>
+                        );
+                      },
+                    )}
+                    <SeeAllToggle
+                      total={backendRows.length}
+                      showAll={showAll}
+                      onToggle={() => setShowAll((v) => !v)}
+                    />
+                  </div>
+                ) : isLoading && !backendRows ? (
+                  <div className="p-10 text-center font-mono text-sm text-muted-foreground">
+                    Loading scores…
+                  </div>
+                ) : !backendConnected && fallbackEntries.length > 0 ? (
+                  // This device's own runs, only while the server is unreachable
+                  // (they used to show whenever the server's board was empty).
+                  <div className="divide-y divide-border/60">
+                    {visibleRows(fallbackEntries, showAll, (e) =>
+                      isChefMatch(e.chefName, chefName),
+                    ).map((entry, idx) => {
+                      const isCurrentPlayer = isChefMatch(entry.chefName, chefName);
+
+                      return (
+                        <Fragment key={entry.id}>
+                          {idx === TOP_N && <RankGap />}
+                          <div
+                            className={cn(
+                              "flex flex-wrap items-center justify-between gap-4 px-6 py-4 transition-colors",
+                              isCurrentPlayer
+                                ? "bg-primary/15 border-l-4 border-l-primary shadow-xs"
+                                : "hover:bg-secondary/30",
+                            )}
+                          >
+                            <div className="flex items-center gap-4">
+                              <RankBadge rank={entry.rank} />
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-display text-base font-extrabold text-foreground">
+                                    {formatChefDisplayName(entry.chefName)}
+                                  </span>
+                                  {isCurrentPlayer && (
+                                    <span className="rounded-full bg-primary px-2 py-0.5 font-mono text-[9px] font-extrabold text-primary-foreground uppercase shadow-xs">
+                                      YOU
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="font-mono text-[10px] text-muted-foreground">
+                                  Time Left: {entry.timeRemaining} · {entry.date}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-6 text-right">
+                              <div>
+                                <p className="font-display text-xl font-extrabold text-gradient-warm">
+                                  {entry.score}
+                                </p>
+                                <p className="font-mono text-[10px] text-muted-foreground">
+                                  {entry.accuracy}% Match
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        </Fragment>
+                      );
+                    })}
+                    <SeeAllToggle
+                      total={fallbackEntries.length}
+                      showAll={showAll}
+                      onToggle={() => setShowAll((v) => !v)}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center p-12 text-center">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-3xl border border-border bg-secondary text-muted-foreground shadow-inner">
+                      <Trophy className="h-7 w-7 opacity-40" />
+                    </div>
+                    <h3 className="mt-4 font-display text-xl font-extrabold text-foreground uppercase">
+                      NO SCORES YET
+                    </h3>
+                    <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+                      Be the first chef to complete the {selectedRecipe.name} challenge on{" "}
+                      {currentDiffConfig.name} difficulty!
+                    </p>
+                    <Link to="/recipe-book" className="mt-5">
+                      <GameButton size="sm" className="uppercase font-bold tracking-wider">
+                        Cook {selectedRecipe.name} →
+                      </GameButton>
+                    </Link>
+                  </div>
+                )}
+              </div>
+            </section>
+
+            {backendConnected && !signedIn && fallbackEntries.length > 0 && (
+              <section className="mt-6">
+                <div className="kitchen-card overflow-hidden p-0">
+                  <div className="flex items-center justify-between border-b border-border/80 bg-secondary/40 px-6 py-3">
+                    <p className="font-display text-sm font-extrabold text-foreground uppercase">
+                      Your runs on this device
+                    </p>
+                    <p className="font-mono text-[10px] tracking-wider text-muted-foreground uppercase">
+                      Not signed in · not on the server
+                    </p>
+                  </div>
+                  <div className="divide-y divide-border/60">
+                    {fallbackEntries.map((entry) => (
+                      <div
+                        key={entry.id}
+                        className="flex flex-wrap items-center justify-between gap-4 px-6 py-3"
+                      >
+                        <span className="font-display text-sm font-extrabold text-foreground">
+                          {formatChefDisplayName(entry.chefName)}
+                        </span>
+                        <span className="font-mono text-[10px] text-muted-foreground">
+                          Time Left: {entry.timeRemaining} · {entry.date}
+                        </span>
+                        <span className="font-display text-lg font-extrabold text-gradient-warm">
+                          {entry.score}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </section>
+            )}
+          </>
+        )}
+
+        {/* VIEW 2: GLOBAL CAREER RANKINGS */}
+        {viewMode === "global" && (
+          <section className="mt-6">
+            <div className="kitchen-card overflow-hidden p-0">
+              <div className="flex items-center justify-between border-b border-border/80 bg-secondary/40 px-6 py-4">
+                <div className="flex items-center gap-2">
+                  <Globe className="h-5 w-5 text-primary" />
+                  <h2 className="font-display text-lg font-extrabold text-foreground uppercase">
+                    Global Career Chef Rankings
+                  </h2>
+                </div>
+                <p className="font-mono text-[10px] tracking-wider text-muted-foreground uppercase">
+                  Ranked by Lifetime Points
+                </p>
+              </div>
+
+              {globalRows && globalRows.length > 0 ? (
+                <div className="divide-y divide-border/60">
+                  {visibleRows(globalRows, showAll, (c) => isChefMatch(c.handle, chefName)).map(
+                    (chef, idx) => {
+                      const isCurrent = isChefMatch(chef.handle, chefName);
+                      return (
+                        <Fragment key={chef.player_id}>
+                          {idx === TOP_N && <RankGap />}
+                          <div
+                            className={cn(
+                              "flex flex-wrap items-center justify-between gap-4 px-6 py-4 transition-colors",
+                              isCurrent
+                                ? "bg-primary/15 border-l-4 border-l-primary"
+                                : "hover:bg-secondary/30",
+                            )}
+                          >
+                            <div className="flex items-center gap-4">
+                              <RankBadge rank={chef.rank} />
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-display text-base font-extrabold text-foreground">
+                                    {formatChefDisplayName(chef.handle)}
+                                  </span>
+                                  <span className="rounded-md border border-primary/30 bg-primary/10 px-2 py-0.5 font-mono text-[10px] font-bold text-primary">
+                                    {chef.rank_title}
+                                  </span>
+                                  {isCurrent && (
+                                    <span className="rounded-full bg-primary px-2 py-0.5 font-mono text-[9px] font-extrabold text-primary-foreground uppercase shadow-xs">
+                                      YOU
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="font-mono text-[10px] text-muted-foreground">
+                                  {chef.dishes_served} Dishes Served · Best Dish this season:{" "}
+                                  {chef.best_score > 0 ? `${chef.best_score} pts` : "—"}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="text-right">
+                              <p className="font-display text-2xl font-extrabold text-gradient-warm">
+                                {chef.points}
+                              </p>
+                              <p className="font-mono text-[10px] text-muted-foreground uppercase">
+                                Lifetime Points
+                              </p>
+                            </div>
+                          </div>
+                        </Fragment>
+                      );
+                    },
+                  )}
+                  <SeeAllToggle
+                    total={globalRows.length}
+                    showAll={showAll}
+                    onToggle={() => setShowAll((v) => !v)}
+                  />
+                </div>
+              ) : (
+                <div className="p-10 text-center font-mono text-sm text-muted-foreground">
+                  No global player records registered yet. Serve dishes to enter the hall of fame!
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* VIEW 3: KITCHEN DSP ANALYTICS */}
+        {viewMode === "analytics" && (
+          <section className="mt-6 space-y-6">
+            {/* Global Summary Cards */}
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <div className="kitchen-card p-4 text-center">
+                <p className="font-mono text-[10px] text-muted-foreground uppercase">Total Chefs</p>
+                <p className="font-display text-3xl font-extrabold text-primary">
+                  {analytics?.players ?? 1}
+                </p>
+              </div>
+              <div className="kitchen-card p-4 text-center">
+                <p className="font-mono text-[10px] text-muted-foreground uppercase">
+                  Dishes Served
+                </p>
+                <p className="font-display text-3xl font-extrabold text-foreground">
+                  {analytics?.dishes_served ?? 0}
+                </p>
+              </div>
+              <div className="kitchen-card p-4 text-center">
+                <p className="font-mono text-[10px] text-muted-foreground uppercase">
+                  Avg Dish Score
+                </p>
+                <p className="font-display text-3xl font-extrabold text-amber-500">
+                  {analytics?.average_score ?? 0}
+                </p>
+              </div>
+              <div className="kitchen-card p-4 text-center">
+                <p className="font-mono text-[10px] text-muted-foreground uppercase">
+                  Hardest Dish
+                </p>
+                <p className="font-display text-lg font-extrabold text-rose-500 truncate">
+                  {analytics?.hardest_recipe ?? "—"}
+                </p>
+              </div>
+            </div>
+
+            {/* Per-Recipe Breakdown */}
+            <div className="kitchen-card overflow-hidden p-0">
+              <div className="border-b border-border/80 bg-secondary/40 px-6 py-4">
+                <h3 className="font-display text-base font-extrabold text-foreground uppercase">
+                  Recipe Difficulty & Five-Star Rate Analysis
+                </h3>
+              </div>
+              <div className="divide-y divide-border/60">
+                {(analytics?.recipes ?? []).map((r) => (
+                  <div
+                    key={r.recipe_id}
+                    className="flex flex-wrap items-center justify-between gap-4 px-6 py-4"
+                  >
+                    <div className="flex items-center gap-3">
+                      <DishGlyph dish={r.recipe_id} className="h-6 w-8 shrink-0" />
+                      <div>
+                        <p className="font-display text-sm font-extrabold text-foreground">
+                          {r.recipe_name}
+                        </p>
+                        <p className="font-mono text-[10px] text-muted-foreground">
+                          Tier {r.tier} Dish
+                        </p>
                       </div>
                     </div>
-                  );
-                })}
+
+                    <div className="flex items-center gap-6 text-right font-mono text-xs">
+                      <div>
+                        <p className="font-extrabold text-foreground">{r.plays} plays</p>
+                        <p className="text-[10px] text-muted-foreground">Attempts</p>
+                      </div>
+                      <div>
+                        <p className="font-extrabold text-primary">{r.average_score}/100</p>
+                        <p className="text-[10px] text-muted-foreground">Avg Score</p>
+                      </div>
+                      <div>
+                        <p className="font-extrabold text-amber-500">
+                          {Math.round(r.five_star_rate * 100)}%
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">5-Star Rate</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center p-12 text-center">
-                <div className="flex h-14 w-14 items-center justify-center rounded-3xl border border-border bg-secondary text-muted-foreground shadow-inner">
-                  <Trophy className="h-7 w-7 opacity-40" />
-                </div>
-                <h3 className="mt-4 font-display text-xl font-extrabold text-foreground uppercase">
-                  NO SCORES YET
-                </h3>
-                <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-                  Be the first chef to complete the {selectedRecipe.name} challenge on{" "}
-                  {currentDiffConfig.name} difficulty!
-                </p>
-                <Link to="/recipe-book" className="mt-5">
-                  <GameButton size="sm" className="uppercase font-bold tracking-wider">
-                    Cook {selectedRecipe.name} →
-                  </GameButton>
-                </Link>
-              </div>
-            )}
-          </div>
-        </section>
+            </div>
+          </section>
+        )}
 
         {/* BOTTOM NAVIGATION */}
         <footer className="mt-8 flex items-center justify-between border-t border-border/80 pt-6">
@@ -349,7 +857,11 @@ function LeaderboardScreen() {
         </footer>
       </div>
 
-      <LogoutModal open={isLogoutModalOpen} onOpenChange={setIsLogoutModalOpen} />
+      <ChefAuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onSuccess={() => fetchBackendData()}
+      />
     </main>
   );
 }

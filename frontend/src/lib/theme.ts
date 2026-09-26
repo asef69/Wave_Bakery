@@ -43,8 +43,8 @@ export function useTheme(): [Theme, (theme: Theme) => void] {
   const [theme, setThemeState] = useState<Theme>(() => getTheme());
 
   useEffect(() => {
-    // Ensure the DOM class matches the initial/current theme
-    applyTheme(theme);
+    // Ensure the DOM class matches the stored theme on mount
+    applyTheme(getTheme());
 
     const handler = () => {
       const current = getTheme();

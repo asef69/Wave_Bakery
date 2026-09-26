@@ -1,0 +1,72 @@
+% Shared styling for the WaveKitchen documentation PDFs.
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=2.2cm,headheight=14pt]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{xcolor}
+\usepackage{booktabs,longtable,tabularx,array}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage[most]{tcolorbox}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,calc,fit}
+\usepackage{microtype}
+\usepackage[hidelinks]{hyperref}
+\urlstyle{tt}
+
+\definecolor{wkorange}{HTML}{E0661E}
+\definecolor{wkteal}{HTML}{0E8A8A}
+\definecolor{wkink}{HTML}{1F2937}
+\definecolor{wkgrey}{HTML}{6B7280}
+\definecolor{wkred}{HTML}{B91C1C}
+\definecolor{wkgreen}{HTML}{15803D}
+\definecolor{wkpaper}{HTML}{FFF8EF}
+
+\hypersetup{colorlinks=true,linkcolor=wkteal,urlcolor=wkteal,citecolor=wkteal}
+
+\titleformat{\section}{\Large\bfseries\color{wkorange}}{\thesection}{0.8em}{}
+\titleformat{\subsection}{\large\bfseries\color{wkink}}{\thesubsection}{0.7em}{}
+\titleformat{\subsubsection}{\normalsize\bfseries\color{wkteal}}{\thesubsubsection}{0.6em}{}
+
+\setlist{itemsep=2pt,topsep=4pt}
+\setlength{\parskip}{4pt}
+\setlength{\parindent}{0pt}
+% long unbreakable code names: stretch spaces rather than overflow the margin
+\setlength{\emergencystretch}{3em}
+\renewcommand{\arraystretch}{1.25}
+% ragged-right paragraph column (no stretched inter-word spaces in narrow cells)
+\newcolumntype{P}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+% file paths (break at slashes) and code identifiers (underscore-safe)
+\newcommand{\file}[1]{\nolinkurl{#1}}
+\DeclareRobustCommand{\fn}[1]{\texttt{\detokenize{#1}}}
+% plain text for PDF bookmarks when these appear in headings
+\pdfstringdefDisableCommands{\def\file#1{#1}\def\fn#1{\detokenize{#1}}}
+
+\newtcolorbox{conceptbox}[1][]{colback=wkteal!6,colframe=wkteal,fonttitle=\bfseries,
+  title={Signals \& Systems concept#1},breakable,left=6pt,right=6pt,top=4pt,bottom=4pt}
+\newtcolorbox{impactbox}[1][]{colback=wkorange!6,colframe=wkorange,fonttitle=\bfseries,
+  title={Why it is here \& its impact#1},breakable,left=6pt,right=6pt,top=4pt,bottom=4pt}
+\newtcolorbox{filesbox}{colback=wkink!4,colframe=wkink!70,fonttitle=\bfseries,
+  title={Files involved},breakable,left=6pt,right=6pt,top=4pt,bottom=4pt,before upper=\raggedright}
+\newtcolorbox{flagbox}[1][]{colback=wkred!5,colframe=wkred,fonttitle=\bfseries,
+  title={\(\blacktriangle\) Flag: low or no impact#1},breakable,left=6pt,right=6pt,top=4pt,bottom=4pt}
+\newtcolorbox{mathbox}[1]{colback=white,colframe=wkteal!70,fonttitle=\bfseries,
+  title={#1},breakable,left=6pt,right=6pt,top=4pt,bottom=4pt}
+\newtcolorbox{notebox}{colback=wkpaper,colframe=wkgrey!60,breakable,left=6pt,right=6pt,top=4pt,bottom=4pt}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[C]{\small\color{wkgrey}\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+
+% station-flow diagram node styles
+\tikzset{
+  st/.style={draw=wkteal,fill=wkteal!8,rounded corners=3pt,minimum height=8mm,
+    minimum width=21mm,align=center,font=\footnotesize},
+  opt/.style={st,draw=wkorange,fill=wkorange!8,dashed},
+  gate/.style={st,draw=wkink,fill=wkink!6},
+  arr/.style={-Stealth,thick,color=wkink!70},
+}

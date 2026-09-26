@@ -1,7 +1,8 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { AlertTriangle, ArrowLeft, Clock, RotateCcw } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Clock, Pause, RotateCcw } from "lucide-react";
 
 import { GameButton } from "@/components/game/GameButton";
+import { PauseModal } from "@/components/game/PauseModal";
 import {
   resetRecipeProgress,
   startRecipeRun,
@@ -10,52 +11,101 @@ import {
 } from "@/lib/recipes";
 import { cn } from "@/lib/utils";
 
+export { PauseModal };
+
 /**
- * HUD Badge showing the active recipe's difficulty and countdown timer.
+ * HUD Badge showing the active recipe's difficulty, countdown timer, and Pause button during gameplay.
  */
-export function RecipeTimerBadge({ className }: { className?: string }) {
-  const { formattedTime, difficultyConfig, isLowTime, isCritical, isExpired, session } =
-    useRecipeTimer();
+export function RecipeTimerBadge({
+  className,
+  showPause = true,
+}: {
+  className?: string;
+  showPause?: boolean;
+}) {
+  const {
+    formattedTime,
+    difficultyConfig,
+    isLowTime,
+    isCritical,
+    isExpired,
+    isPaused,
+    isCountdownPending,
+    session,
+    pauseRun,
+  } = useRecipeTimer();
 
   if (!session) return null;
 
+  const canShowPause =
+    showPause &&
+    !session.isCompleted &&
+    !isCountdownPending &&
+    !isExpired;
+
   return (
-    <div
-      className={cn(
-        "inline-flex items-center gap-2.5 rounded-full border px-3.5 py-1.5 font-mono text-xs font-bold transition-all select-none shadow-sm",
-        isExpired
-          ? "border-destructive bg-destructive/15 text-destructive animate-pulse"
-          : isCritical
-            ? "border-destructive bg-destructive/15 text-destructive animate-pulse ring-2 ring-destructive/40"
-            : isLowTime
-              ? "border-amber-500/60 bg-amber-500/15 text-amber-600 dark:text-amber-400"
-              : "border-border bg-card/80 text-foreground",
-        className,
-      )}
-      title={`Cooking Timer: ${difficultyConfig?.name ?? "Recipe"} Mode`}
-    >
-      <span
+    <div className="inline-flex items-center gap-2">
+      <div
         className={cn(
-          "h-2.5 w-2.5 rounded-full shrink-0",
-          difficultyConfig?.dotClass ?? "bg-primary",
+          "inline-flex items-center gap-2.5 rounded-full border px-3.5 py-1.5 font-mono text-xs font-bold transition-all select-none shadow-sm",
+          isExpired
+            ? "border-destructive bg-destructive/15 text-destructive animate-pulse"
+            : isCritical
+              ? "border-destructive bg-destructive/15 text-destructive animate-pulse ring-2 ring-destructive/40"
+              : isLowTime
+                ? "border-amber-500/60 bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                : isPaused
+                  ? "border-amber-500/60 bg-amber-500/15 text-amber-500 shadow-amber-500/10"
+                  : "border-border bg-card/80 text-foreground",
+          className,
         )}
-        aria-hidden
-      />
-      <span className="tracking-wider uppercase text-[10px] text-muted-foreground">
-        {difficultyConfig?.name ?? "TIMER"}:
-      </span>
-      <span
-        className={cn(
-          "font-mono font-extrabold tracking-widest text-sm",
-          isExpired || isCritical
-            ? "text-destructive"
-            : isLowTime
-              ? "text-amber-600 dark:text-amber-400"
-              : "text-foreground",
-        )}
+        title={`Cooking Timer: ${difficultyConfig?.name ?? "Recipe"} Mode${isPaused ? " (PAUSED)" : ""}`}
       >
-        {formattedTime}
-      </span>
+        <span
+          className={cn(
+            "h-2.5 w-2.5 rounded-full shrink-0",
+            isPaused
+              ? "bg-amber-400 animate-pulse ring-2 ring-amber-400/40"
+              : (difficultyConfig?.dotClass ?? "bg-primary"),
+          )}
+          aria-hidden
+        />
+        <span className="tracking-wider uppercase text-[10px] text-muted-foreground">
+          {isPaused ? "PAUSED" : (difficultyConfig?.name ?? "TIMER")}:
+        </span>
+        <span
+          className={cn(
+            "font-mono font-extrabold tracking-widest text-sm",
+            isExpired || isCritical
+              ? "text-destructive"
+              : isLowTime || isPaused
+                ? "text-amber-600 dark:text-amber-400"
+                : "text-foreground",
+          )}
+        >
+          {formattedTime}
+        </span>
+      </div>
+
+      {canShowPause && (
+        <button
+          type="button"
+          onClick={pauseRun}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 font-mono text-xs font-bold transition-all cursor-pointer select-none active:scale-95 shadow-sm",
+            isPaused
+              ? "border-amber-500/60 bg-amber-500/20 text-amber-500 ring-2 ring-amber-500/30"
+              : "border-border bg-card/90 text-foreground hover:bg-secondary hover:border-primary/50",
+          )}
+          title="Pause game (ESC)"
+          aria-label="Pause game"
+        >
+          <Pause className="h-3.5 w-3.5 fill-current" />
+          <span className="uppercase text-[10px] tracking-wider font-extrabold">Pause</span>
+        </button>
+      )}
+
+      {canShowPause && <PauseModal />}
     </div>
   );
 }

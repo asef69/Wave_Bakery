@@ -10,11 +10,13 @@ instant.
 from __future__ import annotations
 
 import numpy as np
+from sqlalchemy import func
 from sqlalchemy.orm import Session as DbSession
 
 from . import config
 from .dsp import core as C
 from .dsp import contamination, instruments, metrics, pipeline, systems
+from . import delivery
 from .models import GameSession, Ingredient, Player, Recipe, SessionIngredient
 
 RANKS = [
@@ -101,7 +103,7 @@ def filter_curve(bands, tools, points: int = 512) -> tuple[list[float], list[flo
 def clean_signal(ingredient: Ingredient) -> np.ndarray:
     try:
         sig = instruments.synth(ingredient.voice, C.FRAME, ingredient.f0)
-        return C.normalize(sig, 0.9)
+        return sig
     except Exception:
         f = ingredient.f0 if ingredient.f0 and ingredient.f0 > 0 else 440.0
         return C.normalize(C.tone(C.FRAME, 0.9, f), 0.9)
@@ -117,7 +119,9 @@ def dirty_signal(item: SessionIngredient, ingredient: Ingredient,
     clean = clean_signal(ingredient)
     # Only washable ingredients arrive contaminated; non-washable items arrive clean.
     effective_diff = difficulty if getattr(ingredient, 'washable', False) else 0.0
-    dirty, found = contamination.corrupt(clean, effective_diff, item.seed)
+    dirty, found = contamination.corrupt(
+        clean, effective_diff, item.seed,
+        ideal_cutoff=getattr(ingredient, 'ideal_cutoff', None))
 
     comps = [{'freq': float(ingredient.f0 or 440.0), 'amp': 1.0}]
     return clean, dirty, [c.dict() for c in found], comps
@@ -181,11 +185,55 @@ def default_params(recipe: Recipe) -> dict:
 # --------------------------------------------------------------------------
 # stages
 # --------------------------------------------------------------------------
+def bowl_signals(db: DbSession, session: GameSession, signals: list[dict]) -> list:
+    """
+    The signals the player actually mixed. Recipe ingredients in the bowl use
+    their filtered version; extra (non-recipe) ingredients from the catalogue
+    go in clean; anything left out is simply missing from the mix. No bowl
+    recorded (older clients) means the whole recipe, as before.
+    """
+    bowl = (session.params or {}).get('bowl')
+    if bowl is None:
+        return [s['filtered'] for s in signals]
+    wanted = {str(n).strip().lower() for n in bowl}
+    mixed = [s['filtered'] for s in signals if s['ingredient'].name.lower() in wanted]
+    in_recipe = {s['ingredient'].name.lower() for s in signals}
+    for name in sorted(wanted - in_recipe):
+        extra = db.query(Ingredient).filter(func.lower(Ingredient.name) == name).first()
+        if extra is not None:
+            mixed.append(clean_signal(extra))
+    return mixed
+
+
 def compute_stages(db: DbSession, session: GameSession) -> tuple[dict, list[dict]]:
     signals = session_signals(db, session)
-    stages = pipeline.run_pipeline([s['filtered'] for s in signals],
+    stages = pipeline.run_pipeline(bowl_signals(db, session, signals),
                                    params_to_pipeline(session.params or {}))
     return stages, signals
+
+
+def finish_dish(recipe_id: str, cooked: np.ndarray, reference: np.ndarray,
+                params: dict) -> tuple[np.ndarray, float | None, float | None]:
+    """
+    The dish actually served, rebuilt from the player's finishing settings:
+    cooking leaves a burnt overtone; the Precision Oven (if used) filters it;
+    the delivery cart (if used) adds road vibration and filters with its H(z).
+    Returns (served dish, oven sub-score, cart sub-score). Mirrors the
+    browser (frontend/src/lib/delivery.ts), so both judge the same problem.
+    """
+    scale = delivery.hz_per_game_hz(recipe_id, reference, cooked.size)
+    used_oven = bool(params.get('oven_f0'))
+    dish = delivery.bake(cooked, recipe_id, scale, params if used_oven else None)
+    oven_score = cart_score = None
+    if used_oven:
+        oven_score = round(metrics.dish_metrics(reference, dish, common_scale=True)['score'], 2)
+        if params.get('system_preset'):
+            dish = delivery.deliver_on_cart(
+                dish, recipe_id, params['system_preset'],
+                float(params.get('system_pole_radius') or 0.0),
+                float(params.get('system_omega') or 0.0))
+            cart_score = round(metrics.dish_metrics(reference, dish, common_scale=True)['score'], 2)
+    return dish, oven_score, cart_score
 
 
 def stages_payload(stages: dict, session: GameSession) -> dict:
@@ -259,7 +307,14 @@ def judge(db: DbSession, session: GameSession) -> dict:
     target = pipeline.run_pipeline([s['clean'] for s in signals],
                                    pipeline.reference_params(recipe.as_dict()))
 
-    m = metrics.dish_metrics(target['final'], stages['final'])
+    # What was actually served: burnt overtone, then the oven and the cart.
+    p = session.params or {}
+    # Compared on the reference's scale (not each normalised on its own), so
+    # the seasoning level counts, not just the shape.
+    served, delivery_score, system_score = finish_dish(
+        recipe.id, stages['cooked'], target['cooked'], p)
+    stages['final'] = C.normalize(served, 0.9)          # for the returned plot/audio
+    m = metrics.dish_metrics(target['cooked'], served, common_scale=True)
 
     preps = []
     washable_preps = []
@@ -279,10 +334,19 @@ def judge(db: DbSession, session: GameSession) -> dict:
     # Sub-stage scores matching frontend breakdown
     filtering_score = round(prep_avg, 2)
     mixing_score = round(metrics.dish_metrics(target['mixed'], stages['mixed'])['score'], 2)
-    transform_score = round(metrics.dish_metrics(target['marinated'], stages['marinated'])['score'], 2)
-    cooking_score = round(m['score'], 2)
+    transform_score = round(metrics.dish_metrics(
+        target['marinated'], stages['marinated'], common_scale=True)['score'], 2)
+    # Cooking alone: the player's own pre-cooking signal through the recipe's
+    # appliances vs. through the player's. (This used to be the whole-dish
+    # score, so every earlier mistake also showed up as a "cooking" error.)
+    correctly_cooked = pipeline.stage_cook(stages['chopped'], list(recipe.appliances or []))
+    cooking_score = round(metrics.dish_metrics(correctly_cooked, stages['cooked'])['score'], 2)
 
-    raw = 0.72 * m['score'] + 0.28 * prep_avg
+    # Washing scales the dish instead of being added to it: clean prep can
+    # no longer carry a ruined dish (+28 points at any dish quality). With a
+    # perfect dish this equals the old 0.72·m + 0.28·prep.
+    raw = m['score'] * (0.72 + 0.28 * prep_avg / 100.0)
+
     gamma = 1.0 / max(0.3, recipe.tolerance or 1.0)
     score = float(np.clip(100.0 * (raw / 100.0) ** gamma, 0, 100))
 
@@ -293,6 +357,8 @@ def judge(db: DbSession, session: GameSession) -> dict:
         'mixing_score': mixing_score,
         'transform_score': transform_score,
         'cooking_score': cooking_score,
+        'delivery_score': delivery_score,
+        'system_score': system_score,
         'score': round(score, 2),
         'stars': metrics.stars(score),
         'notes': notes or ['Textbook execution. Nothing to correct.'],
@@ -301,23 +367,33 @@ def judge(db: DbSession, session: GameSession) -> dict:
     }
 
 
+# Seasoning / blend / marinate notes appear once a dial is this far off its
+# target (relative), or past its old absolute limit, whichever is smaller.
+NOTE_REL_TOL = 0.05
+
+
 def _diagnose(session: GameSession, recipe: Recipe, signals: list[dict]) -> list[str]:
     """Feedback that names the signal processing cause, not the symptom."""
     p = session.params or {}
     notes: list[str] = []
 
+    def off(value: float, target: float, abs_tol: float) -> bool:
+        # Relative to the target (a fixed 0.12 hid a 17 % blend error on a
+        # 0.6 target), and never less sensitive than the old absolute limit.
+        return abs(value - target) > min(abs_tol, NOTE_REL_TOL * abs(target))
+
     d = p.get('seasoning', 0) - recipe.seasoning
-    if abs(d) > 0.12:
+    if off(p.get('seasoning', 0), recipe.seasoning, 0.12):
         notes.append('Over-seasoned — amplitude scaling too high.' if d > 0
                      else 'Under-seasoned — amplitude scaling too low.')
 
     d = p.get('blend', 1.0) - recipe.blend
-    if abs(d) > 0.12:
+    if off(p.get('blend', 1.0), recipe.blend, 0.12):
         notes.append('Over-blended — the signal is compressed too far in time.' if d > 0
                      else 'Under-blended — the signal is still too stretched.')
 
     d = p.get('marinate', 0.0) - recipe.marinate
-    if abs(d) > 0.03:
+    if off(p.get('marinate', 0.0), recipe.marinate, 0.03):
         notes.append('Marinated too long — excess time shift.' if d > 0
                      else 'Not marinated enough — the time shift is too small.')
 
@@ -344,7 +420,46 @@ def _diagnose(session: GameSession, recipe: Recipe, signals: list[dict]) -> list
             notes.append(f"{s['ingredient'].name}: over-filtered — you cut real ingredient frequencies.")
         elif prep['still_dirty']:
             notes.append(f"{s['ingredient'].name}: still noisy — contamination remains in the spectrum.")
+
+    # The finishing stations: burnt overtone and road vibration.
+    notes.extend(delivery.finishing_notes(recipe.id, p))
     return notes
+
+
+# The scoring rules a run was judged under. Only runs of the current version
+# ("the season") count on the leaderboard, for personal bests, tier-unlock
+# progress and analytics, so nothing ranked mixes two scoring scales. Older
+# runs stay in the database; chef points and tiers they earned are kept.
+#   1 (or NULL): dB-spectrum with an absolute -80 dB floor; washing added
+#   2: dB-spectrum relative to the target (40 dB); washing scales the dish
+SCORING_VERSION = 2
+
+
+def in_season():
+    """SQL condition: the attempt was judged under the current scoring rules."""
+    from .models import Attempt
+    return Attempt.scoring_version == SCORING_VERSION
+
+
+# Time limit (s) and score multiplier per difficulty — DIFFICULTY_CONFIGS and
+# DIFFICULTY_MULTIPLIERS in frontend/src/lib/recipes.ts (keep them identical).
+DIFFICULTIES: dict[str, tuple[int, float]] = {
+    'easy': (420, 0.8), 'medium': (300, 1.0), 'hard': (190, 1.25), 'masterchef': (120, 1.5),
+}
+MAX_TIME_BONUS = 300    # before difficulty: 30 % of a perfect 1000-point base
+
+
+def run_total(score: float, difficulty: str | None, elapsed_s: float) -> tuple[int, int]:
+    """
+    (overall score, time bonus) of a run: the dish score (0-100) x 10 x the
+    difficulty multiplier, plus 2 points per second left (capped), also
+    scaled by difficulty. Timed on the server, from the session's start to
+    the dish being served, so the browser's clock can't inflate it.
+    """
+    limit, mult = DIFFICULTIES.get(difficulty or 'easy', DIFFICULTIES['easy'])
+    left = max(0.0, limit - max(0.0, elapsed_s))
+    bonus = round(min(2 * int(left), MAX_TIME_BONUS) * mult)
+    return round(score * 10 * mult) + bonus, bonus
 
 
 def award(db: DbSession, player: Player, recipe: Recipe, score: float,
@@ -374,9 +489,11 @@ def maybe_unlock(db: DbSession, player: Player) -> None:
         select(func.count(func.distinct(Attempt.recipe_id)))
         .where(Attempt.player_id == player.id,
                Attempt.recipe_id.in_(recipe_ids),
-               Attempt.score >= config.TIER_UNLOCK_SCORE)
+               Attempt.score >= config.TIER_UNLOCK_SCORE,
+               in_season())
     ).scalar_one()
     needed = min(config.TIER_UNLOCK_COUNT, len(recipe_ids))
     if cleared >= needed:
-        max_tier = db.query(func.max(Recipe.tier)).scalar() or tier
+        max_tier = (db.query(func.max(Recipe.tier))
+                    .filter(Recipe.is_active.is_(True)).scalar() or tier)
         player.unlocked_tier = min(int(max_tier), tier + 1)

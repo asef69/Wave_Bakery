@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -129,10 +129,12 @@ class RecipeCard(BaseModel):
 # --------------------------------------------------------------------------
 class PlayerCreate(BaseModel):
     handle: str = Field(..., min_length=2, max_length=24, pattern=r'^[\w .\-]+$')
+    password: str = Field(..., min_length=6, max_length=128)
 
 
 class PlayerLogin(BaseModel):
     handle: str = Field(..., min_length=2, max_length=24, pattern=r'^[\w .\-]+$')
+    password: str = Field(..., min_length=6, max_length=128)
 
 
 class PlayerOut(BaseModel):
@@ -243,8 +245,14 @@ class FilterResponse(BaseModel):
 # --------------------------------------------------------------------------
 # sessions
 # --------------------------------------------------------------------------
+Difficulty = Literal['easy', 'medium', 'hard', 'masterchef']
+
+
 class SessionCreate(BaseModel):
     recipe_id: str
+    # Always recorded (the game's default is Easy), so a run can only ever
+    # appear on its own difficulty's board.
+    difficulty: Difficulty = 'easy'
 
 
 class ContaminantOut(BaseModel):
@@ -284,6 +292,23 @@ class CookParams(BaseModel):
     anti_alias: bool = True
     appliances: list[str] = []
     cooking_method: str | None = None
+    # Ingredient names the player actually put in the bowl (None = the whole
+    # recipe). Without this the server mixed every recipe ingredient no
+    # matter what the Mixing lab did.
+    bowl: Annotated[list[Annotated[str, Field(max_length=40)]], Field(max_length=32)] | None = None
+    # Precision Oven SETTINGS (game Hz; oven_f0 is the dish fundamental they
+    # are relative to). The server applies them to its own dish (delivery.py).
+    oven_f0: float | None = Field(None, gt=0, le=64)
+    oven_gains: Annotated[list[Annotated[float, Field(ge=0, le=3)]], Field(min_length=3, max_length=3)] | None = None
+    oven_cutoff: float | None = Field(None, ge=0, le=1000)
+    oven_notch: float | None = Field(None, ge=0, le=64)
+    oven_notch_on: bool = False
+    oven_fs: float | None = Field(None, ge=2, le=64)   # the oven's sampling rate (game Hz)
+    # System Delivery (z-plane) SETTINGS; the server filters its dish with them.
+    system_preset: Literal['lowpass1', 'resonator2', 'moving_avg', 'notch'] | None = None
+    system_pole_radius: float | None = Field(None, ge=0, le=1.1)
+    system_omega: float | None = Field(None, ge=0, le=3.2)
+    system_sampling_hz: float | None = Field(None, ge=100, le=96_000)
 
 
 class SessionOut(BaseModel):
@@ -335,12 +360,16 @@ class SubmitResult(BaseModel):
     mixing_score: float | None = None
     transform_score: float | None = None
     cooking_score: float | None = None
+    delivery_score: float | None = None
+    system_score: float | None = None
     snr_db: float
     mse: float
     correlation: float
     spectral_similarity: float
     points_awarded: int
     total_points: int
+    total_score: int            # overall score, as the score screen shows it
+    time_bonus: int
     unlocked_tier: int
     rank_title: str
     notes: list[str]
@@ -351,46 +380,18 @@ class SubmitResult(BaseModel):
 
 
 # --------------------------------------------------------------------------
-# beam delivery / phased array
-# --------------------------------------------------------------------------
-class SpeakerStateSchema(BaseModel):
-    id: int
-    phase: float = Field(0.0, ge=-180.0, le=180.0)
-    amplitude: float = Field(1.0, ge=0.0, le=1.0)
-    is_active: bool = True
-
-
-class BeamPointSchema(BaseModel):
-    angle: float
-    intensity: float
-
-
-class BeamDeliveryRequest(BaseModel):
-    speakers: list[SpeakerStateSchema] = []
-    target_angle: float = Field(35.0, ge=-80.0, le=80.0)
-
-
-class BeamDeliveryResponse(BaseModel):
-    steered_angle: float
-    target_angle: float
-    is_aligned: bool
-    tolerance_degrees: float
-    beam_pattern: list[BeamPointSchema]
-    accuracy: float
-    message: str
-
-
-# --------------------------------------------------------------------------
 # leaderboard and stats
 # --------------------------------------------------------------------------
 class LeaderboardRow(BaseModel):
     rank: int
     player_id: str
     handle: str
-    score: float
+    score: float                # dish score, 0-100
+    total_score: int            # overall score (ranked on), as the score screen shows it
     stars: int
     recipe_id: str
     recipe_name: str
+    difficulty: str | None = None
     created_at: datetime
 
 
@@ -437,13 +438,22 @@ class PlayerHistoryRow(BaseModel):
 # --------------------------------------------------------------------------
 # direct DSP service schemas (Server-authoritative DSP)
 # --------------------------------------------------------------------------
+# These endpoints need no login, so every size is bounded: an unbounded
+# sample_rate / array let one request exhaust memory, and 0 or negative rates
+# (or an empty speaker list) crashed the handlers with a 500.
+MAX_DSP_SAMPLES = 200_000
+MAX_IMPULSE_SAMPLES = 4_096
+Sample = Annotated[float, Field(allow_inf_nan=False, ge=-1e6, le=1e6)]
+SampleRate = Annotated[int, Field(ge=1_000, le=96_000)]
+SampleList = Annotated[list[Sample], Field(max_length=MAX_DSP_SAMPLES)]
+
 class GenerateSignalRequest(BaseModel):
     waveform: Literal['sine', 'square', 'triangle', 'noise', 'complex_noisy'] = 'sine'
     frequency: float = Field(220.0, ge=1.0, le=4000.0)
     amplitude: float = Field(1.0, ge=0.0, le=2.0)
     noise_level: float = Field(0.0, ge=0.0, le=1.0)
     duration_s: float = Field(0.5, ge=0.05, le=5.0)
-    sample_rate: int = 22050
+    sample_rate: SampleRate = 22050
 
 
 class GenerateSignalResponse(BaseModel):
@@ -459,8 +469,8 @@ class GenerateSignalResponse(BaseModel):
 
 
 class FilterSignalRequest(BaseModel):
-    samples: list[float]
-    sample_rate: int = 22050
+    samples: SampleList
+    sample_rate: SampleRate = 22050
     filter_type: Literal['lowpass', 'highpass', 'bandpass', 'notch'] = 'lowpass'
     cutoff: float = Field(500.0, ge=10.0, le=10000.0)
     bandwidth: float = Field(100.0, ge=10.0, le=5000.0)
@@ -477,8 +487,8 @@ class FilterSignalResponse(BaseModel):
 
 
 class MixSignalsRequest(BaseModel):
-    tracks: list[list[float]]
-    weights: list[float] | None = None
+    tracks: Annotated[list[SampleList], Field(max_length=32)]
+    weights: Annotated[list[Sample], Field(max_length=32)] | None = None
     normalize: bool = True
 
 
@@ -490,11 +500,11 @@ class MixSignalsResponse(BaseModel):
 
 
 class TransformSignalRequest(BaseModel):
-    samples: list[float]
+    samples: SampleList
     amplitude_scale: float = Field(1.0, ge=0.0, le=3.0)
     time_scale: float = Field(1.0, ge=0.25, le=4.0)
     frequency_shift_hz: float = Field(0.0, ge=-500.0, le=500.0)
-    sample_rate: int = 22050
+    sample_rate: SampleRate = 22050
 
 
 class TransformSignalResponse(BaseModel):
@@ -505,9 +515,9 @@ class TransformSignalResponse(BaseModel):
 
 
 class ConvolveSignalRequest(BaseModel):
-    input_samples: list[float]
+    input_samples: SampleList
     impulse_type: Literal['oven', 'grill', 'skillet', 'steamer', 'custom'] = 'oven'
-    custom_impulse: list[float] | None = None
+    custom_impulse: Annotated[list[Sample], Field(max_length=MAX_IMPULSE_SAMPLES)] | None = None
     convolution_depth: float = Field(1.0, ge=0.0, le=1.0)
 
 
@@ -516,30 +526,6 @@ class ConvolveSignalResponse(BaseModel):
     impulse_samples: list[float]
     peak: float
     rms: float
-
-
-class PhasedArrayCalcRequest(BaseModel):
-    speakers: list[SpeakerStateSchema]
-    target_angle: float = Field(0.0, ge=-80.0, le=80.0)
-    window_type: Literal['uniform', 'hamming', 'hann', 'blackman'] = 'uniform'
-    d_over_lambda: float = 0.5
-
-
-class TableSpilloverOut(BaseModel):
-    table_id: int
-    table_name: str
-    spillover_intensity_pct: float
-
-
-class PhasedArrayCalcResponse(BaseModel):
-    steered_angle: float
-    target_angle: float
-    is_aligned: bool
-    transmission_efficiency_pct: float
-    peak_sidelobe_level_db: float
-    window_weights: list[float]
-    beam_pattern: list[BeamPointSchema]
-    table_spillovers: list[TableSpilloverOut]
 
 
 class DiagnosticItem(BaseModel):
