@@ -35,8 +35,8 @@ reference dish and gives it a score.
 - **Server-authoritative scoring:** the FastAPI backend rebuilds the dish from
   your settings and judges it, so the browser can't fake a score.
 - **4 difficulties** with timers and score multipliers: Easy 7:00 (×0.8),
-  Medium 5:00 (×1.0), Hard 3:10 (×1.25), MasterChef 2:00 (×1.5). You can pause,
-  and there is a countdown before each station.
+  Medium 5:00 (×1.0), Hard 3:10 (×1.25), MasterChef 2:00 (×1.5). A 3-2-1-GO
+  countdown starts each run, and you can pause at any time.
 - **Accounts, recipe book, tier unlocking and a leaderboard** (top 5, with a
   "See all" view). Rankings are grouped into scoring seasons, so older runs
   scored under older rules don't mix with current ones.

@@ -66,7 +66,7 @@ Tasting table & Similarity metrics between the player's dish and the reference d
 \end{tabularx}
 \end{center}
 
-A run is \textbf{timed} (5:00 on Easy down to 1:00 on MasterChef), stations are
+A run is \textbf{timed} (7:00 on Easy down to 2:00 on MasterChef, with pause), stations are
 \textbf{unlocked in order}, and at the end the dish is \textbf{scored}, turned
 into \textbf{stars and points}, and placed on a \textbf{leaderboard}.
 
@@ -100,8 +100,11 @@ File & Role \\
 \file{frontend/src/lib/dsp.ts} & FFT, low-pass filtering, convolution, and the similarity metric used for the final score. \\
 \file{frontend/src/lib/precision-oven-dsp.ts} & Sampling/aliasing analysis, radix-2 FFT/IFFT, oven equaliser, reconstruction and oven metrics. \\
 \file{frontend/src/lib/z-system.ts} & Delivery-cart systems: poles, zeros, gain, difference equation, stability score. \\
+\file{frontend/src/lib/delivery.ts} & The finishing problems: the burnt overtone, the road vibration, the steady-state cart. \\
 \file{frontend/src/lib/cooking-audio.ts} & The four cooking impulse responses $h[n]$ (grill, fry, bake, boil). \\
 \file{frontend/src/lib/audio.ts} & Turns a 401-sample signal into audible sound. \\
+\file{frontend/src/lib/sfx.ts}, \file{frontend/src/lib/sound.ts} & Button clicks and cooking sounds; sound on/off and volume. \\
+\file{frontend/src/lib/playground.ts} & The Signal Playground's labs, built on the stations' own functions. \\
 \file{frontend/src/lib/recipes.ts} & Recipe book, difficulty/timer, run session, progression, backend sync and submission. \\
 \file{frontend/src/lib/leaderboard.ts} & The on-device leaderboard. \\
 \file{frontend/src/lib/api.ts} & HTTP client for the backend. \\
@@ -112,7 +115,8 @@ File & Role \\
 \file{backend/app/dsp/systems.py} & Appliance impulse responses (comb, decay, resonator, moving average, differencer). \\
 \file{backend/app/dsp/pipeline.py} & The canonical backend pipeline \fn{run_pipeline}. \\
 \file{backend/app/dsp/metrics.py} & Prep (cleaning) score and dish score. \\
-\file{backend/app/gameplay.py} & Judging, points, ranks, tier unlocks, System Delivery score. \\
+\file{backend/app/gameplay.py} & Judging, points, ranks, tier unlocks, difficulties, overall score and seasons. \\
+\file{backend/app/delivery.py} & The finishing stations on the server's dish (oven and cart). \\
 \file{backend/app/routers/*.py} & HTTP endpoints: players, sessions, leaderboard, catalogue, direct DSP. \\
 \file{backend/app/seed.py} & Ingredient, appliance and recipe catalogue (with targets). \\
 \bottomrule
@@ -134,7 +138,7 @@ what you hear has the same shape as what you see.
 \begin{tikzpicture}[node distance=5mm and 4mm]
 \node[gate] (menu) {Menu\\\small sign in};
 \node[gate,right=of menu] (book) {Recipe book};
-\node[gate,right=of book] (brief) {Briefing\\\small difficulty};
+\node[gate,right=of book] (brief) {Difficulty\\\small 3-2-1-GO};
 \node[st,right=of brief] (gen) {Generate\\\small step 1};
 \node[st,below=of gen] (fil) {Filter\\\small step 2};
 \node[st,left=of fil] (mix) {Mix\\\small step 3};
@@ -167,12 +171,12 @@ Screen & File & What happens \\
 \endhead
 Landing / Menu & \file{routes/index.tsx}, \file{routes/menu.tsx} & Entry point; opens the chef sign-in (\file{components/game/ChefAuthModal.tsx}), leaderboard, settings, how-to-play and the Signal Playground. \\
 Chef sign-in & \file{components/game/ChefAuthModal.tsx} & Register or sign in with name + password; the backend returns a token that identifies the chef on every later request. \\
-Recipe book & \file{routes/recipe-book.tsx} & Choose one of 5 recipes; shows tier, difficulty and best score. \\
-Briefing & \file{routes/briefing.tsx} & Shows the recipe's ingredients, and lets the player choose difficulty (timer). Starting calls \fn{startRecipeRun}, which resets progress, creates the run session and (if signed in) a backend game session. \\
+Recipe book & \file{routes/recipe-book.tsx} & Choose one of 5 recipes (tier and best score shown), then a difficulty (\file{components/game/DifficultyModal.tsx}). Starting calls \fn{startRecipeRun}, which resets progress, creates the run session and (if signed in) a backend game session; a 3--2--1--GO countdown (\file{components/game/StationCountdown.tsx}) plays before the timer starts. \\
+Briefing & \file{routes/briefing.tsx} & The recipe's ingredients, target dish and the stations ahead. \\
 Kitchen map / hub & \file{routes/kitchen.tsx}, \file{routes/kitchen-hub.tsx} & Station map and navigation hub. \\
 Pantry & \file{routes/pantry.tsx} & Browse every ingredient and inspect its equation, waveform and spectrum (\file{components/game/IngredientSignalModal.tsx}). \\
-Settings / How to play & \file{routes/settings.tsx}, \file{routes/how-to-play.tsx} & Theme, chef name, logout; the tutorial. \\
-Leaderboard & \file{routes/leaderboard.tsx} & Server rankings per recipe/difficulty, global chef ranking, kitchen analytics, plus the on-device list when offline. \\
+Settings / How to play & \file{routes/settings.tsx}, \file{routes/how-to-play.tsx} & Theme, chef name, sound on/off and volume, logout; the tutorial. \\
+Leaderboard & \file{routes/leaderboard.tsx} & Server rankings per recipe/difficulty (top 5, plus your own row, and \emph{See all}), global chef ranking, kitchen analytics for the current season, plus the on-device list when offline. \\
 \bottomrule
 \end{longtable}
 
@@ -182,10 +186,10 @@ Leaderboard & \file{routes/leaderboard.tsx} & Server rankings per recipe/difficu
 \toprule
 Difficulty & Time & Score multiplier & Source \\
 \midrule
-Easy & 5:00 & $\times0.8$ & \fn{DIFFICULTY_CONFIGS} in \file{lib/recipes.ts}, \\
-Medium & 3:30 & $\times1.0$ & multipliers in \file{routes/score.tsx} \\
-Hard & 2:00 & $\times1.25$ & \\
-MasterChef & 1:00 & $\times1.5$ & \\
+Easy & 7:00 & $\times0.8$ & \fn{DIFFICULTY_CONFIGS} in \file{lib/recipes.ts}; \\
+Medium & 5:00 & $\times1.0$ & multipliers mirror \fn{DIFFICULTIES} \\
+Hard & 3:10 & $\times1.25$ & in \file{backend/app/gameplay.py} \\
+MasterChef & 2:00 & $\times1.5$ & \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -193,6 +197,11 @@ The timer (\fn{useRecipeTimer}) counts down from the run's start. When it hits z
 an expiry dialog (\file{components/game/RecipeTimer.tsx}) blocks the run and offers a
 retry; no completion score is awarded for an expired run. Time left at the end
 becomes a bonus (Section~\ref{sec:score}).
+
+\textbf{Pause.} The timer badge has a pause button (\file{components/game/PauseModal.tsx}):
+pausing freezes the timer and every playing signal, and the pause menu offers resume,
+restart, change difficulty, sound on/off and volume, and the light/dark theme. The server
+times its bonus on its own clock, so pause time still counts there.
 
 % ====================================================================
 \section{Station by station}
@@ -375,7 +384,8 @@ Transformation score together with seasoning, and the server names mistakes
 \subsection{Cooking Lab --- convolution with an appliance}
 \textbf{What the player does.} Picks a cooking method (grill, fry, bake, boil ---
 each is an impulse response) and slides the impulse across the signal to set the
-convolution depth. The panels show input $x$, impulse response $h$, output $x*h$
+convolution depth; the method's cooking sound (\file{frontend/sounds}) plays while the
+slider is held. The panels show input $x$, impulse response $h$, output $x*h$
 and the target.
 
 \begin{filesbox}
@@ -438,8 +448,10 @@ band-limited (Dirichlet) reconstruction.
 \end{conceptbox}
 \begin{impactbox}
 The rebuilt dish \emph{is} what gets served, so the oven changes the final similarity
-directly. Leaving the overtone scores about 50--70; notching it scores about 90--98. The
-server receives the oven \emph{settings} and applies the same filter to its own dish.
+directly. Served with the overtone left in, a dish matches the target at about 45--61\,\%;
+after a perfect oven and cart it matches the cooked dish at 99--100\,\%. On the server a
+perfect finish scores 93--98 and leaving the notch off 17--36. The server receives the oven
+\emph{settings} and applies the same filter to its own dish.
 \end{impactbox}
 
 % --------------------------------------------------------------------
@@ -463,10 +475,10 @@ sampling below twice the vibration frequency reports a folded frequency, so a no
 at that reading misses the real tone.
 \end{conceptbox}
 \begin{impactbox}
-The cart's output is the final dish. A notch on the real vibration scores about 92--98, a
-tuned low-pass about 85--93, no filtering or the default about 50--80, a notch aimed at the
-aliased reading about 65, and an unstable cart below 50. The server rebuilds the same
-vibration and filter from the settings.
+The cart's output is the final dish. On the server, a notch on the real vibration (after a
+perfect oven) scores 93--98, no suspension filter 10--21, a notch aimed at the aliased sensor
+reading 9--23, and an unstable cart under 5. The server rebuilds the same vibration and
+filter from the settings.
 \end{impactbox}
 
 % --------------------------------------------------------------------
@@ -489,10 +501,12 @@ How it works in short:
 \item The server rebuilds the player's dish and the reference dish, computes a
   0--100 score and stars (92/80/66/50/32 for 5--1 stars), points and possible tier
   unlocks. Offline, the browser computes a 0--100 score with the same weighting.
-\item Total points on screen $=$ score $\times10\times$ difficulty multiplier $+$ a
-  time bonus (2 per second left, at most 300, also $\times$ difficulty).
+\item Overall score $=$ score $\times10\times$ difficulty multiplier $+$ a
+  time bonus (2 per second left, at most 300, also $\times$ difficulty), computed and stored by
+  the server, so the score screen and the leaderboard show the same number.
 \item The run is saved to the on-device leaderboard; the server leaderboard keeps
-  each chef's best dish per recipe (filterable by difficulty).
+  each chef's best dish per recipe (filterable by difficulty), shows the top 5 with a
+  \emph{See all} button, and ranks only the current scoring season.
 \end{enumerate}
 \begin{conceptbox}
 Signal similarity measures: normalised cross-correlation, (normalised) mean-square

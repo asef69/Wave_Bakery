@@ -43,7 +43,7 @@ Part & Responsibility \\
 \midrule
 \endhead
 \file{run.py} & Starts the backend (\texttt{uvicorn app.main:app --reload}, port 8000; on Windows in its own hidden console so its reload Ctrl+C cannot stop the runner) and the Vite dev server (port 5173). Relays backend logs; stops both on exit. \\
-Frontend & Synthesises ingredient signals, runs every station's DSP, draws, plays audio, keeps the run in \texttt{localStorage}, and talks to the backend through \file{frontend/src/lib/api.ts} (header \texttt{X-Player-Token}). \\
+Frontend & Synthesises ingredient signals, runs every station's DSP, draws, plays the signals and the sound effects, runs the timer (with pause and the start countdown), keeps the run in \texttt{localStorage}, and talks to the backend through \file{frontend/src/lib/api.ts} (header \texttt{X-Player-Token}). \\
 Backend & Owns chefs (hashed passwords, tokens), sessions and attempts; regenerates ingredients from a seed; rebuilds and scores the dish; computes points, ranks, tier unlocks and leaderboards. \\
 \bottomrule
 \end{longtable}
@@ -54,7 +54,7 @@ Backend & Owns chefs (hashed passwords, tokens), sessions and attempts; regenera
 Key & Contents \\
 \midrule
 \endhead
-\file{wavebakery_recipe_session} & The run: recipe, difficulty, start/end time, every stage accuracy, every dial (seasoning, marinate, appliance, bowl, oven, cart), final score/stars, backend session id and result. Type \fn{RecipeRunSession} in \file{lib/recipes.ts}. \\
+\file{wavebakery_recipe_session} & The run: recipe, difficulty, start/end time, every stage accuracy, every dial (seasoning, marinate, appliance, bowl, oven, cart), final score/stars, backend session id and result, and the pause state (paused flag, time left when paused, countdown pending). Type \fn{RecipeRunSession} in \file{lib/recipes.ts}. \\
 \file{wavebakery_progress_<recipe>} & Highest unlocked level (1--9). \\
 \file{wavebakery_pipeline_<recipe>_<stage>} & A saved \fn{PipelineSignal} for stage \texttt{raw, filtered, mixed, seasoned, marinated, cooked, delivered}. \\
 \file{wavebakery_filtered_ingredients_<recipe>} & Filtered samples per washable ingredient. \\
@@ -63,6 +63,7 @@ Key & Contents \\
 \file{wavebakery_leaderboard_entries} & The on-device leaderboard. \\
 \file{wavekitchen_player_token}, \file{wavebakery_chef_name} & Server token and chef name. \\
 \file{wavebakery_recipe_best_scores} & Best total per recipe. \\
+\file{wavebakery_sound_settings} & Sound on/off and volume (0--100), set in Settings or the pause menu (\file{lib/sound.ts}). \\
 \bottomrule
 \end{longtable}
 Changing a stage calls \fn{invalidateDownstreamStages} (\file{lib/pipeline.ts}), which deletes
@@ -384,11 +385,13 @@ X'_k=X_k\cdot G_{\text{band}(f_k)}\cdot C(f_k)\cdot Q(f_k),\qquad
 C(f)=\begin{cases}1&f\le f_c\\ \max\!\bigl(0.01,e^{-((f-f_c)/4)^2}\bigr)&f>f_c\end{cases},
 \]
 \[
-Q(f)=1-\frac{0.88}{1+\bigl((f-f_n)/1.5\bigr)^2}\quad\text{for }|f-f_n|\le3\ (\text{notch on}),
+Q(f)=1-\frac{0.98}{1+\bigl((f-f_n)/1.5\bigr)^2}\quad\text{for }|f-f_n|\le3\ (\text{notch on}),
 \]
 \[
 X'_{N-k}=\overline{X'_k}\qquad(\text{Hermitian symmetry, so the result stays real}).
 \]
+The same gain $G\cdot C\cdot Q$ is \fn{ovenGainAt}$(f)$; the notch rejects 98\,\% at its centre
+(an earlier 0.88 left 12\,\% of the overtone in the dish).
 
 \subsection{Reconstruction --- \fn{computeSignalIFFT}}
 IFFT, keep the first $N_s=\lfloor f_s\rceil$ samples, then band-limited periodic interpolation
@@ -398,11 +401,20 @@ with the Dirichlet kernel back to 401 points:
 D_N(\tau)=\begin{cases}\dfrac{\sin(\pi N\tau)}{N\sin(\pi\tau)} & N\ \text{odd}\\[8pt]
 \dfrac{\sin(\pi N\tau)}{N\tan(\pi\tau)} & N\ \text{even}\end{cases}
 \]
-keeping the dish's own amplitude (scaled down only if its peak would exceed $0.95$). With
-untouched controls and $f_s\ge2f_{\max}$ this reproduces the input dish (verified
-$\ge98\,\%$ by \file{frontend/tests/precision-oven-fft.test.ts}); with the notch on $f_d$ it
-reproduces the dish \emph{without} the overtone (about 50--70 $\rightarrow$ 90--98 similarity
-to the target, \file{frontend/tests/delivery.test.ts}).
+keeping the dish's own amplitude (no rescaling, so a level mistake stays visible). This
+rebuild from the $f_s$ samples is what the sampling stage shows and plays, so aliasing is
+heard when $f_s<2f_{\max}$.
+
+\textbf{The plated dish} (\fn{applyOvenToDish}): once $f_s\ge2f_{\max}$ is verified, sampling is
+lossless, so the served dish is the equaliser applied to the full-resolution dish: a direct DFT
+of one period (400 samples, bin $k=k$ game Hz), $X_k\leftarrow X_k\,\fn{ovenGainAt}(k)$ for
+$k\le f_s/2$, unchanged above, then the inverse DFT. (Rebuilding it from the $f_s$ samples lost
+everything above $f_s/2$, and $f_{\max}$ only holds 95\,\% of the energy, so even a perfect run
+sounded different.) With untouched controls it returns the dish exactly
+(\file{frontend/tests/precision-oven-fft.test.ts}); with the notch on $f_d$ it returns the dish
+\emph{without} the overtone. Served straight from Check Dish (overtone kept) a dish matches the
+target at 45--61\,\%; after a perfect oven and cart it matches the cooked dish at 99--100\,\%
+(\file{frontend/tests/delivery.test.ts}, \file{frontend/tests/playground.test.ts}).
 
 \subsection{Oven score}
 \begin{align*}
@@ -433,7 +445,7 @@ Preset & $H(z)$ & Poles / zeros / gain \\
 1st-order low-pass & $\dfrac{(1-r)z}{z-r}$;\ $y[n]=(1-r)x[n]+ry[n-1]$ & pole $r$, zero $0$, $g=1-r$ (unity DC gain) \\
 2nd-order resonator & $\dfrac{z^2}{(z-re^{j\omega_0})(z-re^{-j\omega_0})}$ & conjugate poles, double zero at 0, $g=1$; $y[n]=x[n]+2r\cos\omega_0\,y[n-1]-r^2y[n-2]$ \\
 Moving average & $\tfrac16\dfrac{1-z^{-6}}{1-z^{-1}}$ & zeros $e^{j2\pi k/6}$, $k=1..5$; five poles at 0; $g=1/6$ (FIR) \\
-Notch & $\dfrac{(z-e^{j\omega_0})(z-e^{-j\omega_0})}{(z-0.85e^{j\omega_0})(z-0.85e^{-j\omega_0})}$ & zeros on the unit circle, poles at radius 0.85 \\
+Notch & $g\,\dfrac{(z-e^{j\omega_0})(z-e^{-j\omega_0})}{(z-0.85e^{j\omega_0})(z-0.85e^{-j\omega_0})}$ & zeros on the unit circle, poles at radius 0.85; $g$ makes $|H|=1$ at DC or Nyquist, whichever is farther from $\omega_0$ (with $g=1$ the dish itself was amplified about $\times1.17$) \\
 \bottomrule
 \end{longtable}
 
@@ -455,18 +467,23 @@ The road adds a tone at $f_r$ (recipe profile, defined at the true rate $F_d=800
 \[
 \omega_r=\frac{2\pi f_r}{F_d},\qquad
 v[n]=x[n]+a_r\max|x|\cos(\omega_r n),\qquad
-y=H\{v\},\qquad
-\text{served}=\frac{0.95\,y}{\max|y|}.
+y=H\{v\}\ \text{(steady state)}.
 \]
-Score $=$ \fn{computeSignalSimilarity}(served, dish before the road). A zero on the unit
-circle at $\omega_r$ removes the tone and leaves the dish; a low-pass pole damps it but also
-dulls the dish; poles outside $|z|=1$ make $y$ grow without bound, which after
-normalisation leaves only ringing.
+The dish loops and every road frequency is a whole number of cycles per window, so the cart's
+\emph{steady-state} response is used (\fn{cartServe}): the filter runs over three warm-up periods
+first and the fourth is served. Starting from rest left a start-up transient worth up to the
+dish's whole peak. The output keeps the dish's level; only a runaway output (above
+$1.5\max|x|$, from an unstable cart or a resonance on the road) is scaled back to the dish's
+peak, so its ringing, not its size, is judged. Score $=$ \fn{computeSignalSimilarity}(served,
+dish before the road). A zero on the unit circle at $\omega_r$ removes the tone and leaves the
+dish; a low-pass pole damps it but also dulls the dish; poles outside $|z|=1$ make $y$ grow
+without bound.
 
 \textbf{Aliased sensing} (\fn{sensedRoadOmega}): the sensor samples at $f_s$ and reports
 $f_a=|f_r \bmod f_s|$ folded into $[0,f_s/2]$, i.e.\ $\hat\omega=2\pi f_a/f_s$, drawn as the
 orange marker. At 8\,kHz $\hat\omega=\omega_r$; at 1.2\,kHz it is wrong (burger: $2.04\to1.05$),
-so a notch aimed at the marker misses the real vibration (score about 66 instead of 98).
+so a notch aimed at the marker misses the real vibration (server dish score 9--23 instead
+of 93--98).
 \end{mathbox}
 
 \textbf{Server} (\fn{deliver_on_cart}, \file{backend/app/delivery.py}): the same tone at the same
@@ -610,12 +627,66 @@ Complete page (\file{routes/complete.tsx}) only displays them.
   tiers they earned are kept.
 \end{description}
 
+\subsection{Leaderboard page (\file{frontend/src/routes/leaderboard.tsx})}
+Each board shows the \textbf{top 5} rows, plus the signed-in chef's own row when it is ranked
+lower (\fn{visibleRows}); \emph{See all} fetches every row (up to 500). A request id guards
+against a slow earlier request overwriting a newer filter's rows, and a submission still in
+flight is awaited before the board reloads, so a run just served appears at once.
+
 \subsection{On-device leaderboard (\file{frontend/src/lib/leaderboard.ts})}
 The score screen calls \fn{addLeaderboardEntry} with id
 \texttt{run-<recipe>-<difficulty>-<start>}: one entry per chef, recipe and difficulty, keeping
 the higher score. \fn{getLeaderboard} filters by recipe and difficulty and sorts by score. The
 leaderboard page shows the server's rows when it has any, otherwise these; it also re-submits
 a finished run that never reached the server (backend offline) and shows a retry notice.
+
+% ====================================================================
+\section{Timer, pause and sound}
+% ====================================================================
+\begin{itemize}
+\item \textbf{Timer} (\fn{useRecipeTimer}, \file{lib/recipes.ts}): Easy 7:00, Medium 5:00, Hard
+  3:10, MasterChef 2:00 (\fn{DIFFICULTY_CONFIGS}; the multipliers $0.8/1.0/1.25/1.5$ mirror
+  \fn{DIFFICULTIES} in \file{backend/app/gameplay.py}). At zero the expiry dialog blocks the run.
+\item \textbf{Start countdown} (\file{components/game/StationCountdown.tsx}): starting a recipe
+  shows 3--2--1--GO with a short tone each; the timer starts when it ends
+  (\texttt{countdownPending}).
+\item \textbf{Pause} (\fn{pauseRecipeRun}, \fn{resumeRecipeRun}, \file{components/game/PauseModal.tsx}):
+  freezes the timer (the time left is stored) and pauses every playing signal; the pause menu
+  offers resume, restart, change difficulty, sound on/off and volume, and the theme.
+\item \textbf{Sound settings} (\file{lib/sound.ts}): on/off and volume, applied to signal playback
+  and to the sound effects.
+\item \textbf{Sound effects} (\file{lib/sfx.ts}): one delegated click listener plays a short Web
+  Audio tick for every button; each cooking method has one looping recording (grill, fry, bake,
+  boil, in \file{frontend/sounds}) that plays while the convolution slider is held and stops on
+  release, on leaving the page, or after a short keyboard nudge.
+\end{itemize}
+The server times the overall score's bonus on its own clock from session creation to submission,
+so pause time is not subtracted there (the score screen shows the server's total).
+
+% ====================================================================
+\section{Signal Playground (\file{frontend/src/lib/playground.ts})}
+% ====================================================================
+The playground runs every station on any ingredient or oscillator by calling the stations' own
+functions, so a signal looks and sounds exactly as in a run:
+\begin{itemize}
+\item \fn{sourceSamples}, \fn{washSource}, \fn{mixSources}, \fn{seasonSource},
+  \fn{marinateSource}, \fn{cookSource}: the ingredient models, \fn{washFilterPreview},
+  \fn{superposeSamples}, \fn{computeSeasonedSignal}, \fn{computeMarinatedSignal},
+  \fn{computeConvolvedSignal}.
+\item \fn{bakeInOven}: \fn{addBurntOvertone} at a frequency between the signal's harmonics
+  (\fn{overtoneBetweenHarmonics}), \fn{computeDiscreteSignalFFT} at $f_s$,
+  \fn{tuneOvenFrequencies}; the output is \fn{applyOvenToDish} at $f_s\ge2f_{\max}$, else the
+  aliased rebuild \fn{computeSignalIFFT}.
+\item \fn{deliverOnPlaygroundCart}: \fn{addRoadTone}, \fn{cartServe} with \fn{systemPolesZeros},
+  $|H|$ at the road and at DC (\fn{gainAt}), stability, and the sensor reading \fn{aliasedOmega}.
+\item \fn{tasteCompare}: the live match (\fn{computeSignalSimilarity}) and the server's dish score
+  (common scale, SNR, best-lag correlation, 40\,dB spectra) on any two signals.
+\item \fn{runFullChain}: \fn{computeCleanMixedSignal} $\rightarrow$ season $\rightarrow$ marinate
+  $\rightarrow$ cook $\rightarrow$ \fn{servedDish} $\rightarrow$ oven notch on \fn{ovenDefectHz}
+  $\rightarrow$ cart notch on \fn{roadOmega}, compared with \fn{getIdealDishSignal}; at
+  \fn{targetDials} it reproduces the reference dish (99--100\,\%, tested for every recipe).
+\end{itemize}
+The lab screens are \file{routes/labs.tsx} and \file{components/playground/*}.
 
 % ====================================================================
 \section{Security and validation}
@@ -626,7 +697,7 @@ a finished run that never reached the server (backend offline) and shows a retry
   sign-in.
 \item Every session endpoint checks the token owns the session (\fn{owned_session}).
 \item DSP endpoints bound every input (sample rate 1--96\,kHz, $\le200\,000$ finite samples,
-  $\le4096$-tap custom impulse, 1--64 speakers).
+  $\le4096$-tap custom impulse).
 \item The SPA file route only serves files inside \texttt{frontend/dist}; CORS allows only the
   frontend's origins.
 \item The server never trusts client audio: it regenerates ingredients from the seed and
@@ -667,7 +738,12 @@ Function & File & Mathematical role \\
 \fn{computeSpectrumSimilarity} & \file{lib/precision-oven-dsp.ts} & Spectral match \\
 \fn{systemPolesZeros}, \fn{applySystem} & \file{lib/z-system.ts} & $H(z)$, difference equation \\
 \fn{servedDish}, \fn{dishFundamental}, \fn{ovenDefectHz} & \file{lib/delivery.ts} & Burnt overtone \\
-\fn{deliverOnCart}, \fn{withRoadVibration}, \fn{sensedRoadOmega} & \file{lib/delivery.ts} & Road vibration, aliased sensing, cart score \\
+\fn{deliverOnCart}, \fn{cartServe}, \fn{withRoadVibration}, \fn{sensedRoadOmega} & \file{lib/delivery.ts} & Road vibration, steady-state cart, aliased sensing \\
+\fn{ovenGainAt}, \fn{applyOvenToDish} & \file{lib/precision-oven-dsp.ts} & Oven gain, the plated dish \\
+\fn{gainAt} & \file{lib/z-system.ts} & $|H(e^{j\omega})|$ at one frequency \\
+\fn{bakeInOven}, \fn{deliverOnPlaygroundCart}, \fn{tasteCompare}, \fn{runFullChain} & \file{lib/playground.ts} & Playground labs \\
+\fn{pauseRecipeRun}, \fn{resumeRecipeRun}, \fn{useRecipeTimer} & \file{lib/recipes.ts} & Timer and pause \\
+\fn{startCookingSfx}, \fn{stopCookingSfx}, \fn{installButtonClickSfx} & \file{lib/sfx.ts} & Sound effects \\
 \fn{SignalAudioPlayer} & \file{lib/audio.ts} & Sonification \\
 \fn{recordStageAccuracy}, \fn{syncSessionParamsToBackend}, \fn{submitRunToBackend} & \file{lib/recipes.ts} & Accuracies, sync, submission \\
 \fn{addLeaderboardEntry}, \fn{getLeaderboard} & \file{lib/leaderboard.ts} & Local leaderboard \\
