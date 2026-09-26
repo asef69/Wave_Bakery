@@ -11,7 +11,8 @@ export default defineConfig({
       server: { entry: "server" },
     }),
     nitro({
-      defaultPreset: "cloudflare-module",
+      // Vercel sets VERCEL=1 during its builds; elsewhere keep Cloudflare.
+      defaultPreset: process.env["VERCEL"] ? "vercel" : "cloudflare-module",
     }),
     react(),
     tailwindcss(),

@@ -33,3 +33,9 @@ desktop.ini
 
 # LaTeX build output
 docs/build/
+
+# secrets and Vercel project links
+.env
+.env.*
+!.env.example
+.vercel/

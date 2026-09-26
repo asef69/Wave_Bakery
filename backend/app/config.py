@@ -7,6 +7,13 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 DATABASE_URL = os.getenv('WK_DATABASE_URL', f'sqlite:///{BASE_DIR / "wavekitchen.db"}')
+# Supabase and Heroku-style URLs say postgres:// or postgresql://; name the
+# driver explicitly (psycopg2, in requirements.txt), since SQLAlchemy 2.1
+# otherwise defaults to psycopg 3.
+for _prefix in ('postgres://', 'postgresql://'):
+    if DATABASE_URL.startswith(_prefix):
+        DATABASE_URL = 'postgresql+psycopg2://' + DATABASE_URL[len(_prefix):]
+        break
 # Explicit origins only: '*' (with credentials allowed) let any website call
 # the API from a visitor's browser. Add more via WK_CORS_ORIGINS if needed.
 CORS_ORIGINS = [o.strip() for o in os.getenv(

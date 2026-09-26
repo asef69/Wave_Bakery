@@ -14,8 +14,13 @@
 // bumps Vite to 5174+ and silently breaks every API call, including
 // registration. `import.meta.env.DEV` is true regardless of which port
 // Vite actually picks.
-const API_BASE =
-  typeof import.meta !== "undefined" && import.meta.env?.DEV ? "http://127.0.0.1:8000/api" : "/api";
+// In a deployment where the API lives on another origin (e.g. its own Vercel
+// project), VITE_API_BASE is set at build time to its full URL, ending in /api.
+const API_BASE: string =
+  (typeof import.meta !== "undefined" && import.meta.env?.["VITE_API_BASE"]) ||
+  (typeof import.meta !== "undefined" && import.meta.env?.DEV
+    ? "http://127.0.0.1:8000/api"
+    : "/api");
 
 const TOKEN_KEY = "wavekitchen_player_token";
 
