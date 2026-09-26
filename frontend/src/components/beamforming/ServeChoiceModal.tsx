@@ -50,7 +50,7 @@ export function ServeChoiceModal({ isOpen, onClose, recipeName }: ServeChoiceMod
 
         {/* Serving Options 2x1 Grid */}
         <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          {/* Option 1: Serve Normally */}
+          {/* Option 1: Serve As-Is */}
           <Link to="/score" onClick={onClose} className="block group">
             <div className="flex h-full flex-col justify-between rounded-2xl border-2 border-border bg-secondary/40 p-5 transition-all duration-150 hover:border-primary/60 hover:bg-secondary/70 hover:scale-[1.02] cursor-pointer">
               <div>
@@ -58,20 +58,20 @@ export function ServeChoiceModal({ isOpen, onClose, recipeName }: ServeChoiceMod
                   <Utensils className="h-5 w-5" />
                 </div>
                 <h4 className="mt-3 font-display text-lg font-extrabold text-foreground uppercase">
-                  Serve Normally
+                  Serve As-Is
                 </h4>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Traditional tabletop plating. Proceed directly to the score and taste review.
+                  Plate the cooked dish as-is with its slight overcooking note, and proceed directly to tasting and scoring.
                 </p>
               </div>
 
               <span className="mt-4 inline-block font-mono text-[11px] font-bold text-primary group-hover:underline">
-                View Results & Score →
+                Proceed with Burnt Note →
               </span>
             </div>
           </Link>
 
-          {/* Option 2: Precision Delivery — Nyquist/Precision Oven, then z-plane System Delivery */}
+          {/* Option 2: Save the Dish with Precision Oven */}
           <Link to="/beam-delivery" onClick={onClose} className="block group">
             <div className="flex h-full flex-col justify-between rounded-2xl border-2 border-primary/50 bg-primary/10 p-5 shadow-xs transition-all duration-150 hover:border-primary hover:bg-primary/15 hover:scale-[1.02] cursor-pointer">
               <div>
@@ -80,20 +80,19 @@ export function ServeChoiceModal({ isOpen, onClose, recipeName }: ServeChoiceMod
                 </div>
                 <div className="mt-3 flex items-center gap-2">
                   <h4 className="font-display text-lg font-extrabold text-foreground uppercase">
-                    Precision Delivery
+                    🧪 Save the Dish!
                   </h4>
                   <span className="rounded-md bg-signal/20 px-1.5 py-0.5 font-mono text-[9px] font-extrabold text-signal uppercase">
-                    CSE 220
+                    Precision Oven
                   </span>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Precision Oven (sampling, Nyquist, FFT/IFFT) then System Delivery (z-plane poles
-                  &amp; zeros, BIBO stability) before the dish is served.
+                  The intense cooking heat left an unwanted burnt flavor signature. Use the Precision Oven's frequency-domain filtering to suppress the burnt component and restore flavor balance.
                 </p>
               </div>
 
               <span className="mt-4 inline-block font-mono text-[11px] font-bold text-primary group-hover:underline">
-                Enter Precision Oven 🔥 →
+                Enter Precision Oven 🧪 →
               </span>
             </div>
           </Link>
@@ -104,7 +103,7 @@ export function ServeChoiceModal({ isOpen, onClose, recipeName }: ServeChoiceMod
           <ChefFourier
             size="sm"
             float={false}
-            message="Choose standard plating, or fire up the Precision Oven to master sampling and FFT/IFFT before calibrating the transmission channel with z-domain poles & zeros!"
+            message="Looks like we got a little too much heat on the grill! That burnt flavor has a frequency of its own. Plate it now with the charred note, or use the Precision Oven to notch out the burnt component and save the dish!"
           />
         </div>
 

@@ -78,7 +78,7 @@ function SeasoningLab() {
     }
     const session = getRecipeRunSession();
     if (typeof session?.seasonGain === "number") return session.seasonGain;
-    return 0.4;
+    return 1.0;
   }, [storedSeasoned]);
 
   const initialFreq = useMemo(() => {
@@ -87,7 +87,7 @@ function SeasoningLab() {
     }
     const session = getRecipeRunSession();
     if (typeof session?.seasonFreq === "number") return session.seasonFreq;
-    return 0.4;
+    return 1.0;
   }, [storedSeasoned]);
 
   const [amp, setAmp] = useState(initialAmp);
@@ -235,8 +235,8 @@ function SeasoningLab() {
               ? "Try increasing the frequency to add more harmonic flavor."
               : "Amplitude controls strength, frequency controls tone. Experiment with both controls!";
 
-  const width = 900;
-  const height = 300;
+  const width = 1000;
+  const height = 320;
 
   if (unlockedStep < 4) {
     return (
@@ -326,37 +326,68 @@ function SeasoningLab() {
             </div>
           </div>
 
-          <div className="relative z-10 mt-5 rounded-2xl border border-signal/25 bg-[oklch(0.19_0.03_250)]/60 p-4">
+          <div className="relative z-10 mt-5 rounded-2xl border border-signal/25 bg-[oklch(0.19_0.03_250)]/60 p-4 overflow-visible">
             <svg
               viewBox={`0 0 ${width} ${height}`}
-              className="h-[300px] w-full"
-              preserveAspectRatio="none"
+              className="relative z-10 h-[24rem] w-full overflow-visible"
             >
               {/* grid */}
-              {Array.from({ length: 13 }).map((_, i) => (
+              {Array.from({ length: 11 }).map((_, i) => (
                 <line
                   key={`v${i}`}
-                  x1={(width / 12) * i}
-                  x2={(width / 12) * i}
+                  x1={(i * width) / 10}
                   y1={0}
+                  x2={(i * width) / 10}
                   y2={height}
-                  stroke="var(--signal)"
-                  strokeWidth={i === 0 ? 1.4 : 0.5}
-                  opacity={i === 0 ? 0.4 : 0.14}
+                  stroke="var(--lab-grid)"
+                  strokeWidth="1"
+                  opacity={i % 5 === 0 ? 0.5 : 0.22}
                 />
               ))}
               {Array.from({ length: 9 }).map((_, i) => (
                 <line
                   key={`h${i}`}
-                  y1={(height / 8) * i}
-                  y2={(height / 8) * i}
                   x1={0}
+                  y1={(i * height) / 8}
                   x2={width}
-                  stroke="var(--signal)"
-                  strokeWidth={i === 4 ? 1.4 : 0.5}
-                  opacity={i === 4 ? 0.45 : 0.14}
+                  y2={(i * height) / 8}
+                  stroke="var(--lab-grid)"
+                  strokeWidth="1"
+                  opacity={i === 4 ? 0.7 : 0.2}
                 />
               ))}
+              <line
+                x1="0"
+                y1={height / 2}
+                x2={width}
+                y2={height / 2}
+                stroke="var(--signal)"
+                strokeWidth="1.5"
+                opacity="0.35"
+              />
+              <text x="8" y="18" fill="var(--signal)" opacity="0.55" fontSize="13" fontFamily="monospace">
+                +A
+              </text>
+              <text
+                x="8"
+                y={height - 8}
+                fill="var(--signal)"
+                opacity="0.55"
+                fontSize="13"
+                fontFamily="monospace"
+              >
+                −A
+              </text>
+              <text
+                x={width - 46}
+                y={height / 2 - 10}
+                fill="var(--signal)"
+                opacity="0.55"
+                fontSize="13"
+                fontFamily="monospace"
+              >
+                time
+              </text>
               {/* target reference waveform (hidden numerical target) */}
               <path
                 d={pipelineSignalToPath(targetSeasoned, width, height)}
@@ -379,9 +410,9 @@ function SeasoningLab() {
               {/* synchronized playback cursor line */}
               {playbackState.progress > 0 && (
                 <line
-                  x1={playbackState.progress * width}
+                  x1={24 + playbackState.progress * (width - 48)}
                   y1={0}
-                  x2={playbackState.progress * width}
+                  x2={24 + playbackState.progress * (width - 48)}
                   y2={height}
                   stroke="var(--signal)"
                   strokeWidth="2.5"

@@ -373,36 +373,47 @@ function CheckDishScreen() {
           </div>
         </div>
 
-        {/* The defect cooking left behind: what is served if you skip the oven */}
-        <div className="kitchen-card mt-6 border-2 border-amber-500/40 bg-card/95 p-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Flame className="h-4 w-4 text-amber-500" />
-              <span className="font-mono text-[10px] font-extrabold tracking-wider text-amber-600 uppercase">
-                As it leaves the kitchen: dish + burnt overtone ({defectHz} Hz)
+        {/* Overcooking / Burnt Flavor Signature Section */}
+        <div className="kitchen-card mt-6 border-2 border-amber-500/50 bg-gradient-to-br from-card via-card to-amber-500/5 p-6 shadow-md">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-500/30 pb-3">
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/20 text-amber-400">
+                <Flame className="h-4 w-4 animate-pulse" />
               </span>
+              <div>
+                <span className="font-mono text-[9px] font-extrabold tracking-wider text-amber-500 uppercase">
+                  🔥 Uh-oh! Slightly Overcooked!
+                </span>
+                <h4 className="font-display text-sm font-extrabold text-foreground uppercase">
+                  Burnt Flavor Signature Detected ({defectHz} Hz)
+                </h4>
+              </div>
             </div>
             <GameButton
               size="sm"
               variant="secondary"
               onClick={() => (defectPlaying ? defectPlayer?.pause() : defectPlayer?.replay())}
-              className="uppercase font-bold tracking-wider"
+              className="uppercase font-bold tracking-wider text-xs border-amber-500/40 hover:bg-amber-500/10 cursor-pointer"
             >
-              {defectPlaying ? "Pause" : "▶ Hear the defect"}
+              {defectPlaying ? "Pause Audio" : "▶ Hear Burnt Flavor"}
             </GameButton>
           </div>
           <div className="mt-4">
             <WaveformDisplay
               height={140}
-              label={`Served now: (x ∗ h)(t) + burnt overtone at ${defectHz} Hz`}
+              label={`Cooked Dish with Overcooking Artifact: (x ∗ h)(t) + burnt component at ${defectHz} Hz`}
               samples={servedSamples}
               curveRef={curveRef}
               color="var(--primary)"
             />
           </div>
-          <p className="mt-3 text-sm text-muted-foreground">
-            Cooking left a tone at {defectHz} Hz, between two harmonics of the dish. Serve now and
-            it stays in the dish; the Precision Oven can find it in the spectrum and notch it out.
+          <p className="mt-3 text-xs sm:text-sm font-mono text-muted-foreground leading-relaxed">
+            The cooking heat was a little too intense! An unwanted{" "}
+            <span className="font-bold text-amber-400">burnt flavor signature</span> has appeared
+            at <span className="font-bold text-foreground">{defectHz} Hz</span>, sitting between the
+            dish's natural harmonics. Serving now leaves this slightly burnt note in the food. You can
+            take the dish to the <span className="font-bold text-primary">Precision Oven</span> to
+            suppress this cooking artifact and save the dish!
           </p>
         </div>
 
@@ -411,7 +422,7 @@ function CheckDishScreen() {
           <ChefFourier
             size="sm"
             float={false}
-            message="Smells like perfect math! Give that signal a listen before we plate it."
+            message={`The appliance cooked our ingredients via convolution, but the heat got a little too intense! That slightly burnt flavor has a frequency of its own at ${defectHz} Hz. Serve it as-is, or fire up the Precision Oven to save the dish!`}
           />
 
           <div className="flex flex-wrap items-center gap-4">

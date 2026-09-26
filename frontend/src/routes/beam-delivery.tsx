@@ -427,8 +427,8 @@ function PrecisionOvenScreen() {
   return (
     <LabShell
       eyebrow={`FINISHING STATION • RECIPE: ${recipe.name}`}
-      title="🔥 Precision Oven"
-      chefLine="Cooking left a burnt overtone in this dish. Sample it safely, find the spike the target doesn't have, remove it, and rebuild with the IFFT!"
+      title="🧪 Save the Dish! · Precision Oven"
+      chefLine="Looks like we got a little too much heat! That burnt flavor signature has a frequency of its own. Find it in the spectrum and notch it out!"
       backTo="/check-dish"
       backLabel="← Back to Dish Inspection"
     >
@@ -446,11 +446,12 @@ function PrecisionOvenScreen() {
                 </p>
               </div>
               <h1 className="font-display text-3xl font-extrabold tracking-tight text-foreground uppercase sm:text-4xl">
-                🔥 Precision Oven
+                🧪 Save the Dish! · Precision Oven
               </h1>
               <p className="text-sm text-muted-foreground">
-                Sampling · Nyquist Theorem · Aliasing Elimination · FFT Spectrum · IFFT
-                Reconstruction
+                The cooking process was slightly too intense, leaving an unwanted burnt flavor
+                signature. Isolate the cooking-induced spectral component and notch it out to restore
+                balance!
               </p>
             </div>
 
@@ -483,6 +484,15 @@ function PrecisionOvenScreen() {
           </div>
         </div>
 
+        {/* CSE220 Technical Context Box */}
+        <div className="rounded-xl border border-primary/30 bg-primary/5 px-5 py-3.5 text-xs font-mono text-muted-foreground shadow-sm">
+          <span className="font-bold text-primary uppercase mr-2">CSE220 Technical Context:</span>
+          Cooking is modeled as convolution with the appliance&apos;s impulse response $(x ∗ h)(t)$.
+          The intense cooking process produces an unwanted cooking-induced spectral component.
+          The Precision Oven uses frequency-domain filtering $(H[k] \cdot X[k])$ and IFFT reconstruction
+          to suppress that component while preserving the rest of the dish.
+        </div>
+
         {/* ========================================================================= */}
         {/* STAGE 1: SAMPLING LOCK */}
         {/* ========================================================================= */}
@@ -498,8 +508,8 @@ function PrecisionOvenScreen() {
                   Find the Safe Sampling Rate ($f_s$)
                 </h2>
                 <p className="text-sm text-muted-foreground">
-                  Adjust the sampling frequency slider. Watch BOTH the waveform and the spectrum.
-                  Find the minimum rate that avoids aliasing!
+                  To isolate and remove the overcooking artifact, the oven sensor must sample the dish
+                  fast enough to avoid aliasing. Find the safe Nyquist rate!
                 </p>
               </div>
 
@@ -919,11 +929,10 @@ function PrecisionOvenScreen() {
                   Stage 03 • Frequency-Domain Laboratory (fs = {activeRate} Hz)
                 </p>
                 <h2 className="font-display text-2xl font-bold uppercase text-foreground">
-                  Match the Target Dish Spectrum
+                  Suppress the Burnt Flavor Signature
                 </h2>
                 <p className="text-sm text-muted-foreground">
-                  Each band slider operates strictly on its assigned frequency range. Hover or
-                  adjust to see the live highlighting!
+                  Compare your cooked dish spectrum against the ideal target. Notice the unwanted cooking artifact? Tune the notch filter to suppress it while keeping the dish&apos;s authentic flavors intact!
                 </p>
               </div>
 
@@ -1920,7 +1929,7 @@ function PrecisionOvenScreen() {
                     <span>Roll-off: &gt; {browningCutoffHz} Hz</span>
                   </div>
                   <p className="text-[11px] text-muted-foreground">
-                    Separate low-pass filter attenuating burnt overtones above f_cut
+                    Separate low-pass roll-off attenuating overcooking artifacts above f_cut
                   </p>
                 </div>
               </div>
@@ -1948,7 +1957,7 @@ function PrecisionOvenScreen() {
                     htmlFor="notch-toggle"
                     className="cursor-pointer font-mono text-xs font-bold text-foreground"
                   >
-                    Charred Resonant Notch Filter (Narrow harmonic rejection)
+                    Charred Resonant Notch Filter (Suppress Burnt Flavor Signature)
                   </label>
                 </div>
 

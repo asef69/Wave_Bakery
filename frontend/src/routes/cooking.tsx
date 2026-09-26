@@ -204,7 +204,7 @@ function CookingLab() {
             : `This recipe calls for ${requiredMethod.name}! Select the ${requiredMethod.name} impulse response.`
     : isTargetSelected
       ? isCookingComplete
-        ? `Perfect! The ${recipe.name} signal is properly convolved with the ${requiredMethod.name} impulse response.`
+        ? `Cooking complete! The ${requiredMethod.name} impulse response transformed the ingredients into a cooked dish. Next, inspect your dish to check how the cooking heat affected its flavors.`
         : `Great choice! Drag the ${requiredMethod.name} impulse response across the signal to complete cooking.`
       : `Notice how this impulse response changes the signal? But remember, this recipe calls for ${requiredMethod.name}!`;
 

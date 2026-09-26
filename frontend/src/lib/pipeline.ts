@@ -407,7 +407,7 @@ export function pipelineSignalToPath(
   signal: PipelineSignal,
   width: number,
   height: number,
-  yScale = 0.34,
+  yScale = 0.32,
 ): string {
   const curve = getSignalCurve(signal);
   const mid = signal.metadata?.["curveYMid"];
@@ -421,7 +421,7 @@ export function pipelineSignalToPath(
       if (p.x > maxX) maxX = p.x;
     }
     const spanX = maxX - minX || 1;
-    const pad = 16;
+    const pad = 24;
     curve.forEach((p, i) => {
       const x = pad + ((p.x - minX) / spanX) * (width - 2 * pad);
       const y = height / 2 - ((p.y - mid) / half) * height * yScale;
@@ -524,7 +524,7 @@ export function curvePointToSvg(
   value: number,
   width: number,
   height: number,
-  yScale = 0.34,
+  yScale = 0.32,
 ): { x: number; y: number } {
   const curve = ref ? getSignalCurve(ref) : null;
   const frame = ref ? curveFrame(ref) : null;
@@ -539,7 +539,7 @@ export function curvePointToSvg(
   const pos = Math.max(0, Math.min(1, t)) * (curve.length - 1);
   const idx = Math.min(curve.length - 2, Math.floor(pos));
   const cx = curve[idx]!.x + (pos - idx) * (curve[idx + 1]!.x - curve[idx]!.x);
-  const pad = 16;
+  const pad = 24;
   return { x: pad + ((cx - minX) / (maxX - minX || 1)) * (width - 2 * pad), y };
 }
 

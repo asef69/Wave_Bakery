@@ -256,20 +256,14 @@ function MixingLab() {
     () => storedMixed?.samples ?? null,
   );
 
-  // The solid "combined" trace renders the faithful superposition of ingredients
+  // The combined trace renders the faithful superposition of ingredients
   // in the bowl: exact canonical shape for single ingredients (overlapping perfectly),
   // true 2D parametric superposition for special ingredients, and sample-wise
   // addition for 1D ingredients.
   const superpositionPath = useMemo(() => {
     if (inBowl.length === 0) return "";
-    return computeSuperpositionPath(
-      inBowl,
-      ingredientSamplesMap,
-      W,
-      H,
-      mixed && committedMixedSamples ? committedMixedSamples : null,
-    );
-  }, [inBowl, ingredientSamplesMap, mixed, committedMixedSamples]);
+    return computeSuperpositionPath(inBowl, ingredientSamplesMap, W, H);
+  }, [inBowl, ingredientSamplesMap]);
 
   const [player, setPlayer] = useState<SignalAudioPlayer | null>(null);
 
@@ -707,7 +701,7 @@ function MixingLab() {
                       : "combined signal (solid)"
                     : inBowl.length === 0
                       ? "awaiting ingredients"
-                      : `${inBowl.length} ingredient traces (dashed) + combined signal (solid)`}
+                      : `${inBowl.length} ingredient traces (dashed) + combined signal (dotted)`}
                 </span>
               </div>
 
@@ -777,13 +771,14 @@ function MixingLab() {
                     })}
                   </g>
 
-                  {/* combined/mixed signal — solid, dominant before and after MIX */}
+                  {/* combined/mixed signal — dotted before MIX, solid after MIX */}
                   {superpositionPath && inBowl.length > 0 ? (
                     <path
                       d={superpositionPath}
                       fill="none"
                       stroke="var(--trace-mixed)"
                       strokeWidth={mixed ? 5 : 4.5}
+                      strokeDasharray={mixed ? undefined : "6 4"}
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       className="transition-all duration-700"

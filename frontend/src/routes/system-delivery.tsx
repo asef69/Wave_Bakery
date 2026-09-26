@@ -1,8 +1,18 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity, CheckCircle2, Play, Radio, RotateCcw, Sliders, Volume2 } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  ArrowRight,
+  CheckCircle2,
+  Play,
+  RotateCcw,
+  Sliders,
+  Sparkles,
+  Truck,
+  Volume2,
+} from "lucide-react";
 
-import { ChefFourier } from "@/components/game/ChefFourier";
 import { GameButton } from "@/components/game/GameButton";
 import { LabShell } from "@/components/game/LabShell";
 import { StationLocked } from "@/components/game/StationLocked";
@@ -12,7 +22,7 @@ import {
   type SystemPresetType,
 } from "@/components/system/SystemResponsePlotter";
 import { CookedSignalAudioPlayer, type PlaybackState } from "@/lib/audio";
-import { deliverOnCart, roadOmega, sensedRoadOmega } from "@/lib/delivery";
+import { deliverOnCart, deliveryProfile, roadOmega, sensedRoadOmega } from "@/lib/delivery";
 import { hasPipelineStageSignal, savePipelineStageSignal } from "@/lib/pipeline";
 import {
   recordStageAccuracy,
@@ -24,6 +34,7 @@ import {
   useRecipeTimer,
 } from "@/lib/recipes";
 import { SYSTEM_ALIAS_FREE_FS, gainAt, systemPolesZeros } from "@/lib/z-system";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/system-delivery")({
   head: () => ({
@@ -64,11 +75,12 @@ function SystemDeliveryLab() {
   );
 
   // System controls state (No Dragging!)
-  const [preset, setPreset] = useState<SystemPresetType>("resonator2");
+  const [preset, setPreset] = useState<SystemPresetType>("notch");
   const [poleRadius, setPoleRadius] = useState<number>(0.85);
   const [frequency, setFrequency] = useState<number>(Math.PI * 0.35);
   const [samplingRateHz, setSamplingRateHz] = useState<number>(8000);
 
+  const [audioMode, setAudioMode] = useState<"after" | "before">("after");
   const [audioPlayer, setAudioPlayer] = useState<CookedSignalAudioPlayer | null>(null);
   const [playbackState, setPlaybackState] = useState<PlaybackState>({
     isPlaying: false,
@@ -106,21 +118,20 @@ function SystemDeliveryLab() {
   // aliased frequency, so a notch aimed at that reading misses the real tone.
   const sensedOmega = sensedRoadOmega(recipe.id, samplingRateHz);
   // What the cart does to the two things that matter: the road tone (at its
-  // TRUE frequency) and the dish (low frequencies, ≈ DC). A resonator aimed
-  // at the road boosts it — the served dish is then mostly vibration.
+  // TRUE frequency) and the dish (low frequencies, ≈ DC).
   const roadGain = gainAt(system, roadOmega(recipe.id));
   const dishGain = gainAt(system, 0);
 
-  // Record the result once per settings change (saving the served stage
-  // re-renders this page; keying on the settings keeps that from looping).
+  const profile = useMemo(() => deliveryProfile(recipe.id), [recipe.id]);
+
+  // Record the result once per settings change
   const lastSavedRef = useRef<string | null>(null);
   useEffect(() => {
     const key = `${recipe.id}|${preset}|${poleRadius}|${frequency}|${samplingRateHz}|${accuracy}`;
     if (lastSavedRef.current === key) return;
     lastSavedRef.current = key;
     recordStageAccuracy("system", accuracy);
-    // The server rebuilds this from the settings (sent with the next params
-    // sync, e.g. right before the dish is submitted).
+    // The server rebuilds this from the settings
     updateRecipeRunSession({
       systemPreset: preset,
       systemPoleRadius: poleRadius,
@@ -145,21 +156,30 @@ function SystemDeliveryLab() {
     deliveredSignal,
   ]);
 
-  // A new system means a new signal: drop the old player (the cleanup effect
-  // above destroys it) so the next play uses the current filter.
+  // A new system means a new signal: drop the old player
   useEffect(() => {
     setAudioPlayer(null);
     setPlaybackState((prev) => ({ ...prev, isPlaying: false, isPaused: false, progress: 0 }));
   }, [equalizedSamples]);
 
+  const handlePlayAudio = (mode: "after" | "before" = "after") => {
+    setAudioMode(mode);
+    const targetSamples = mode === "before" ? cartInput : equalizedSamples;
+    if (audioPlayer) {
+      audioPlayer.destroy();
+      setAudioPlayer(null);
+    }
+    const p = new CookedSignalAudioPlayer(
+      { ...cookedSignal, samples: targetSamples },
+      (state) => setPlaybackState(state),
+    );
+    setAudioPlayer(p);
+    p.play();
+  };
+
   const handleToggleAudio = () => {
     if (!audioPlayer) {
-      const p = new CookedSignalAudioPlayer(
-        { ...cookedSignal, samples: equalizedSamples },
-        (state) => setPlaybackState(state),
-      );
-      setAudioPlayer(p);
-      p.play();
+      handlePlayAudio(audioMode);
     } else {
       if (playbackState.isPlaying) {
         audioPlayer.pause();
@@ -171,18 +191,22 @@ function SystemDeliveryLab() {
     }
   };
 
-  const chefLine = !isStable
-    ? "⚠️ Careful! The delivery cart's wheel wobble r ≥ 1.0 is past the safe limit — it'll shake the dish right off the tray!"
-    : samplingRateHz < SYSTEM_ALIAS_FREE_FS
-      ? "⚠️ The wobble sensor is sampling too slowly (fs < 2·f_max) — it's misreading fast shakes as slow ones!"
-      : roadGain > 1
-        ? `⚠️ Your cart is AMPLIFYING the road vibration ×${roadGain.toFixed(1)}! A resonator's peak boosts whatever it sits on — put zeros (a notch) on the road ω instead.`
-        : accuracy >= 90
-          ? "Smooth delivery! The road vibration is gone and the dish arrives intact."
-          : "The road is shaking the dish — see the orange road ω marker? Put a zero (notch) on it, or damp it without dulling the dish.";
+  const chefLine = useMemo(() => {
+    if (!isStable) {
+      return "⚠️ Careful! The delivery cart's wheel wobble r ≥ 1.0 is past the safe limit (|z|=1) — runaway resonance will shake the dish right off the tray!";
+    }
+    if (samplingRateHz < SYSTEM_ALIAS_FREE_FS) {
+      return "⚠️ The wobble sensor is sampling too slowly (fs < 2·f_max) — it's reporting an aliased ghost shake! Switch to 8.0 kHz to see the true rattle.";
+    }
+    if (roadGain > 1.0) {
+      return `⚠️ Your cart is AMPLIFYING the road vibration ×${roadGain.toFixed(1)}! Put zeros (a notch) on the road ω instead.`;
+    }
+    if (accuracy >= 90) {
+      return `🌟 Smooth delivery! The road vibration is cancelled (×${roadGain.toFixed(2)}) and the dish flavor is intact. Give it a quick listen and serve!`;
+    }
+    return `The cart is rattling at ${profile.roadHz} Hz! Choose the Notch filter and slide the zero over the orange road marker.`;
+  }, [isStable, samplingRateHz, roadGain, accuracy, profile.roadHz]);
 
-  // Reached from the Precision Oven, which unlocks 8. This page used to
-  // unlock 7 on load, so opening its URL skipped straight to the score.
   if (unlockedStep < 8) {
     return (
       <StationLocked
@@ -197,94 +221,78 @@ function SystemDeliveryLab() {
 
   return (
     <LabShell
-      eyebrow="Station 07 · System Delivery"
-      title="System Delivery Lab"
+      eyebrow={`STATION 07 • RECIPE: ${recipe.name}`}
+      title="🚚 System Delivery"
       chefLine={chefLine}
       backTo="/beam-delivery"
       backLabel="← Back to Precision Oven"
       nextTo="/score"
-      nextLabel="SERVE DISH TO TASTING TABLE →"
+      nextLabel="SERVE DISH →"
     >
       <TimeExpiredModal />
 
-      {/* HUD HEADER */}
-      <div className="kitchen-card flex flex-wrap items-center justify-between gap-4 px-6 py-4">
-        <div className="flex flex-wrap items-center gap-6">
-          <div className="flex items-center gap-2.5 rounded-xl border border-primary/40 bg-secondary/80 px-3 py-1.5 shadow-sm">
-            <Radio className="h-4 w-4 text-primary animate-pulse" />
-            <div>
-              <p className="font-mono text-[9px] font-extrabold tracking-[0.2em] text-primary uppercase">
-                Active Recipe
-              </p>
-              <p className="font-display text-sm font-extrabold text-foreground">{recipe.name}</p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 font-mono text-xs">
-            <span className="text-muted-foreground uppercase text-[10px]">Sampling:</span>
-            <span className="font-bold text-foreground">{samplingRateHz} Hz</span>
-            <span className="text-muted-foreground">·</span>
-            <span className="text-muted-foreground uppercase text-[10px]">Cart Status:</span>
-            <span className={isStable ? "font-bold text-emerald-400" : "font-bold text-rose-400"}>
-              {isStable ? "Rolling Smooth" : "Shaking Apart!"}
+      <div className="mx-auto max-w-6xl space-y-5 pb-12">
+        {/* 1. LIGHTWEIGHT STATION HUD */}
+        <div className="kitchen-card flex flex-wrap items-center justify-between gap-4 px-6 py-3.5 border-2 border-border/80 bg-card/90 shadow-sm">
+          <div className="flex items-center gap-4">
+            <span className="font-display text-sm font-extrabold text-foreground uppercase flex items-center gap-2">
+              <span>🍲</span> {recipe.name}
+            </span>
+            <span className="h-4 w-px bg-border/80 hidden sm:inline" />
+            <span className="font-mono text-xs font-bold uppercase text-primary hidden sm:inline">
+              Station 07 · SYSTEM DELIVERY
             </span>
           </div>
 
-          {isStable && (
-            <div className="flex items-center gap-2 font-mono text-xs">
-              <span className="text-muted-foreground uppercase text-[10px]">Road vibration:</span>
-              <span
-                className={
-                  roadGain > 1
-                    ? "font-bold text-rose-400"
-                    : roadGain > 0.3
-                      ? "font-bold text-amber-500"
-                      : "font-bold text-emerald-400"
-                }
-              >
-                ×{roadGain.toFixed(2)}{" "}
-                {roadGain > 1 ? "(amplified!)" : roadGain > 0.3 ? "(gets through)" : "(removed)"}
-              </span>
-              <span className="text-muted-foreground">·</span>
-              <span className="text-muted-foreground uppercase text-[10px]">Dish:</span>
-              <span
-                className={
-                  Math.abs(dishGain - 1) > 0.3
-                    ? "font-bold text-amber-500"
-                    : "font-bold text-emerald-400"
-                }
-              >
-                ×{dishGain.toFixed(2)}
-              </span>
+          <div className="flex items-center gap-3">
+            <span
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg px-2.5 py-1 font-mono text-[11px] font-bold uppercase border",
+                isStable
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                  : "border-rose-500/40 bg-rose-500/15 text-rose-400 animate-pulse",
+              )}
+            >
+              {isStable ? "✓ Stable Suspension" : "⚠️ Resonance Risk (|z| ≥ 1.0)"}
+            </span>
+            {session && <RecipeTimerBadge />}
+          </div>
+        </div>
+
+        {/* 2. COMPACT MISSION CARD */}
+        <div className="kitchen-card relative overflow-hidden border-2 border-primary/40 bg-gradient-to-br from-card via-card to-primary/5 p-5 shadow-md">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="space-y-1 max-w-xl">
+              <div className="flex items-center gap-2">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/20 text-amber-400">
+                  <Truck className="h-4 w-4 animate-bounce" />
+                </span>
+                <h2 className="font-display text-xl font-black uppercase text-foreground">
+                  🚚 THE CART IS SHAKING!
+                </h2>
+              </div>
+              <p className="font-mono text-xs text-muted-foreground leading-relaxed">
+                Road vibration is disturbing your dish. Tune the suspension filter before delivery.
+              </p>
+              <div className="flex items-center gap-2 pt-1 font-mono text-xs">
+                <span className="text-muted-foreground">Road vibration:</span>
+                <span className="font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30">
+                  {(profile.roadHz / 1000).toFixed(1)} kHz ({profile.roadHz} Hz)
+                </span>
+              </div>
             </div>
-          )}
+
+            {/* Compact Chef Fourier speech line */}
+            <div className="flex items-center gap-3 rounded-2xl border border-primary/30 bg-primary/5 px-4 py-2.5 max-w-md">
+              <span className="text-2xl" aria-hidden>👨‍🍳</span>
+              <p className="font-mono text-xs text-muted-foreground italic">
+                &ldquo;The cart is rattling! Find the vibration and cancel it before we serve.&rdquo;
+              </p>
+            </div>
+          </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={handleToggleAudio}
-            className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 font-display text-xs font-extrabold uppercase text-primary-foreground shadow-md hover:bg-primary/90 cursor-pointer"
-          >
-            {playbackState.isPlaying ? (
-              <>
-                <Volume2 className="h-4 w-4 animate-bounce" />
-                <span>Pause Audio</span>
-              </>
-            ) : (
-              <>
-                <Play className="h-4 w-4 fill-current" />
-                <span>Listen Equalized Dish</span>
-              </>
-            )}
-          </button>
-
-          {session && <RecipeTimerBadge />}
-        </div>
-      </div>
-
-      {/* MAIN SYSTEM RESPONSE PLOTTER (Z-PLANE, PRESETS, SLIDERS, FFT, SAMPLING) */}
-      <section className="mt-6">
+        {/* 3. MAIN INTERACTIVE LAB AREA (TWO-COLUMN GAME CONSOLE) */}
         <SystemResponsePlotter
           preset={preset}
           poleRadius={poleRadius}
@@ -295,27 +303,50 @@ function SystemDeliveryLab() {
           onFrequencyChange={setFrequency}
           onSamplingRateChange={setSamplingRateHz}
           dishSignal={cartInput}
+          equalizedSignal={equalizedSamples}
           vibrationOmega={sensedOmega}
+          roadGain={roadGain}
+          dishGain={dishGain}
+          accuracy={accuracy}
+          roadHz={profile.roadHz}
+          recipeName={recipe.name}
+          onToggleAudio={handleToggleAudio}
+          onPlayBeforeAudio={() => handlePlayAudio("before")}
+          onPlayAfterAudio={() => handlePlayAudio("after")}
+          audioMode={audioMode}
+          isPlaying={playbackState.isPlaying}
         />
-      </section>
 
-      {/* FOOTER CTA */}
-      <footer className="mt-8 flex items-center justify-between border-t border-border/80 pt-6">
-        <Link to="/beam-delivery">
-          <GameButton variant="secondary" size="lg" className="uppercase font-bold">
-            ← Back to Precision Oven
-          </GameButton>
-        </Link>
+        {/* 4. FOOTER NAVIGATION & CLEAR ACTION CTAS */}
+        <footer className="mt-8 flex flex-wrap items-center justify-between gap-4 border-t border-border/80 pt-6">
+          <Link to="/beam-delivery">
+            <GameButton variant="secondary" size="lg" className="uppercase font-bold">
+              ← Back to Precision Oven
+            </GameButton>
+          </Link>
 
-        <Link to="/score">
-          <GameButton
-            size="lg"
-            className="uppercase font-extrabold tracking-wider text-base px-8 py-3.5"
-          >
-            SERVE DISH TO TASTING TABLE →
-          </GameButton>
-        </Link>
-      </footer>
+          <div className="flex flex-wrap items-center gap-3">
+            <GameButton
+              variant="lab"
+              size="lg"
+              onClick={() => handlePlayAudio("after")}
+              className="uppercase font-extrabold tracking-wider"
+            >
+              <Truck className="mr-2 h-4 w-4" />
+              🚚 TEST DELIVERY
+            </GameButton>
+
+            <Link to="/score">
+              <GameButton
+                size="lg"
+                className="uppercase font-extrabold tracking-wider text-base px-8 py-3.5 shadow-xl bg-primary text-primary-foreground cursor-pointer"
+              >
+                SERVE DISH →
+              </GameButton>
+            </Link>
+          </div>
+        </footer>
+      </div>
     </LabShell>
   );
 }
