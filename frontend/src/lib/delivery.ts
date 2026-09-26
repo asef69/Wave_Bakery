@@ -49,11 +49,6 @@ export const DELIVERY_PROFILES: Record<string, DeliveryProfile> = {
   cake: { defectRatio: 16 / 3, defectAmp: 0.9, roadHz: 2300, roadAmp: 0.9 },
   noodles: { defectRatio: 20 / 14, defectAmp: 0.9, roadHz: 2900, roadAmp: 0.9 },
   "chicken-fry": { defectRatio: 20 / 3, defectAmp: 1.0, roadHz: 1700, roadAmp: 1.0 },
-  toast: { defectRatio: 15 / 6, defectAmp: 0.8, roadHz: 2000, roadAmp: 0.8 },
-  soup: { defectRatio: 20 / 8, defectAmp: 0.9, roadHz: 2500, roadAmp: 0.9 },
-  salad: { defectRatio: 17 / 7, defectAmp: 0.9, roadHz: 3100, roadAmp: 0.9 },
-  creme: { defectRatio: 14 / 4, defectAmp: 1.0, roadHz: 1800, roadAmp: 1.0 },
-  feast: { defectRatio: 24 / 7, defectAmp: 1.1, roadHz: 2700, roadAmp: 1.1 },
 };
 
 export function deliveryProfile(recipeId: string): DeliveryProfile {
@@ -91,13 +86,39 @@ export function ovenDefectHz(recipeId: string): number {
   return Math.min(NOTCH_MAX_HZ, Math.max(NOTCH_MIN_HZ, f));
 }
 
+/**
+ * A burnt overtone added to a dish: a tone of `hz` (whole cycles per window)
+ * at `amp` x the dish's peak. servedDish uses it with the recipe's profile;
+ * the Signal Playground with any settings.
+ */
+export function addBurntOvertone(cooked: number[], hz: number, amp: number): number[] {
+  const a = amp * peakOf(cooked);
+  const n = cooked.length;
+  return cooked.map((v, i) => v + a * Math.sin((2 * Math.PI * hz * i) / (n - 1)));
+}
+
+/**
+ * An overtone frequency (whole game Hz, within the notch slider's range)
+ * that sits as far as possible from every harmonic of the dish, as each
+ * recipe's overtone does.
+ */
+export function overtoneBetweenHarmonics(samples: number[]): number {
+  const f0 = Math.max(1, dishFundamental(samples));
+  let best = NOTCH_MIN_HZ;
+  let bestGap = -1;
+  for (let f = NOTCH_MIN_HZ; f <= NOTCH_MAX_HZ; f++) {
+    const gap = Math.abs(f - Math.round(f / f0) * f0);
+    if (gap > bestGap) {
+      bestGap = gap;
+      best = f;
+    }
+  }
+  return best;
+}
+
 /** The dish as it leaves the kitchen: the cooked dish plus the burnt overtone. */
 export function servedDish(recipeId: string, cooked: number[]): number[] {
-  const { defectAmp } = deliveryProfile(recipeId);
-  const f = ovenDefectHz(recipeId);
-  const a = defectAmp * peakOf(cooked);
-  const n = cooked.length;
-  return cooked.map((v, i) => v + a * Math.sin((2 * Math.PI * f * i) / (n - 1)));
+  return addBurntOvertone(cooked, ovenDefectHz(recipeId), deliveryProfile(recipeId).defectAmp);
 }
 
 /** Road vibration at its true digital frequency (rad/sample at DELIVERY_FS). */
@@ -110,17 +131,27 @@ export function roadOmega(recipeId: string): number {
  * folded into [0, fs/2], as an angle in [0, pi].
  */
 export function sensedRoadOmega(recipeId: string, sensorFs: number): number {
-  const f = deliveryProfile(recipeId).roadHz;
-  let alias = f % sensorFs;
+  return aliasedOmega(deliveryProfile(recipeId).roadHz, sensorFs);
+}
+
+/** Where a sensor sampling at `sensorFs` sees a tone of `hz`, as an angle in [0, pi]. */
+export function aliasedOmega(hz: number, sensorFs: number): number {
+  let alias = hz % sensorFs;
   if (alias > sensorFs / 2) alias = sensorFs - alias;
   return (2 * Math.PI * alias) / sensorFs;
 }
 
+/** A road tone of `hz` (at DELIVERY_FS) at `amp` x the dish's peak, added to the dish. */
+export function addRoadTone(dish: number[], hz: number, amp: number): number[] {
+  const a = amp * peakOf(dish);
+  const w = (2 * Math.PI * hz) / DELIVERY_FS;
+  return dish.map((v, n) => v + a * Math.cos(w * n));
+}
+
 /** The dish on the cart, before the cart's suspension filters it. */
 export function withRoadVibration(recipeId: string, dish: number[]): number[] {
-  const a = deliveryProfile(recipeId).roadAmp * peakOf(dish);
-  const w = roadOmega(recipeId);
-  return dish.map((v, n) => v + a * Math.cos(w * n));
+  const { roadHz, roadAmp } = deliveryProfile(recipeId);
+  return addRoadTone(dish, roadHz, roadAmp);
 }
 
 /** Periods the cart runs before the served one, so its start-up transient has died out. */
@@ -159,7 +190,18 @@ export function deliverOnCart(
   dish: number[],
   system: ZSystem,
 ): { input: number[]; served: number[]; accuracy: number } {
-  const input = withRoadVibration(recipeId, dish);
+  return cartServe(dish, withRoadVibration(recipeId, dish), system);
+}
+
+/**
+ * The cart's H(z) applied to `input` (the dish plus road vibration): the
+ * served dish and how close it is to the dish before the road.
+ */
+export function cartServe(
+  dish: number[],
+  input: number[],
+  system: ZSystem,
+): { input: number[]; served: number[]; accuracy: number } {
   const y = applySystemPeriodic(input, system);
   const peak = y.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
   const dishPeak = peakOf(dish);

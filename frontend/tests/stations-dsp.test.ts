@@ -7,43 +7,32 @@ import {
 } from "@/lib/recipes";
 
 describe("Stations & Dynamic Recipe Pipeline Flow", () => {
-  it("includes all 5 canonical recipes with metadata", () => {
-    expect(recipes.length).toBeGreaterThanOrEqual(5);
-    const ids = recipes.map((r) => r.id);
-    expect(ids).toContain("burger");
-    expect(ids).toContain("soup");
-    expect(ids).toContain("salad");
-    expect(ids).toContain("creme");
-    expect(ids).toContain("feast");
+  it("includes exactly the 5 recipes of the recipe book", () => {
+    expect(recipes.map((r) => r.id).sort()).toEqual(
+      ["burger", "cake", "chicken-fry", "noodles", "sandwich"].sort(),
+    );
   });
 
-  it("dynamically generates recipe station flow including chop and caramelize", () => {
-    const salad = recipes.find((r) => r.id === "salad")!;
-    const creme = recipes.find((r) => r.id === "creme")!;
-    const feast = recipes.find((r) => r.id === "feast")!;
-
-    const saladFlow = getRecipeStationFlow(salad).map((s) => s.path);
-    expect(saladFlow).toContain("/chop");
-
-    const cremeFlow = getRecipeStationFlow(creme).map((s) => s.path);
-    expect(cremeFlow).toContain("/caramelize");
-
-    const feastFlow = getRecipeStationFlow(feast).map((s) => s.path);
-    expect(feastFlow).toContain("/caramelize");
-    expect(feastFlow).toContain("/chop");
+  it("every recipe follows the same station flow", () => {
+    for (const recipe of recipes) {
+      expect(getRecipeStationFlow(recipe).map((s) => s.path)).toEqual([
+        "/generate",
+        "/filtering",
+        "/mixing",
+        "/transform",
+        "/marinate",
+        "/cooking",
+        "/system-delivery",
+        "/score",
+        "/complete",
+      ]);
+    }
   });
 
   it("calculates next and previous station navigation paths correctly", () => {
-    const salad = recipes.find((r) => r.id === "salad")!;
-    const nextAfterMarinate = getNextStationPath("/marinate", salad);
-    expect(nextAfterMarinate).toBe("/chop");
-
-    const prevBeforeChop = getPrevStationPath("/chop", salad);
-    expect(prevBeforeChop).toBe("/marinate");
-
-    const creme = recipes.find((r) => r.id === "creme")!;
-    const nextAfterMarinateCreme = getNextStationPath("/marinate", creme);
-    expect(nextAfterMarinateCreme).toBe("/caramelize");
+    const burger = recipes.find((r) => r.id === "burger")!;
+    expect(getNextStationPath("/marinate", burger)).toBe("/cooking");
+    expect(getPrevStationPath("/cooking", burger)).toBe("/marinate");
   });
 
   it("verifies z-plane BIBO system stability criteria (|p| < 1.0 vs |p| >= 1.0)", () => {

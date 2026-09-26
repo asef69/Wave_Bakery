@@ -38,8 +38,6 @@ def client():
     ('/api/dsp/generate', {'sample_rate': 10 ** 9}),
     ('/api/dsp/filter', {'samples': [0.1] * 100, 'sample_rate': 0}),
     ('/api/dsp/filter', {'samples': [0.0] * 200_001}),
-    ('/api/dsp/beamforming', {'speakers': []}),
-    ('/api/dsp/beamforming', {'speakers': [{'id': 0}], 'd_over_lambda': 0}),
 ])
 def test_bad_dsp_input_is_rejected_not_crashing(client, path, body):
     assert client.post(path, json=body).status_code == 422
@@ -47,5 +45,3 @@ def test_bad_dsp_input_is_rejected_not_crashing(client, path, body):
 
 def test_valid_dsp_input_still_works(client):
     assert client.post('/api/dsp/generate', json={'sample_rate': 22050}).status_code == 200
-    r = client.post('/api/dsp/beamforming', json={'speakers': [{'id': 0}, {'id': 1}]})
-    assert r.status_code == 200

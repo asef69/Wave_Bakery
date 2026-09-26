@@ -153,7 +153,7 @@ def test_profile(client, chef):
 def test_locked_tiers_are_ranked_but_earn_no_points(client, chef):
     """Locked-tier runs used to 403 at start, silently leaving them off the board."""
     before = client.get('/api/players/me', headers=auth(chef)).json()
-    r = client.post('/api/sessions', json={'recipe_id': 'feast', 'difficulty': 'hard'},
+    r = client.post('/api/sessions', json={'recipe_id': 'chicken-fry', 'difficulty': 'hard'},
                     headers=auth(chef))
     assert r.status_code == 201
     result = client.post(f"/api/sessions/{r.json()['id']}/submit", headers=auth(chef)).json()
@@ -161,12 +161,12 @@ def test_locked_tiers_are_ranked_but_earn_no_points(client, chef):
     after = client.get('/api/players/me', headers=auth(chef)).json()
     assert after['points'] == before['points']
     assert after['unlocked_tier'] == before['unlocked_tier']
-    rows = client.get('/api/leaderboard', params={'recipe_id': 'feast'}).json()
+    rows = client.get('/api/leaderboard', params={'recipe_id': 'chicken-fry'}).json()
     assert any(row['handle'] == 'Test Chef' for row in rows)
 
 
 def test_a_served_dish_cannot_be_edited(client, chef):
-    sid = client.post('/api/sessions', json={'recipe_id': 'toast'},
+    sid = client.post('/api/sessions', json={'recipe_id': 'sandwich'},
                       headers=auth(chef)).json()['id']
     assert client.post(f'/api/sessions/{sid}/submit', headers=auth(chef)).status_code == 200
     h = auth(chef)
@@ -184,20 +184,75 @@ def test_leaderboard_filters_by_difficulty(client, chef):
         client.post(f'/api/sessions/{sid}/submit', headers=auth(chef))
     rows = client.get('/api/leaderboard',
                       params={'recipe_id': 'sandwich', 'difficulty': 'masterchef'}).json()
-    assert rows and all(r['difficulty'] in ('masterchef', None) for r in rows)
-    assert any(r['difficulty'] == 'masterchef' for r in rows)
+    assert rows and all(r['difficulty'] == 'masterchef' for r in rows)
+
+
+def _test_db():
+    from app.database import get_db
+    return next(app.dependency_overrides[get_db]())
+
+
+def test_runs_without_a_recorded_difficulty_only_show_on_easy(client, chef):
+    from app.models import Attempt, GameSession
+    sid = client.post('/api/sessions', json={'recipe_id': 'cake'}, headers=auth(chef)).json()['id']
+    client.post(f'/api/sessions/{sid}/submit', headers=auth(chef))
+    db = _test_db()
+    db.query(GameSession).filter(GameSession.id == sid).update({GameSession.difficulty: None})
+    db.query(Attempt).filter(Attempt.session_id == sid).update({Attempt.difficulty: None})
+    db.commit()
+    db.close()
+    board = lambda d: client.get('/api/leaderboard', params={'recipe_id': 'cake', 'difficulty': d}).json()
+    assert any(r['difficulty'] is None for r in board('easy'))
+    for d in ('medium', 'hard', 'masterchef'):       # used to appear on every board
+        assert all(r['difficulty'] == d for r in board(d))
+
+
+def test_new_sessions_always_record_a_difficulty(client, chef):
+    r = client.post('/api/sessions', json={'recipe_id': 'sandwich'}, headers=auth(chef)).json()
+    from app.models import GameSession
+    db = _test_db()
+    assert db.get(GameSession, r['id']).difficulty == 'easy'
+    db.close()
+
+
+def test_old_runs_get_an_overall_score_on_the_same_scale(client, chef):
+    from app.database import _backfill_run_totals
+    from app.gameplay import run_total
+    from app.models import Attempt, GameSession
+    sid = client.post('/api/sessions', json={'recipe_id': 'sandwich', 'difficulty': 'hard'},
+                      headers=auth(chef)).json()['id']
+    client.post(f'/api/sessions/{sid}/submit', headers=auth(chef))
+    db = _test_db()
+    attempt = db.query(Attempt).filter(Attempt.session_id == sid).one()
+    stored = (attempt.total_score, attempt.time_bonus)
+    attempt.total_score = attempt.time_bonus = None       # as for a run from before totals
+    db.commit()
+    _backfill_run_totals(db)
+    db.refresh(attempt)
+    session = db.get(GameSession, sid)
+    expected = run_total(attempt.score, 'hard',
+                         (session.served_at - session.created_at).total_seconds())
+    assert (attempt.total_score, attempt.time_bonus) == expected == stored
+    db.close()
+
+
+def test_global_ranking_lists_only_chefs_who_have_served(client, chef):
+    client.post('/api/players', json={'handle': 'Idle Chef', 'password': PW})
+    handles = {r['handle'] for r in client.get('/api/leaderboard/global',
+                                                params={'limit': 500}).json()}
+    assert 'Idle Chef' not in handles and 'Test Chef' in handles
 
 
 def test_one_chef_with_many_runs_does_not_crowd_out_others(client, chef):
     rival = client.post('/api/players', json={'handle': 'Rival', 'password': PW}).json()
     for _ in range(6):
-        sid = client.post('/api/sessions', json={'recipe_id': 'toast'},
+        sid = client.post('/api/sessions', json={'recipe_id': 'sandwich'},
                           headers=auth(chef)).json()['id']
         client.post(f'/api/sessions/{sid}/submit', headers=auth(chef))
-    sid = client.post('/api/sessions', json={'recipe_id': 'toast'},
+    sid = client.post('/api/sessions', json={'recipe_id': 'sandwich'},
                       headers={'X-Player-Token': rival['token']}).json()['id']
     client.post(f'/api/sessions/{sid}/submit', headers={'X-Player-Token': rival['token']})
-    rows = client.get('/api/leaderboard', params={'recipe_id': 'toast', 'limit': 2}).json()
+    rows = client.get('/api/leaderboard', params={'recipe_id': 'sandwich', 'limit': 2}).json()
     assert {r['handle'] for r in rows} == {'Test Chef', 'Rival'}
 
 
@@ -218,7 +273,7 @@ def test_session_start_delivers_contaminated_ingredients(client, chef):
 
 
 def test_filtering_updates_prep_score(client, chef):
-    sid = client.post('/api/sessions', json={'recipe_id': 'toast'},
+    sid = client.post('/api/sessions', json={'recipe_id': 'sandwich'},
                       headers=auth(chef)).json()['id']
     before = client.post(f'/api/sessions/{sid}/ingredients/0/filter',
                          json={'bands': [], 'tools': []}, headers=auth(chef)).json()
@@ -231,13 +286,14 @@ def test_filtering_updates_prep_score(client, chef):
 
 
 def test_over_filtering_is_detected_and_rejected(client, chef):
-    sid = client.post('/api/sessions', json={'recipe_id': 'toast'},
+    sid = client.post('/api/sessions', json={'recipe_id': 'sandwich'},
                       headers=auth(chef)).json()['id']
-    r = client.post(f'/api/sessions/{sid}/ingredients/0/filter',
+    cheese = 2      # the sandwich's Cheese slot (bread, chicken, cheese, ...)
+    r = client.post(f'/api/sessions/{sid}/ingredients/{cheese}/filter',
                     json={'bands': [], 'tools': [{'kind': 'lowpass', 'cutoff': 15}]},
                     headers=auth(chef)).json()
     assert r['prep']['over_filtered'] is True
-    assert client.post(f'/api/sessions/{sid}/ingredients/0/accept',
+    assert client.post(f'/api/sessions/{sid}/ingredients/{cheese}/accept',
                        headers=auth(chef)).status_code == 409
 
 
@@ -257,7 +313,7 @@ def test_params_return_every_stage(client, chef):
 
 
 def test_convolution_view_is_a_real_partial_sum(client, chef):
-    sid = client.post('/api/sessions', json={'recipe_id': 'toast'},
+    sid = client.post('/api/sessions', json={'recipe_id': 'sandwich'},
                       headers=auth(chef)).json()['id']
     client.put(f'/api/sessions/{sid}/params', headers=auth(chef),
                json={'seasoning': 1.0, 'appliances': ['bake']})
@@ -270,7 +326,7 @@ def test_convolution_view_is_a_real_partial_sum(client, chef):
 
 
 def test_unknown_appliance_is_rejected(client, chef):
-    sid = client.post('/api/sessions', json={'recipe_id': 'toast'},
+    sid = client.post('/api/sessions', json={'recipe_id': 'sandwich'},
                       headers=auth(chef)).json()['id']
     r = client.put(f'/api/sessions/{sid}/params', headers=auth(chef),
                    json={'seasoning': 1.0, 'appliances': ['microwave']})
@@ -278,7 +334,7 @@ def test_unknown_appliance_is_rejected(client, chef):
 
 
 def test_another_player_cannot_touch_the_session(client, chef):
-    sid = client.post('/api/sessions', json={'recipe_id': 'toast'},
+    sid = client.post('/api/sessions', json={'recipe_id': 'sandwich'},
                       headers=auth(chef)).json()['id']
     other = client.post('/api/players', json={'handle': 'Intruder', 'password': PW}).json()
     r = client.get(f'/api/sessions/{sid}',
@@ -395,7 +451,7 @@ def test_an_untouched_pipeline_scores_badly_with_useful_notes(client, chef):
 
 
 def test_a_dish_cannot_be_served_twice(client, chef):
-    sid = client.post('/api/sessions', json={'recipe_id': 'toast'},
+    sid = client.post('/api/sessions', json={'recipe_id': 'sandwich'},
                       headers=auth(chef)).json()['id']
     assert client.post(f'/api/sessions/{sid}/submit', headers=auth(chef)).status_code == 200
     assert client.post(f'/api/sessions/{sid}/submit', headers=auth(chef)).status_code == 409
@@ -403,12 +459,12 @@ def test_a_dish_cannot_be_served_twice(client, chef):
 
 def test_scores_are_recomputed_server_side(client, chef):
     """The client never sends audio, so a forged signal cannot inflate a score."""
-    sid = client.post('/api/sessions', json={'recipe_id': 'toast'},
+    sid = client.post('/api/sessions', json={'recipe_id': 'sandwich'},
                       headers=auth(chef)).json()['id']
     body = client.post(f'/api/sessions/{sid}/submit', headers=auth(chef)).json()
 
     db = SessionLocal()
-    recipe = db.get(Recipe, 'toast')
+    recipe = db.get(Recipe, 'sandwich')
     db.close()
     # independently reproduce the reference dish from the recipe alone
     from app.dsp import instruments, metrics
@@ -421,16 +477,18 @@ def test_scores_are_recomputed_server_side(client, chef):
 
 # -------------------------------------------------------------- progression
 def test_clearing_tier_one_unlocks_tier_two(client, chef):
-    _play_perfectly(client, chef, 'toast')
-    _play_perfectly(client, chef, 'burger')
+    # Finished dishes (oven + cart): one served with the burnt overtone still
+    # in it no longer reaches the unlock score.
+    _play_perfectly(client, chef, 'sandwich', **_finishing('sandwich'))
+    _play_perfectly(client, chef, 'burger', **_finishing('burger'))
     profile = client.get('/api/players/me', headers=auth(chef)).json()
     assert profile['unlocked_tier'] >= 2
     assert profile['points'] > 0
 
 
 def test_points_only_come_from_beating_a_personal_best(client, chef):
-    first = _play_perfectly(client, chef, 'toast')
-    second = _play_perfectly(client, chef, 'toast')
+    first = _play_perfectly(client, chef, 'sandwich')
+    second = _play_perfectly(client, chef, 'sandwich')
     if second['score'] <= first['score']:
         assert second['points_awarded'] == 0
 
@@ -439,8 +497,8 @@ def test_points_only_come_from_beating_a_personal_best(client, chef):
 def test_leaderboards(client, chef):
     rows = client.get('/api/leaderboard').json()
     assert rows and rows[0]['rank'] == 1
-    per_recipe = client.get('/api/leaderboard?recipe_id=toast').json()
-    assert all(r['recipe_id'] == 'toast' for r in per_recipe)
+    per_recipe = client.get('/api/leaderboard?recipe_id=sandwich').json()
+    assert all(r['recipe_id'] == 'sandwich' for r in per_recipe)
     career = client.get('/api/leaderboard/global').json()
     assert career and career[0]['points'] >= career[-1]['points']
 
@@ -512,36 +570,6 @@ def test_all_18_ingredients(client):
     assert 'Pantry' in categories
 
 
-def test_beam_delivery_endpoint(client, chef):
-    from app.dsp import beamforming
-    sid = client.post('/api/sessions', json={'recipe_id': 'burger'}, headers=auth(chef)).json()['id']
-    
-    # 1. Unaligned delivery attempt
-    bad_req = {
-        'speakers': [{'id': i, 'phase': 0.0, 'amplitude': 1.0, 'is_active': True} for i in range(1, 9)],
-        'target_angle': 35.0
-    }
-    r = client.post(f'/api/sessions/{sid}/beam-delivery', json=bad_req, headers=auth(chef))
-    assert r.status_code == 200
-    res = r.json()
-    assert res['is_aligned'] is False
-    assert len(res['beam_pattern']) == 73
-
-    # 2. Aligned delivery attempt using exact phase preset
-    preset_35 = beamforming.get_preset_phases_for_angle(35.0, 8)
-    good_req = {
-        'speakers': [{'id': i + 1, 'phase': float(p), 'amplitude': 1.0, 'is_active': True}
-                     for i, p in enumerate(preset_35)],
-        'target_angle': 35.0
-    }
-    r2 = client.post(f'/api/sessions/{sid}/beam-delivery', json=good_req, headers=auth(chef))
-    assert r2.status_code == 200
-    res2 = r2.json()
-    assert res2['is_aligned'] is True
-    assert res2['accuracy'] >= 90.0
-    assert 'Bullseye' in res2['message']
-
-
 def test_the_leaderboard_shows_the_same_overall_score_as_the_score_screen(client, chef):
     """One number everywhere: dish x 10 x difficulty + time bonus, timed on the server."""
     from app import gameplay
@@ -560,5 +588,63 @@ def test_the_leaderboard_shows_the_same_overall_score_as_the_score_screen(client
 def test_run_total_scales_with_difficulty_and_time_left():
     from app.gameplay import run_total
     assert run_total(80, 'easy', 0) == (round(800 * 0.8) + 240, 240)
-    assert run_total(80, 'masterchef', 30) == (round(800 * 1.5) + 90, 90)   # 30 s left
-    assert run_total(80, 'hard', 500) == (1000, 0)                          # out of time
+    assert run_total(80, 'masterchef', 90) == (round(800 * 1.5) + 90, 90)   # 30 s of 120 left
+    assert run_total(80, 'hard', 500) == (1000, 0)                          # out of time (190 s)
+
+
+def test_only_this_seasons_runs_are_ranked(client, chef):
+    """Runs judged under older scoring rules leave the board and personal bests."""
+    from app import gameplay
+    from app.models import Attempt
+    fin = _finishing('noodles')
+    first = _play_perfectly(client, chef, 'noodles', **fin)
+    assert first['points_awarded'] > 0
+    db = _test_db()
+    old = db.query(Attempt).filter(Attempt.id == first['attempt_id']).one()
+    assert old.scoring_version == gameplay.SCORING_VERSION
+    old.scoring_version, old.score = None, 100.0          # an old, lenient run
+    db.commit()
+    db.close()
+    rows = client.get('/api/leaderboard', params={'recipe_id': 'noodles', 'difficulty': 'easy'}).json()
+    assert all(r['score'] != 100.0 for r in rows)
+    again = _play_perfectly(client, chef, 'noodles', **fin)   # old 100 is not the bar to beat
+    assert again['points_awarded'] > 0
+    profile = client.get('/api/players/me', headers=auth(chef)).json()
+    assert profile['best_scores']['noodles'] == again['score']
+
+
+def test_recipe_book_shows_a_signed_in_chefs_best(client, chef):
+    fin = _finishing('burger')
+    r = _play_perfectly(client, chef, 'burger', **fin)
+    book = client.get('/api/recipes', headers=auth(chef)).json()
+    burger = next(c for c in book if c['id'] == 'burger')
+    assert burger['best_score'] is not None and burger['best_score'] >= r['score']
+
+
+def test_timing_notes_are_relative_to_the_target(client, chef):
+    # Cake's blend target is 0.6: 0.7 is 17 % off and must be named
+    # (a fixed 0.12 limit used to stay silent about it).
+    notes = ' '.join(_play_perfectly(client, chef, 'cake', blend=0.7)['notes'])
+    assert 'Over-blended' in notes
+    notes = ' '.join(_play_perfectly(client, chef, 'cake', blend=0.61)['notes'])
+    assert 'blended' not in notes                      # within 5 %: no note
+
+
+def test_removed_recipes_are_retired(client, chef):
+    """Golden Toast, Velvet Soup, Crisp Salad, Crème Brûlée and the Grand Feast
+    are out of the recipe book; old rows are kept but inactive."""
+    book = {c['id'] for c in client.get('/api/recipes').json()}
+    assert book == {'burger', 'sandwich', 'cake', 'noodles', 'chicken-fry'}
+    stats = {r['recipe_id'] for r in client.get('/api/stats').json()['recipes']}
+    assert stats == book
+
+
+def test_server_time_limits_match_the_game_timers():
+    """The time bonus uses the same limits the in-game timer counts down from."""
+    import re
+    from pathlib import Path
+    from app.gameplay import DIFFICULTIES
+    src = (Path(__file__).resolve().parents[2] / 'frontend/src/lib/recipes.ts').read_text(encoding='utf-8')
+    for diff, (limit, _) in DIFFICULTIES.items():
+        m = re.search(rf'{diff}: \{{\s*id: "{diff}",.*?timeSeconds: (\d+)', src, re.S)
+        assert m and int(m.group(1)) == limit, diff

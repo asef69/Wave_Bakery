@@ -212,6 +212,57 @@ export function computeMixedSignal(
  * Superposition of per-ingredient samples: one ingredient passes straight
  * through; several are summed, scaled by 1/sqrt(K) and peak-limited to 0.95.
  */
+/**
+ * The mixing bowl: superposition Σ x_k scaled by 1/√K (so K ingredients are
+ * not K times louder), then normalised to a 0.95 peak. One signal passes
+ * through unchanged. Shared by the Mixing lab and the Signal Playground.
+ */
+export function superposeSamples(list: number[][], sampleCount = 401): number[] {
+  if (list.length === 1) {
+    return Array.from({ length: sampleCount }, (_, i) => list[0]![i] ?? 0);
+  }
+  const summed = new Array<number>(sampleCount).fill(0);
+  for (const ing of list) {
+    for (let i = 0; i < sampleCount; i++) summed[i] = (summed[i] ?? 0) + (ing[i] ?? 0);
+  }
+  const normFactor = 1 / Math.sqrt(Math.max(1, list.length));
+  return normalizeSamples(
+    summed.map((v) => v * normFactor),
+    0.95,
+  );
+}
+
+/**
+ * The Filtering lab's washing model (its live preview, and the offline
+ * result when there is no server): a cutoff below the ingredient's own
+ * band (idealCutoff) starts cutting the ingredient; above it, the noise that
+ * gets through grows as the cutoff opens up. Shared by the Signal Playground.
+ */
+export function washFilterPreview(
+  raw: number[],
+  clean: number[],
+  cutoff: number,
+  idealCutoff: number,
+): number[] {
+  return raw.map((r, i) => {
+    const c = clean[i] ?? 0;
+    const noise = r - c;
+    let signalGain = 1.0;
+    let noiseGain = 1.0;
+    if (cutoff < idealCutoff) {
+      // Cutoff is below the ingredient's band: attenuates the ingredient itself.
+      signalGain = Math.max(0, 1 - (idealCutoff - cutoff) / 200);
+      noiseGain = 0;
+    } else {
+      // Above it the ingredient is safe; noise shrinks as the cutoff approaches it.
+      const noiseRange = 900 - idealCutoff;
+      noiseGain = noiseRange > 0 ? (cutoff - idealCutoff) / noiseRange : 0;
+      noiseGain = Math.pow(Math.max(0, Math.min(1, noiseGain)), 1.5);
+    }
+    return c * signalGain + noise * noiseGain;
+  });
+}
+
 function mixFromSamples(
   recipeId: string,
   names: string[],
@@ -233,15 +284,9 @@ function mixFromSamples(
   if (names.length === 1) {
     samples = [...(samplesByName[names[0]!] ?? new Array<number>(sampleCount).fill(0))];
   } else {
-    const summed = new Array<number>(sampleCount).fill(0);
-    for (const name of names) {
-      const ing = samplesByName[name] ?? [];
-      for (let i = 0; i < sampleCount; i++) summed[i] = (summed[i] ?? 0) + (ing[i] ?? 0);
-    }
-    const normFactor = 1 / Math.sqrt(Math.max(1, names.length));
-    samples = normalizeSamples(
-      summed.map((v) => v * normFactor),
-      0.95,
+    samples = superposeSamples(
+      names.map((name) => samplesByName[name] ?? []),
+      sampleCount,
     );
   }
 
@@ -458,7 +503,7 @@ function curveFrame(signal: PipelineSignal): { mid: number; half: number } | nul
 
 /**
  * For stages that process the signal along its own time axis (cooking
- * convolution, chop, caramelize, oven reconstruction): the curve keeps the
+ * convolution, oven reconstruction): the curve keeps the
  * input's x-positions, and whatever the stage did to the samples
  * (output − input) is applied to the curve's height at the same instant.
  */

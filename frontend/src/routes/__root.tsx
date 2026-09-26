@@ -11,6 +11,7 @@ import { useEffect, type ReactNode } from "react";
 
 import { useTheme } from "@/lib/theme";
 import { loadChickenAudio } from "@/lib/chicken-audio";
+import { installButtonClickSfx } from "@/lib/sfx";
 import appCss from "../styles.css?url";
 
 function NotFoundComponent() {
@@ -160,6 +161,9 @@ function RootComponent() {
   useEffect(() => {
     loadChickenAudio("/sounds/chicken.wav").catch(() => {});
   }, []);
+
+  // Sound effect only: a short click on every activated button.
+  useEffect(() => installButtonClickSfx(), []);
 
   return (
     <QueryClientProvider client={queryClient}>

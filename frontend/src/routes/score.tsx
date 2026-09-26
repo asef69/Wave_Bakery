@@ -11,7 +11,6 @@ import {
 import { ChefFourier } from "@/components/game/ChefFourier";
 import { GameButton } from "@/components/game/GameButton";
 import { MiniWave } from "@/components/game/MiniWave";
-import { SignalChainDiagram } from "@/components/game/SignalChainDiagram";
 import { RecipeTimerBadge, TimeExpiredModal } from "@/components/game/RecipeTimer";
 import { SignalAudioPlayer } from "@/lib/audio";
 import { generateCustomerCritique } from "@/lib/critiques";
@@ -156,10 +155,7 @@ function ScoreScreen() {
   const deliveryVal = backendSubmitResult?.delivery_score ?? session?.deliveryAccuracy ?? null;
   const systemVal = backendSubmitResult?.system_score ?? session?.systemAccuracy ?? null;
 
-  // Chop / Caramelize count only for recipes that include those stations.
   const stageVals = [filteringVal, mixingVal, seasoningVal, marinatingVal, cookingVal];
-  if (recipe.requiresChop) stageVals.push(session?.chopAccuracy ?? 0);
-  if (recipe.requiresCaramelize) stageVals.push(session?.caramelizeAccuracy ?? 0);
   const stageAvg = stageVals.reduce((sum, v) => sum + v, 0) / stageVals.length;
 
   // Local score on the backend's scale and weights: the core dish, then the
@@ -619,11 +615,6 @@ function ScoreScreen() {
               ))}
             </div>
           </div>
-        </section>
-
-        {/* ITEM 5: End-to-End Cascaded LTI System Architecture Diagram */}
-        <section className="mt-8">
-          <SignalChainDiagram activeBlockId="cooking" />
         </section>
 
         <div className="mt-10 flex flex-wrap items-end justify-between gap-6">

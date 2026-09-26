@@ -250,7 +250,9 @@ Difficulty = Literal['easy', 'medium', 'hard', 'masterchef']
 
 class SessionCreate(BaseModel):
     recipe_id: str
-    difficulty: Difficulty | None = None
+    # Always recorded (the game's default is Easy), so a run can only ever
+    # appear on its own difficulty's board.
+    difficulty: Difficulty = 'easy'
 
 
 class ContaminantOut(BaseModel):
@@ -375,36 +377,6 @@ class SubmitResult(BaseModel):
     player_dish: SignalPayload
     target_spectrum: SpectrumPayload
     player_spectrum: SpectrumPayload
-
-
-# --------------------------------------------------------------------------
-# beam delivery / phased array
-# --------------------------------------------------------------------------
-class SpeakerStateSchema(BaseModel):
-    id: int
-    phase: float = Field(0.0, ge=-180.0, le=180.0)
-    amplitude: float = Field(1.0, ge=0.0, le=1.0)
-    is_active: bool = True
-
-
-class BeamPointSchema(BaseModel):
-    angle: float
-    intensity: float
-
-
-class BeamDeliveryRequest(BaseModel):
-    speakers: list[SpeakerStateSchema] = []
-    target_angle: float = Field(35.0, ge=-80.0, le=80.0)
-
-
-class BeamDeliveryResponse(BaseModel):
-    steered_angle: float
-    target_angle: float
-    is_aligned: bool
-    tolerance_degrees: float
-    beam_pattern: list[BeamPointSchema]
-    accuracy: float
-    message: str
 
 
 # --------------------------------------------------------------------------
@@ -554,30 +526,6 @@ class ConvolveSignalResponse(BaseModel):
     impulse_samples: list[float]
     peak: float
     rms: float
-
-
-class PhasedArrayCalcRequest(BaseModel):
-    speakers: Annotated[list[SpeakerStateSchema], Field(min_length=1, max_length=64)]
-    target_angle: float = Field(0.0, ge=-80.0, le=80.0)
-    window_type: Literal['uniform', 'hamming', 'hann', 'blackman'] = 'uniform'
-    d_over_lambda: float = Field(0.5, gt=0.0, le=2.0)
-
-
-class TableSpilloverOut(BaseModel):
-    table_id: int
-    table_name: str
-    spillover_intensity_pct: float
-
-
-class PhasedArrayCalcResponse(BaseModel):
-    steered_angle: float
-    target_angle: float
-    is_aligned: bool
-    transmission_efficiency_pct: float
-    peak_sidelobe_level_db: float
-    window_weights: list[float]
-    beam_pattern: list[BeamPointSchema]
-    table_spillovers: list[TableSpilloverOut]
 
 
 class DiagnosticItem(BaseModel):

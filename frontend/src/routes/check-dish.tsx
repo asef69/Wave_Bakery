@@ -2,7 +2,7 @@ import { Link, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Play, Pause, RotateCcw, Volume2, Sparkles, Flame } from "lucide-react";
 
-import { ServeChoiceModal } from "@/components/beamforming/ServeChoiceModal";
+import { ServeChoiceModal } from "@/components/game/ServeChoiceModal";
 import { ChefFourier } from "@/components/game/ChefFourier";
 import { GameButton } from "@/components/game/GameButton";
 import { RecipeTimerBadge, TimeExpiredModal } from "@/components/game/RecipeTimer";
@@ -409,11 +409,11 @@ function CheckDishScreen() {
           </div>
           <p className="mt-3 text-xs sm:text-sm font-mono text-muted-foreground leading-relaxed">
             The cooking heat was a little too intense! An unwanted{" "}
-            <span className="font-bold text-amber-400">burnt flavor signature</span> has appeared
-            at <span className="font-bold text-foreground">{defectHz} Hz</span>, sitting between the
-            dish's natural harmonics. Serving now leaves this slightly burnt note in the food. You can
-            take the dish to the <span className="font-bold text-primary">Precision Oven</span> to
-            suppress this cooking artifact and save the dish!
+            <span className="font-bold text-amber-400">burnt flavor signature</span> has appeared at{" "}
+            <span className="font-bold text-foreground">{defectHz} Hz</span>, sitting between the
+            dish's natural harmonics. Serving now leaves this slightly burnt note in the food. You
+            can take the dish to the <span className="font-bold text-primary">Precision Oven</span>{" "}
+            to suppress this cooking artifact and save the dish!
           </p>
         </div>
 

@@ -1,7 +1,7 @@
 """
 Dedicated DSP Router for WaveKitchen (Server-Authoritative DSP Engine).
-Performs pure signal synthesis, filtering, mixing, transformation, convolution,
-beamforming array calculations, and customer taste diagnostics.
+Performs pure signal synthesis, filtering, mixing, transformation, convolution
+and customer taste diagnostics.
 """
 from __future__ import annotations
 
@@ -10,19 +10,9 @@ from scipy import signal as sp_signal
 from fastapi import APIRouter, HTTPException, status
 
 from .. import schemas
-from ..dsp import beamforming, core as C
+from ..dsp import core as C
 
 router = APIRouter(prefix='/dsp', tags=['dsp-engine'])
-
-
-# Table layout definition for restaurant floorplan
-RESTAURANT_TABLES = [
-    {'id': 1, 'name': 'Table 1 · Window Booth', 'angle': -30.0, 'eater': 'Speedy Diner'},
-    {'id': 3, 'name': 'Table 3 · Sunlit Terrace', 'angle': -15.0, 'eater': 'Lunch Patron'},
-    {'id': 2, 'name': 'Table 2 · Ramen Counter', 'angle': 15.0, 'eater': 'Hungry Noodle Fan'},
-    {'id': 4, 'name': 'Table 4 · Center Dining Table', 'angle': 35.0, 'eater': 'Gourmet Critic'},
-    {'id': 5, 'name': 'Table 5 · VIP Celebration Lounge', 'angle': 45.0, 'eater': 'VIP Party Host'},
-]
 
 
 # --------------------------------------------------------------------------
@@ -258,101 +248,7 @@ def convolve_signal(payload: schemas.ConvolveSignalRequest):
 
 
 # --------------------------------------------------------------------------
-# 6. Phased-Array Beamforming & Windowing Calculation
-# --------------------------------------------------------------------------
-@router.post('/beamforming', response_model=schemas.PhasedArrayCalcResponse)
-def calculate_beamforming(payload: schemas.PhasedArrayCalcRequest):
-    speakers = payload.speakers
-    num_elements = len(speakers)
-    window_type = payload.window_type
-    target_angle = payload.target_angle
-    d_over_lambda = payload.d_over_lambda
-
-    # Compute window tapering weights
-    if window_type == 'hamming':
-        weights = 0.54 - 0.46 * np.cos(2.0 * np.pi * np.arange(num_elements) / max(1, num_elements - 1))
-    elif window_type == 'hann':
-        weights = 0.5 * (1.0 - np.cos(2.0 * np.pi * np.arange(num_elements) / max(1, num_elements - 1)))
-    elif window_type == 'blackman':
-        n = np.arange(num_elements)
-        N = max(1, num_elements - 1)
-        weights = 0.42 - 0.5 * np.cos(2.0 * np.pi * n / N) + 0.08 * np.cos(4.0 * np.pi * n / N)
-    else:
-        weights = np.ones(num_elements, dtype=np.float32)
-
-    weights = weights / (np.max(weights) + 1e-6)
-
-    # Extract phases
-    phases_deg = np.array([s.phase for s in speakers], dtype=np.float32)
-
-    # Calculate Array Factor over [-90, +90]
-    angles_deg = np.linspace(-90.0, 90.0, 73, dtype=np.float32)
-    theta_rad = np.radians(angles_deg)
-    phi_rad = np.radians(phases_deg)
-    center = (num_elements - 1) / 2.0
-    m_indices = np.arange(num_elements) - center
-
-    # Psi matrix: [num_elements, num_angles]
-    psi = (m_indices[:, None] * 2.0 * np.pi * d_over_lambda * np.sin(theta_rad)[None, :]
-           + phi_rad[:, None])
-    w_matrix = weights[:, None]
-
-    af_complex = np.sum(w_matrix * np.exp(1j * psi), axis=0) / np.sum(weights)
-    af_mag = np.abs(af_complex).astype(np.float32)
-
-    # Find steered angle (peak of AF)
-    steered_idx = int(np.argmax(af_mag))
-    steered_angle = float(angles_deg[steered_idx])
-
-    # Target efficiency
-    target_idx = int(np.argmin(np.abs(angles_deg - target_angle)))
-    target_eff = float(af_mag[target_idx]) * 100.0
-    is_aligned = abs(steered_angle - target_angle) <= 6.0 or target_eff >= 80.0
-
-    # Peak sidelobe level calculation in dB
-    # Find secondary peaks away from main lobe
-    peaks_idx, _ = sp_signal.find_peaks(af_mag, height=0.05, distance=5)
-    sidelobe_peaks = [af_mag[p] for p in peaks_idx if abs(angles_deg[p] - steered_angle) > 12.0]
-    if sidelobe_peaks:
-        max_sidelobe = max(sidelobe_peaks)
-        psll_db = float(20.0 * np.log10(max(1e-4, max_sidelobe / np.max(af_mag))))
-    else:
-        psll_db = -45.0 if window_type != 'uniform' else -13.3
-
-    beam_points = [
-        schemas.BeamPointSchema(angle=round(float(ang), 1), intensity=round(float(mag), 3))
-        for ang, mag in zip(angles_deg, af_mag)
-    ]
-
-    # Evaluate table spillovers
-    spillovers: list[schemas.TableSpilloverOut] = []
-    for table in RESTAURANT_TABLES:
-        t_ang = table['angle']
-        if abs(t_ang - target_angle) < 8.0:
-            continue
-        t_idx = int(np.argmin(np.abs(angles_deg - t_ang)))
-        pwr = float(af_mag[t_idx]) * 100.0
-        if pwr > 35.0:
-            spillovers.append(schemas.TableSpilloverOut(
-                table_id=table['id'],
-                table_name=table['name'],
-                spillover_intensity_pct=round(pwr, 1),
-            ))
-
-    return schemas.PhasedArrayCalcResponse(
-        steered_angle=round(steered_angle, 1),
-        target_angle=round(target_angle, 1),
-        is_aligned=is_aligned,
-        transmission_efficiency_pct=round(target_eff, 1),
-        peak_sidelobe_level_db=round(psll_db, 1),
-        window_weights=[round(float(w), 3) for w in weights],
-        beam_pattern=beam_points,
-        table_spillovers=spillovers,
-    )
-
-
-# --------------------------------------------------------------------------
-# 7. Customer Taste Critique & Diagnostic Evaluation
+# 6. Customer Taste Critique & Diagnostic Evaluation
 # --------------------------------------------------------------------------
 class CritiqueInput(schemas.BaseModel):
     recipe_id: str

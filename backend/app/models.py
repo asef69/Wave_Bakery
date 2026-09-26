@@ -188,6 +188,9 @@ class Attempt(Base):
     # difficulty + time bonus (server clock). NULL for runs from before it.
     total_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     time_bonus: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Which scoring rules produced `score` (gameplay.SCORING_VERSION). Only
+    # current-version runs are ranked; NULL = judged before versions existed.
+    scoring_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     difficulty: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
     notes: Mapped[list] = mapped_column(JSON, default=list)
     params: Mapped[dict] = mapped_column(JSON, default=dict)

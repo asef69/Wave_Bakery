@@ -28,11 +28,6 @@ PROFILES: dict[str, dict[str, float]] = {
     'cake':        dict(defect_hz=16, dish_top=6,  defect_amp=0.90, road_hz=2300, road_amp=0.90),
     'noodles':     dict(defect_hz=20, dish_top=23, defect_amp=0.90, road_hz=2900, road_amp=0.90),
     'chicken-fry': dict(defect_hz=20, dish_top=9,  defect_amp=1.00, road_hz=1700, road_amp=1.00),
-    'toast':       dict(defect_hz=15, dish_top=7,  defect_amp=0.80, road_hz=2000, road_amp=0.80),
-    'soup':        dict(defect_hz=20, dish_top=26, defect_amp=0.90, road_hz=2500, road_amp=0.90),
-    'salad':       dict(defect_hz=17, dish_top=11, defect_amp=0.90, road_hz=3100, road_amp=0.90),
-    'creme':       dict(defect_hz=14, dish_top=6,  defect_amp=1.00, road_hz=1800, road_amp=1.00),
-    'feast':       dict(defect_hz=24, dish_top=12, defect_amp=1.10, road_hz=2700, road_amp=1.10),
 }
 DEFAULT_PROFILE = dict(defect_hz=20, dish_top=12, defect_amp=0.90, road_hz=2200, road_amp=0.90)
 DELIVERY_FS = 8000.0          # true rate the road frequency is defined at

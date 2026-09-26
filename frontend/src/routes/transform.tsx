@@ -365,7 +365,14 @@ function SeasoningLab() {
                 strokeWidth="1.5"
                 opacity="0.35"
               />
-              <text x="8" y="18" fill="var(--signal)" opacity="0.55" fontSize="13" fontFamily="monospace">
+              <text
+                x="8"
+                y="18"
+                fill="var(--signal)"
+                opacity="0.55"
+                fontSize="13"
+                fontFamily="monospace"
+              >
                 +A
               </text>
               <text

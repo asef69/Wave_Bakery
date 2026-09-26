@@ -93,29 +93,6 @@ function KitchenHub() {
       chefLine: "Stretch or compress the signal to change its timing.",
       step: 5,
     },
-    ...(recipe.requiresCaramelize
-      ? [
-          {
-            id: "caramelize" as MachineId,
-            label: "Caramelize",
-            purpose: "AM modulation & carrier envelope",
-            to: "/caramelize",
-            chefLine: "Torch with high-frequency carrier wave to caramelize flavor!",
-            step: 5,
-          },
-        ]
-      : recipe.requiresChop
-        ? [
-            {
-              id: "chop" as MachineId,
-              label: "Chop / Decimate",
-              purpose: "Nyquist downsampling & anti-aliasing",
-              to: "/chop",
-              chefLine: "Chop with decimation factor while guarding against aliasing!",
-              step: 5,
-            },
-          ]
-        : []),
     {
       id: "cook",
       label: "Cook",

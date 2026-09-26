@@ -102,12 +102,12 @@ const CULINARY_DSP_BRIDGES = [
   {
     step: "6. Serving",
     icon: Radio,
-    culinary: "Contactless Dining Delivery",
-    dsp: "Phased Array Beamforming AF(θ)",
+    culinary: "Delivery Cart Suspension",
+    dsp: "Z-Plane System H(z) (Notch Filter)",
     color: "text-sky-400",
     bgColor: "bg-sky-500/10 border-sky-500/30",
     description:
-      "Acoustic waveguides levitate and steer the delicate dish directly to the diner's table.",
+      "The cart's suspension filter cancels the road vibration so the dish reaches the diner intact.",
   },
 ];
 

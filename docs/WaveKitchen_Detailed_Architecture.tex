@@ -54,7 +54,7 @@ Backend & Owns chefs (hashed passwords, tokens), sessions and attempts; regenera
 Key & Contents \\
 \midrule
 \endhead
-\file{wavebakery_recipe_session} & The run: recipe, difficulty, start/end time, every stage accuracy, every dial (seasoning, marinate, appliance, bowl, chop, caramelize, cart), final score/stars, backend session id and result. Type \fn{RecipeRunSession} in \file{lib/recipes.ts}. \\
+\file{wavebakery_recipe_session} & The run: recipe, difficulty, start/end time, every stage accuracy, every dial (seasoning, marinate, appliance, bowl, oven, cart), final score/stars, backend session id and result. Type \fn{RecipeRunSession} in \file{lib/recipes.ts}. \\
 \file{wavebakery_progress_<recipe>} & Highest unlocked level (1--9). \\
 \file{wavebakery_pipeline_<recipe>_<stage>} & A saved \fn{PipelineSignal} for stage \texttt{raw, filtered, mixed, seasoned, marinated, cooked, delivered}. \\
 \file{wavebakery_filtered_ingredients_<recipe>} & Filtered samples per washable ingredient. \\
@@ -75,10 +75,10 @@ Table & Fields that matter \\
 \midrule
 \endhead
 \texttt{players} & handle, token, scrypt \texttt{password\_hash}, points, unlocked tier. \\
-\texttt{ingredients}, \texttt{appliances}, \texttt{recipes} & Catalogue from \file{seed.py}; recipes hold targets (seasoning, blend, marinate, caramelize carrier/depth, chop factor, appliances), tier, tolerance, noise difficulty. \\
+\texttt{ingredients}, \texttt{appliances}, \texttt{recipes} & Catalogue from \file{seed.py}; recipes hold targets (seasoning, blend, marinate, appliances), tier, tolerance, noise difficulty. A recipe removed from the book stays in the table (old runs reference it) but is retired (\texttt{is\_active} false). \\
 \texttt{game\_sessions} & One run: seed, status (\texttt{active/served/abandoned}), difficulty, params (JSON). \\
 \file{session_ingredients} & Per-slot seed, contaminants, filter bands/tools, prep score, accepted. \\
-\texttt{attempts} & A served dish: score, stars, prep score, SNR, MSE, correlation, spectral similarity, points, difficulty, notes. The leaderboard's source. \\
+\texttt{attempts} & A served dish: score, stars, prep score, SNR, MSE, correlation, spectral similarity, overall score and time bonus, points, difficulty, scoring version, notes. The leaderboard's source. \\
 \bottomrule
 \end{longtable}
 
@@ -269,7 +269,7 @@ filtered signal, extra catalogue ingredients are added clean, missing ones are a
 $m=\frac{1}{\sqrt K}\sum_k \text{resize}(x_k,4096)$.
 
 % ====================================================================
-\section{Seasoning, marinating, caramelizing, chopping}
+\section{Seasoning and marinating}
 % ====================================================================
 \subsection{Seasoning --- \fn{computeSeasonedSignal}}
 \[
@@ -300,22 +300,6 @@ delays copy samples, fractional delays use the shift theorem
 \[
 Y[k]=X[k]\,e^{-j2\pi k\,d/N}\qquad(\fn{core.time_shift}).
 \]
-
-\subsection{Caramelizing --- amplitude modulation}
-Frontend (\file{routes/caramelize.tsx}): $y[n]=r[n]\bigl(1+m\cos(2\pi\tfrac{f_c}{10}t_n)\bigr)$,
-then normalised to $0.95$; \textbf{accuracy}
-$=\operatorname{clip}\bigl(100-45\tfrac{|f_c-180|}{180}-55|m-0.55|,\,10,\,100\bigr)$.
-Server (\fn{core.am_modulate}): $y(t)=x(t)\,[1+m\cos(2\pi f_c t)]$ with $t$ in seconds.
-In frequency: $Y(f)=X(f)+\tfrac m2X(f-f_c)+\tfrac m2X(f+f_c)$ --- two sidebands.
-
-\subsection{Chopping --- decimation}
-Frontend (\file{routes/chop.tsx}): zero-order-hold decimation by $M$,
-$y[n]=x\bigl[M\lfloor n/M\rfloor\bigr]$; the effective rate is $22050/M$ and ``aliasing''
-is declared when anti-aliasing is off, $M>1$ and $800f>22050/(2M)$, in which case a
-synthetic tone of $|22050/M-800f|/100$ cycles per window and amplitude 0.35 is added (a simulation, not true folding). \textbf{Accuracy}:
-$\max(20,\,100-25|M-3|)$, minus 35 (floor 15) without anti-aliasing.
-Server (\fn{core.decimate}): optional low-pass at $0.9\cdot\tfrac{F_s}{2M}$, keep every $M$-th
-sample, zero-order hold back to the original length; new Nyquist $F_s/(2M)$.
 
 % ====================================================================
 \section{Cooking --- convolution}
@@ -363,7 +347,7 @@ x_{\text{served}}[n]=x_{\text{cooked}}[n]+a_d\,\max|x_{\text{cooked}}|\,\sin\!\B
 \]
 $\rho$ is chosen so $f_d$ is an integer inside the notch slider's range and at least 1\,Hz
 from every harmonic of $f_0$ (e.g.\ burger $f_0=4$, $f_d=18$ between harmonics 16 and 20);
-$a_d$ rises with the tier (0.8, 0.9, 1.0, 1.1 for the Feast). Check Dish shows and plays
+$a_d$ rises with the tier (0.8 for Burger and Sandwich, 0.9 for Cake and Noodles, 1.0 for Chicken Fry). Check Dish shows and plays
 $x_{\text{served}}$, the oven receives it, and serving without the oven keeps it.
 
 \subsection{Maximum frequency and the Nyquist rate}
@@ -504,17 +488,22 @@ r_{xy}=\frac{\sum(x-\bar x)(y-\bar y)}{\sqrt{\sum(x-\bar x)^2\sum(y-\bar y)^2}},
 Correlation rewards the right \emph{shape}; NRMSE rewards the right \emph{level}.
 
 \subsection{Server dish score (\fn{metrics.dish_metrics})}
-Both dishes are normalised to peak $0.9$; then
+For the served dish both signals are scaled by the same factor (the reference's peak to
+$0.9$), so a level error such as over-seasoning counts; the station sub-scores compare shapes
+(each normalised to peak $0.9$). Then
 \begin{align*}
 \text{SNR}&=10\log_{10}\frac{\sum t^2}{\sum(t-p)^2}\ \text{dB}, &
 \text{corr}&=\max_\ell\frac{(t\star p)[\ell]}{\|t\|\,\|p\|}\ \ (\text{peak of the cross-correlation}),\\
 \text{spec}&=\frac{\langle T_{\text{dB}},P_{\text{dB}}\rangle}{\|T_{\text{dB}}\|\,\|P_{\text{dB}}\|}, &
-T_{\text{dB}}&=\max\bigl(20\log_{10}|T|,-80\bigr)+80,
+T_{\text{dB}}&=\max\Bigl(20\log_{10}\tfrac{|T|}{\max|T|},-40\Bigr)+40,
 \end{align*}
+with $P_{\text{dB}}$ measured against the \emph{target's} peak as well, so only the 40\,dB that make
+the dish are compared (an absolute $-80$\,dB floor made every dish score $0.98$--$1.00$).
 \[
-\text{dish}=100\Bigl(0.40\operatorname{clip}\tfrac{\text{spec}-0.75}{0.25}+0.35\operatorname{clip}(\text{corr})
+\text{dish}=100\Bigl(0.40\operatorname{clip}\tfrac{\text{spec}-0.60}{0.38}+0.35\operatorname{clip}(\text{corr})
 +0.25\operatorname{clip}\tfrac{\text{SNR}+5}{30}\Bigr)\quad(\text{each clip to }[0,1]).
 \]
+Perfect dishes measure $\text{spec}=0.984$--$0.996$; broken ones $0.5$--$0.9$.
 
 % ====================================================================
 \section{Scoring, step by step}\label{sec:scoring}
@@ -522,11 +511,11 @@ T_{\text{dB}}&=\max\bigl(20\log_{10}|T|,-80\bigr)+80,
 \subsection{During the run: stage accuracies}
 Each station calls \fn{recordStageAccuracy} (\file{lib/recipes.ts}), which clamps to $[0,100]$
 and stores it on the run session: filtering, mixing, seasoning, marinating, cooking,
-chop, caramelize, delivery (oven), system (cart). Dials are stored too and pushed to the
+delivery (oven), system (cart). Dials are stored too and pushed to the
 server by \fn{syncSessionParamsToBackend}. The payload fields are
 \fn{seasoning}, \fn{frequency}, \fn{blend}, \fn{marinate}, \fn{appliances}, \fn{bowl},
-\fn{carrier}, \fn{depth}, \fn{chop_factor}, \fn{anti_alias}, the oven settings
-\fn{oven_f0}, \fn{oven_gains}, \fn{oven_cutoff}, \fn{oven_notch}, \fn{oven_notch_on}, and the cart
+the oven settings \fn{oven_f0}, \fn{oven_gains}, \fn{oven_cutoff}, \fn{oven_notch},
+\fn{oven_notch_on}, \fn{oven_fs}, and the cart
 settings \fn{system_preset}, \fn{system_pole_radius}, \fn{system_omega} and
 \fn{system_sampling_hz}. No score is sent: the server computes every one.
 
@@ -542,25 +531,29 @@ marinating with $s^\star$ $\rightarrow$ convolution with the recipe method at $p
 \item Rebuild the player's dish: regenerate each ingredient from its seed, apply the stored
   filters, keep only the bowl, run \fn{run_pipeline} with the stored params:
   mix $\rightarrow$ season ($A$) $\rightarrow$ blend ($\alpha$) $\rightarrow$ marinate ($s$) $\rightarrow$
-  caramelize ($f_c,m$) $\rightarrow$ chop ($M$) $\rightarrow$ cook (appliances) $\rightarrow$ normalise $0.9$.
+  cook (appliances). (The server pipeline still has optional AM and decimation stages; no recipe
+  uses them, so they pass the signal through.)
 \item Finish it (\fn{finish_dish}): add the burnt overtone; if the oven was used apply its
   equaliser (oven sub-score $=$ dish score after the oven); if the cart was used add the road
   vibration and filter with $H(z)$ (cart sub-score $=$ dish score after the cart). Serving
   from Check Dish skips both, so the overtone stays.
-\item $m=$ \fn{dish_metrics}(reference final, served dish).
+\item $m=$ \fn{dish_metrics}(reference cooked dish, served dish) on a common scale.
 \item Prep average $\bar P$ over washable/contaminated ingredients (all ingredients if none).
 \item Sub-scores: filtering $=\bar P$; mixing $=$ dish score of the two mixes; transformation
   $=$ dish score of the two marinated signals; cooking $=$ dish score of
   (player's pre-cooking signal through the recipe's appliances) vs (through the player's).
-\item $\text{raw}=0.72\,m_{\text{score}}+0.28\,\bar P$ (the finishing stations count through $m$,
-  because they change the served dish itself).
+\item $\text{raw}=m_{\text{score}}\,(0.72+0.28\,\bar P/100)$: washing scales the dish score, so clean
+  prep cannot carry a ruined dish (with a perfect dish this equals $0.72\,m+0.28\,\bar P$). The
+  finishing stations count through $m$, because they change the served dish itself.
 \item Tolerance curve: $\text{score}=100\,(\text{raw}/100)^{\gamma}$,
-  $\gamma=1/\max(0.3,\text{tolerance})$ (tolerance $0.75$ for the Feast up to $1.25$ for Toast:
+  $\gamma=1/\max(0.3,\text{tolerance})$ (tolerance $0.9$ for Chicken Fry up to $1.15$ for Sandwich:
   harder recipes are graded more strictly).
 \item Stars: $\ge92\to5$, $\ge80\to4$, $\ge66\to3$, $\ge50\to2$, $\ge32\to1$, else 0.
 \item Notes (\fn{_diagnose}): named mistakes from the parameter errors (over/under-seasoned,
-  blended, marinated; wrong AM carrier or depth; wrong chop factor; aliasing; wrong appliance
-  chain; over-filtered or still-dirty ingredients).
+  blended, marinated, flagged once a dial is more than 5\,\% off its target; wrong appliance
+  chain; over-filtered or still-dirty ingredients) and the finishing stations (how much of the
+  burnt overtone the oven kept, how the cart scaled the road vibration and the dish, an unstable
+  cart, a notch aimed at the aliased sensor reading).
 \end{enumerate}
 
 \subsection{Submission (exactly once)}
@@ -572,8 +565,7 @@ judging fails the claim is released. A served session can no longer be edited.
 \subsection{What the score screen shows (\file{routes/score.tsx})}
 The player dish is the served dish: the cart's output (\texttt{served} stage), else the oven's
 output (\texttt{delivered}), else the cooked dish \emph{with} the burnt overtone. The stage
-average is the mean of filtering, mixing, seasoning, marinating and cooking, plus chop and
-caramelize for recipes that include those stations.
+average is the mean of filtering, mixing, seasoning, marinating and cooking.
 \begin{align*}
 \text{similarity}&=\text{computeSignalSimilarity}(\text{player dish},\ \text{reference dish})\\
 \text{local}&=0.5\,\text{similarity}+0.5\,\text{stageAvg}\\
@@ -604,13 +596,18 @@ Complete page (\file{routes/complete.tsx}) only displays them.
 
 \subsection{Server leaderboards (\file{backend/app/routers/leaderboard.py})}
 \begin{description}[style=nextline,leftmargin=0.6cm]
-\item[\texttt{GET /leaderboard?recipe\_id=\&difficulty=\&limit=}] All attempts ordered by
-  score (then time), de-duplicated to each chef's best, then cut to \texttt{limit}. With a
-  difficulty, attempts of that difficulty plus older attempts that have none recorded.
-\item[\texttt{GET /leaderboard/global}] Chefs ordered by career points, then best score; with
-  rank title and dishes served.
-\item[\texttt{GET /stats}] Players, sessions started, dishes served, average score, and per recipe:
-  plays, average, best and five-star rate.
+\item[\texttt{GET /leaderboard?recipe\_id=\&difficulty=\&limit=}] This season's attempts ordered by
+  overall score (then time), de-duplicated to each chef's best, then cut to \texttt{limit}
+  (at most 500). With a difficulty, only attempts of that difficulty; runs from before
+  difficulty was recorded count as Easy.
+\item[\texttt{GET /leaderboard/global}] Chefs who have served a dish, ordered by career points,
+  then best overall score this season; with rank title and dishes served.
+\item[\texttt{GET /stats}] Players, sessions started, and for this season's runs on active recipes:
+  dishes served, average score, and per recipe plays, average, best and five-star rate.
+\item[Seasons] Every attempt records the scoring rules that judged it
+  (\fn{SCORING_VERSION}). Only runs of the current version are ranked, count as personal bests
+  and towards tier unlocks, or enter the statistics; older runs stay stored, and the points and
+  tiers they earned are kept.
 \end{description}
 
 \subsection{On-device leaderboard (\file{frontend/src/lib/leaderboard.ts})}
@@ -681,7 +678,7 @@ Function & File & Mathematical role \\
 \fn{build_mask}, \fn{apply_mask}, \fn{filter_signal} & \file{dsp/core.py} & FFT-mask filtering \\
 \fn{time_scale}, \fn{time_shift} & \file{dsp/core.py} & $x(\alpha t)$, $x(t-t_0)$ \\
 \fn{convolve}, \fn{apply_system}, \fn{cascade}, \fn{frequency_response} & \file{dsp/core.py} & LTI systems \\
-\fn{am_modulate}, \fn{decimate} & \file{dsp/core.py} & AM, down-sampling \\
+\fn{am_modulate}, \fn{decimate} & \file{dsp/core.py} & AM, down-sampling (unused by the current recipes) \\
 \fn{corrupt} & \file{dsp/contamination.py} & Seeded noise \\
 \fn{synth} & \file{dsp/instruments.py} & Ingredient audio \\
 \fn{ir_comb}, \fn{ir_decay}, \fn{ir_resonator}, \fn{ir_moving_average}, \fn{ir_difference} & \file{dsp/systems.py} & Appliance $h[n]$ \\

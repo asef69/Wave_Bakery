@@ -1,5 +1,5 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import {
   Activity,
   Award,
@@ -26,6 +26,7 @@ import { formatChefDisplayName, isChefMatch, useLeaderboard } from "@/lib/leader
 import {
   DIFFICULTY_CONFIGS,
   getRecipeRunSession,
+  inflightSubmit,
   recipes,
   submitRunToBackend,
   useChefName,
@@ -60,6 +61,55 @@ const difficultyIcons: Record<RecipeDifficulty, typeof Clock> = {
   hard: Zap,
   masterchef: Flame,
 };
+
+/** Rows shown before "See all". */
+const TOP_N = 5;
+/** Everyone: the most the server returns in one request. */
+const ALL_LIMIT = 500;
+
+/**
+ * The rows to show: the top 5, plus the signed-in chef's own row when it is
+ * ranked lower (so you can always find yourself), or every row after "See all".
+ */
+function visibleRows<T>(rows: T[], showAll: boolean, isMine: (row: T) => boolean): T[] {
+  if (showAll || rows.length <= TOP_N) return rows;
+  const top = rows.slice(0, TOP_N);
+  const mine = rows.slice(TOP_N).find(isMine);
+  return mine ? [...top, mine] : top;
+}
+
+function SeeAllToggle({
+  total,
+  showAll,
+  onToggle,
+}: {
+  total: number;
+  showAll: boolean;
+  onToggle: () => void;
+}) {
+  if (total <= TOP_N) return null;
+  return (
+    <div className="flex justify-center border-t border-border/60 bg-secondary/20 px-6 py-4">
+      <GameButton
+        size="sm"
+        variant="secondary"
+        onClick={onToggle}
+        className="uppercase font-bold tracking-wider"
+      >
+        {showAll ? `Show top ${TOP_N} ↑` : `See all (${total}) ↓`}
+      </GameButton>
+    </div>
+  );
+}
+
+/** "…" between the top 5 and your own lower-ranked row. */
+function RankGap() {
+  return (
+    <div className="px-6 py-1.5 text-center font-mono text-xs text-muted-foreground" aria-hidden>
+      ⋯
+    </div>
+  );
+}
 
 function RankBadge({ rank }: { rank: number }) {
   if (rank === 1) {
@@ -109,31 +159,45 @@ function LeaderboardScreen() {
   const [analytics, setAnalytics] = useState<GlobalStats | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [backendConnected, setBackendConnected] = useState(false);
+  // Top 5 by default; "See all" lists every chef's score.
+  const [showAll, setShowAll] = useState(false);
+  useEffect(() => setShowAll(false), [viewMode, selectedRecipeId, selectedDifficulty]);
 
   // Local offline fallback
   const fallbackEntries = useLeaderboard(selectedRecipeId, selectedDifficulty, chefName);
   const selectedRecipe = recipes.find((r) => r.id === selectedRecipeId) ?? recipes[0]!;
 
+  // Only the latest request may update the board: switching recipe quickly
+  // used to let a slower, older reply overwrite the new recipe's rows.
+  const requestIdRef = useRef(0);
   const fetchBackendData = async () => {
+    const requestId = ++requestIdRef.current;
+    const isLatest = () => requestId === requestIdRef.current;
     setIsLoading(true);
+    // Drop the previous recipe's rows at once; a failed request used to leave
+    // them on screen under the newly selected recipe's name.
+    if (viewMode === "recipe") setBackendRows(null);
     try {
       if (viewMode === "recipe") {
-        const rows = await api.getLeaderboard(selectedRecipeId, 30, selectedDifficulty);
+        const rows = await api.getLeaderboard(selectedRecipeId, ALL_LIMIT, selectedDifficulty);
+        if (!isLatest()) return;
         setBackendRows(rows);
         setBackendConnected(true);
       } else if (viewMode === "global") {
-        const rows = await api.getGlobalRanking(30);
+        const rows = await api.getGlobalRanking(ALL_LIMIT);
+        if (!isLatest()) return;
         setGlobalRows(rows);
         setBackendConnected(true);
       } else if (viewMode === "analytics") {
         const stats = await api.getStats();
+        if (!isLatest()) return;
         setAnalytics(stats);
         setBackendConnected(true);
       }
     } catch {
-      setBackendConnected(false);
+      if (isLatest()) setBackendConnected(false);
     } finally {
-      setIsLoading(false);
+      if (isLatest()) setIsLoading(false);
     }
   };
 
@@ -161,6 +225,25 @@ function LeaderboardScreen() {
     retryPendingSubmit();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Arriving straight from the score screen while its submit is still on its
+  // way: reload the board once the server has the run (it used to load
+  // without it and never update).
+  const fetchRef = useRef(fetchBackendData);
+  fetchRef.current = fetchBackendData;
+  useEffect(() => {
+    let live = true;
+    inflightSubmit()?.then((result) => {
+      if (live && result) void fetchRef.current();
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  // A chef who is not signed in only has runs on this device; show them
+  // (separately) even while the server's board is available.
+  const signedIn = Boolean(api.getToken());
 
   useEffect(() => {
     fetchBackendData();
@@ -389,9 +472,9 @@ function LeaderboardScreen() {
                     </span>
                   </div>
                   <p className="font-mono text-[10px] tracking-wider text-muted-foreground uppercase">
-                    {backendRows && backendRows.length > 0
-                      ? `${backendRows.length} Authoritative Entries`
-                      : `${fallbackEntries.length} Local Entries`}
+                    {backendConnected
+                      ? `${backendRows?.length ?? 0} Authoritative Entries`
+                      : `${fallbackEntries.length} Local Entries (offline)`}
                   </p>
                 </div>
 
@@ -414,101 +497,125 @@ function LeaderboardScreen() {
 
                 {backendRows && backendRows.length > 0 ? (
                   <div className="divide-y divide-border/60">
-                    {backendRows.map((entry) => {
-                      const isCurrentPlayer = isChefMatch(entry.handle, chefName);
+                    {visibleRows(backendRows, showAll, (e) => isChefMatch(e.handle, chefName)).map(
+                      (entry, idx) => {
+                        const isCurrentPlayer = isChefMatch(entry.handle, chefName);
 
-                      return (
-                        <div
-                          key={`${entry.player_id}-${entry.created_at}`}
-                          className={cn(
-                            "flex flex-wrap items-center justify-between gap-4 px-6 py-4 transition-colors",
-                            isCurrentPlayer
-                              ? "bg-primary/15 border-l-4 border-l-primary shadow-xs"
-                              : "hover:bg-secondary/30",
-                          )}
-                        >
-                          <div className="flex items-center gap-4">
-                            <RankBadge rank={entry.rank} />
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-display text-base font-extrabold text-foreground">
-                                  {formatChefDisplayName(entry.handle)}
-                                </span>
-                                {isCurrentPlayer && (
-                                  <span className="rounded-full bg-primary px-2 py-0.5 font-mono text-[9px] font-extrabold text-primary-foreground uppercase shadow-xs">
-                                    YOU
-                                  </span>
-                                )}
+                        return (
+                          <Fragment key={`${entry.player_id}-${entry.created_at}`}>
+                            {idx === TOP_N && <RankGap />}
+                            <div
+                              className={cn(
+                                "flex flex-wrap items-center justify-between gap-4 px-6 py-4 transition-colors",
+                                isCurrentPlayer
+                                  ? "bg-primary/15 border-l-4 border-l-primary shadow-xs"
+                                  : "hover:bg-secondary/30",
+                              )}
+                            >
+                              <div className="flex items-center gap-4">
+                                <RankBadge rank={entry.rank} />
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-display text-base font-extrabold text-foreground">
+                                      {formatChefDisplayName(entry.handle)}
+                                    </span>
+                                    {isCurrentPlayer && (
+                                      <span className="rounded-full bg-primary px-2 py-0.5 font-mono text-[9px] font-extrabold text-primary-foreground uppercase shadow-xs">
+                                        YOU
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="font-mono text-[10px] text-muted-foreground">
+                                    {"⭐".repeat(entry.stars)} ·{" "}
+                                    {new Date(entry.created_at).toLocaleDateString()}
+                                    {entry.difficulty ? "" : " · difficulty not recorded"}
+                                  </p>
+                                </div>
                               </div>
-                              <p className="font-mono text-[10px] text-muted-foreground">
-                                {"⭐".repeat(entry.stars)} ·{" "}
-                                {new Date(entry.created_at).toLocaleDateString()}
-                                {entry.difficulty ? "" : " · difficulty not recorded"}
-                              </p>
-                            </div>
-                          </div>
 
-                          <div className="flex items-center gap-6 text-right">
-                            <div>
-                              <p className="font-display text-xl font-extrabold text-gradient-warm">
-                                {entry.total_score ?? Math.round(entry.score * 10)}
-                              </p>
-                              <p className="font-mono text-[10px] text-muted-foreground">
-                                Authoritative Score · dish {entry.score}%
-                              </p>
+                              <div className="flex items-center gap-6 text-right">
+                                <div>
+                                  <p className="font-display text-xl font-extrabold text-gradient-warm">
+                                    {entry.total_score ?? Math.round(entry.score * 10)}
+                                  </p>
+                                  <p className="font-mono text-[10px] text-muted-foreground">
+                                    Authoritative Score · dish {entry.score}%
+                                  </p>
+                                </div>
+                              </div>
                             </div>
-                          </div>
-                        </div>
-                      );
-                    })}
+                          </Fragment>
+                        );
+                      },
+                    )}
+                    <SeeAllToggle
+                      total={backendRows.length}
+                      showAll={showAll}
+                      onToggle={() => setShowAll((v) => !v)}
+                    />
                   </div>
-                ) : fallbackEntries.length > 0 ? (
+                ) : isLoading && !backendRows ? (
+                  <div className="p-10 text-center font-mono text-sm text-muted-foreground">
+                    Loading scores…
+                  </div>
+                ) : !backendConnected && fallbackEntries.length > 0 ? (
+                  // This device's own runs, only while the server is unreachable
+                  // (they used to show whenever the server's board was empty).
                   <div className="divide-y divide-border/60">
-                    {fallbackEntries.map((entry) => {
+                    {visibleRows(fallbackEntries, showAll, (e) =>
+                      isChefMatch(e.chefName, chefName),
+                    ).map((entry, idx) => {
                       const isCurrentPlayer = isChefMatch(entry.chefName, chefName);
 
                       return (
-                        <div
-                          key={entry.id}
-                          className={cn(
-                            "flex flex-wrap items-center justify-between gap-4 px-6 py-4 transition-colors",
-                            isCurrentPlayer
-                              ? "bg-primary/15 border-l-4 border-l-primary shadow-xs"
-                              : "hover:bg-secondary/30",
-                          )}
-                        >
-                          <div className="flex items-center gap-4">
-                            <RankBadge rank={entry.rank} />
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-display text-base font-extrabold text-foreground">
-                                  {formatChefDisplayName(entry.chefName)}
-                                </span>
-                                {isCurrentPlayer && (
-                                  <span className="rounded-full bg-primary px-2 py-0.5 font-mono text-[9px] font-extrabold text-primary-foreground uppercase shadow-xs">
-                                    YOU
+                        <Fragment key={entry.id}>
+                          {idx === TOP_N && <RankGap />}
+                          <div
+                            className={cn(
+                              "flex flex-wrap items-center justify-between gap-4 px-6 py-4 transition-colors",
+                              isCurrentPlayer
+                                ? "bg-primary/15 border-l-4 border-l-primary shadow-xs"
+                                : "hover:bg-secondary/30",
+                            )}
+                          >
+                            <div className="flex items-center gap-4">
+                              <RankBadge rank={entry.rank} />
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-display text-base font-extrabold text-foreground">
+                                    {formatChefDisplayName(entry.chefName)}
                                   </span>
-                                )}
+                                  {isCurrentPlayer && (
+                                    <span className="rounded-full bg-primary px-2 py-0.5 font-mono text-[9px] font-extrabold text-primary-foreground uppercase shadow-xs">
+                                      YOU
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="font-mono text-[10px] text-muted-foreground">
+                                  Time Left: {entry.timeRemaining} · {entry.date}
+                                </p>
                               </div>
-                              <p className="font-mono text-[10px] text-muted-foreground">
-                                Time Left: {entry.timeRemaining} · {entry.date}
-                              </p>
                             </div>
-                          </div>
 
-                          <div className="flex items-center gap-6 text-right">
-                            <div>
-                              <p className="font-display text-xl font-extrabold text-gradient-warm">
-                                {entry.score}
-                              </p>
-                              <p className="font-mono text-[10px] text-muted-foreground">
-                                {entry.accuracy}% Match
-                              </p>
+                            <div className="flex items-center gap-6 text-right">
+                              <div>
+                                <p className="font-display text-xl font-extrabold text-gradient-warm">
+                                  {entry.score}
+                                </p>
+                                <p className="font-mono text-[10px] text-muted-foreground">
+                                  {entry.accuracy}% Match
+                                </p>
+                              </div>
                             </div>
                           </div>
-                        </div>
+                        </Fragment>
                       );
                     })}
+                    <SeeAllToggle
+                      total={fallbackEntries.length}
+                      showAll={showAll}
+                      onToggle={() => setShowAll((v) => !v)}
+                    />
                   </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center p-12 text-center">
@@ -531,6 +638,39 @@ function LeaderboardScreen() {
                 )}
               </div>
             </section>
+
+            {backendConnected && !signedIn && fallbackEntries.length > 0 && (
+              <section className="mt-6">
+                <div className="kitchen-card overflow-hidden p-0">
+                  <div className="flex items-center justify-between border-b border-border/80 bg-secondary/40 px-6 py-3">
+                    <p className="font-display text-sm font-extrabold text-foreground uppercase">
+                      Your runs on this device
+                    </p>
+                    <p className="font-mono text-[10px] tracking-wider text-muted-foreground uppercase">
+                      Not signed in · not on the server
+                    </p>
+                  </div>
+                  <div className="divide-y divide-border/60">
+                    {fallbackEntries.map((entry) => (
+                      <div
+                        key={entry.id}
+                        className="flex flex-wrap items-center justify-between gap-4 px-6 py-3"
+                      >
+                        <span className="font-display text-sm font-extrabold text-foreground">
+                          {formatChefDisplayName(entry.chefName)}
+                        </span>
+                        <span className="font-mono text-[10px] text-muted-foreground">
+                          Time Left: {entry.timeRemaining} · {entry.date}
+                        </span>
+                        <span className="font-display text-lg font-extrabold text-gradient-warm">
+                          {entry.score}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </section>
+            )}
           </>
         )}
 
@@ -552,51 +692,61 @@ function LeaderboardScreen() {
 
               {globalRows && globalRows.length > 0 ? (
                 <div className="divide-y divide-border/60">
-                  {globalRows.map((chef) => {
-                    const isCurrent = isChefMatch(chef.handle, chefName);
-                    return (
-                      <div
-                        key={chef.player_id}
-                        className={cn(
-                          "flex flex-wrap items-center justify-between gap-4 px-6 py-4 transition-colors",
-                          isCurrent
-                            ? "bg-primary/15 border-l-4 border-l-primary"
-                            : "hover:bg-secondary/30",
-                        )}
-                      >
-                        <div className="flex items-center gap-4">
-                          <RankBadge rank={chef.rank} />
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-display text-base font-extrabold text-foreground">
-                                {formatChefDisplayName(chef.handle)}
-                              </span>
-                              <span className="rounded-md border border-primary/30 bg-primary/10 px-2 py-0.5 font-mono text-[10px] font-bold text-primary">
-                                {chef.rank_title}
-                              </span>
-                              {isCurrent && (
-                                <span className="rounded-full bg-primary px-2 py-0.5 font-mono text-[9px] font-extrabold text-primary-foreground uppercase shadow-xs">
-                                  YOU
-                                </span>
-                              )}
+                  {visibleRows(globalRows, showAll, (c) => isChefMatch(c.handle, chefName)).map(
+                    (chef, idx) => {
+                      const isCurrent = isChefMatch(chef.handle, chefName);
+                      return (
+                        <Fragment key={chef.player_id}>
+                          {idx === TOP_N && <RankGap />}
+                          <div
+                            className={cn(
+                              "flex flex-wrap items-center justify-between gap-4 px-6 py-4 transition-colors",
+                              isCurrent
+                                ? "bg-primary/15 border-l-4 border-l-primary"
+                                : "hover:bg-secondary/30",
+                            )}
+                          >
+                            <div className="flex items-center gap-4">
+                              <RankBadge rank={chef.rank} />
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-display text-base font-extrabold text-foreground">
+                                    {formatChefDisplayName(chef.handle)}
+                                  </span>
+                                  <span className="rounded-md border border-primary/30 bg-primary/10 px-2 py-0.5 font-mono text-[10px] font-bold text-primary">
+                                    {chef.rank_title}
+                                  </span>
+                                  {isCurrent && (
+                                    <span className="rounded-full bg-primary px-2 py-0.5 font-mono text-[9px] font-extrabold text-primary-foreground uppercase shadow-xs">
+                                      YOU
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="font-mono text-[10px] text-muted-foreground">
+                                  {chef.dishes_served} Dishes Served · Best Dish this season:{" "}
+                                  {chef.best_score > 0 ? `${chef.best_score} pts` : "—"}
+                                </p>
+                              </div>
                             </div>
-                            <p className="font-mono text-[10px] text-muted-foreground">
-                              {chef.dishes_served} Dishes Served · Best Dish: {chef.best_score} pts
-                            </p>
-                          </div>
-                        </div>
 
-                        <div className="text-right">
-                          <p className="font-display text-2xl font-extrabold text-gradient-warm">
-                            {chef.points}
-                          </p>
-                          <p className="font-mono text-[10px] text-muted-foreground uppercase">
-                            Lifetime Points
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })}
+                            <div className="text-right">
+                              <p className="font-display text-2xl font-extrabold text-gradient-warm">
+                                {chef.points}
+                              </p>
+                              <p className="font-mono text-[10px] text-muted-foreground uppercase">
+                                Lifetime Points
+                              </p>
+                            </div>
+                          </div>
+                        </Fragment>
+                      );
+                    },
+                  )}
+                  <SeeAllToggle
+                    total={globalRows.length}
+                    showAll={showAll}
+                    onToggle={() => setShowAll((v) => !v)}
+                  />
                 </div>
               ) : (
                 <div className="p-10 text-center font-mono text-sm text-muted-foreground">
@@ -639,7 +789,7 @@ function LeaderboardScreen() {
                   Hardest Dish
                 </p>
                 <p className="font-display text-lg font-extrabold text-rose-500 truncate">
-                  {analytics?.hardest_recipe ?? "Grand Feast"}
+                  {analytics?.hardest_recipe ?? "—"}
                 </p>
               </div>
             </div>

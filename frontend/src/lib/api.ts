@@ -3,7 +3,7 @@
  *
  * Connects the frontend with the FastAPI backend running on port 8000.
  * Server owns DSP calculations, state, spectrograms, convolutions,
- * dish judging, score evaluations, and phased array beamforming.
+ * dish judging and score evaluations.
  */
 
 // In dev, always hit the backend directly rather than relying on Vite's
@@ -97,8 +97,6 @@ export interface GameSessionOut {
   status: "in_prep" | "cooked" | "served" | "abandoned";
   params: Record<string, unknown>;
   items: SessionItemOut[];
-  requires_caramelize: boolean;
-  requires_chop: boolean;
 }
 
 export interface FilterBand {
@@ -156,10 +154,6 @@ export interface CookParams {
   blend?: number;
   frequency?: number;
   marinate?: number;
-  carrier?: number | null;
-  depth?: number | null;
-  chop_factor?: number | null;
-  anti_alias?: boolean;
   appliances?: string[];
   cooking_method?: string | null;
   bowl?: string[] | null;
@@ -285,28 +279,6 @@ export interface PlayerHistoryRow {
   stars: number;
   points_awarded: number;
   created_at: string;
-}
-
-export interface SpeakerState {
-  id: number;
-  phase: number;
-  amplitude?: number;
-  is_active?: boolean;
-}
-
-export interface BeamDeliveryRequest {
-  speakers: SpeakerState[];
-  target_angle: number;
-}
-
-export interface BeamDeliveryResponse {
-  steered_angle: number;
-  target_angle: number;
-  is_aligned: boolean;
-  tolerance_degrees: number;
-  beam_pattern: Array<{ angle: number; intensity: number }>;
-  accuracy: number;
-  message: string;
 }
 
 class ApiClient {
@@ -546,16 +518,6 @@ class ApiClient {
     });
   }
 
-  async beamDelivery(
-    sessionId: string,
-    payload: BeamDeliveryRequest,
-  ): Promise<BeamDeliveryResponse> {
-    return this.request<BeamDeliveryResponse>(`/sessions/${sessionId}/beam-delivery`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-  }
-
   // Leaderboard
   async getLeaderboard(
     recipeId?: string,
@@ -661,30 +623,6 @@ class ApiClient {
       peak: number;
       rms: number;
     }>("/dsp/convolve", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-  }
-
-  async calculateBeamforming(payload: {
-    speakers: Array<{ id: number; phase: number; amplitude?: number; is_active?: boolean }>;
-    target_angle?: number;
-    window_type?: string;
-  }) {
-    return this.request<{
-      steered_angle: number;
-      target_angle: number;
-      is_aligned: boolean;
-      transmission_efficiency_pct: number;
-      peak_sidelobe_level_db: number;
-      window_weights: number[];
-      beam_pattern: Array<{ angle: number; intensity: number }>;
-      table_spillovers: Array<{
-        table_id: number;
-        table_name: string;
-        spillover_intensity_pct: number;
-      }>;
-    }>("/dsp/beamforming", {
       method: "POST",
       body: JSON.stringify(payload),
     });

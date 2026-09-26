@@ -25,6 +25,7 @@ import {
   useActiveRecipe,
   useRecipeProgress,
   useSelectedIngredients,
+  washFilterPreview,
 } from "@/lib/recipes";
 import { getMathematicalSignal, parametricPath } from "@/lib/signals";
 import { cn } from "@/lib/utils";
@@ -662,29 +663,10 @@ function FilteringLab() {
   // backend session exists. Once the filter is actually applied and the
   // server responds, the real backend result (backendFilteredPlot) takes
   // over as the displayed/saved filtered signal.
-  const localFilteredSamples = useMemo(() => {
-    return rawSamples.map((raw, i) => {
-      const clean = cleanSamples[i] ?? 0;
-      const noise = raw - clean;
-
-      let signalGain = 1.0;
-      let noiseGain = 1.0;
-
-      if (cutoff < current.idealCutoff) {
-        // Cutoff is below signal fundamental: attenuates the main signal
-        signalGain = Math.max(0, 1 - (current.idealCutoff - cutoff) / 200);
-        noiseGain = 0;
-      } else {
-        // Cutoff is above signal: signal is safe, noise gets reduced as cutoff approaches ideal
-        const noiseRange = 900 - current.idealCutoff;
-        noiseGain = noiseRange > 0 ? (cutoff - current.idealCutoff) / noiseRange : 0;
-        // Non-linear decay for smoother visual
-        noiseGain = Math.pow(Math.max(0, Math.min(1, noiseGain)), 1.5);
-      }
-
-      return clean * signalGain + noise * noiseGain;
-    });
-  }, [rawSamples, cleanSamples, cutoff, current.idealCutoff]);
+  const localFilteredSamples = useMemo(
+    () => washFilterPreview(rawSamples, cleanSamples, cutoff, current.idealCutoff),
+    [rawSamples, cleanSamples, cutoff, current.idealCutoff],
+  );
 
   const filteredSamples =
     applied && backendFilteredPlot && backendFilteredPlot.length > 0

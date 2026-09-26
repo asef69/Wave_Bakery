@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { LogOut } from "lucide-react";
 
 import { ChefFourier } from "@/components/game/ChefFourier";
@@ -63,7 +63,11 @@ function SettingsScreen() {
 
   // Sync external volume updates
   useEffect(() => {
-    setSettings((prev) => (prev.masterVolume !== soundSettings.volume ? { ...prev, masterVolume: soundSettings.volume } : prev));
+    setSettings((prev) =>
+      prev.masterVolume !== soundSettings.volume
+        ? { ...prev, masterVolume: soundSettings.volume }
+        : prev,
+    );
   }, [soundSettings.volume]);
 
   const updateSetting = <K extends keyof SettingsState>(key: K, value: SettingsState[K]) => {

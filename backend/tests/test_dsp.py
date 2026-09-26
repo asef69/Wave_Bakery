@@ -171,33 +171,6 @@ def test_signal_transport_roundtrips():
     assert np.allclose(C.decode(C.encode(x)), x, atol=1e-6)
 
 
-def test_beamforming_phased_array_steering():
-    from app.dsp import beamforming
-    # 0 degree target -> all phases 0
-    zero_speakers = [{'id': i, 'phase': 0.0, 'is_active': True} for i in range(1, 9)]
-    assert beamforming.calculate_beam_angle(zero_speakers) == 0.0
-
-    # Test preset for +35 degrees
-    preset_35 = beamforming.get_preset_phases_for_angle(35.0, 8)
-    spk_35 = [{'id': i + 1, 'phase': p, 'is_active': True} for i, p in enumerate(preset_35)]
-    steered = beamforming.calculate_beam_angle(spk_35)
-    assert beamforming.check_beam_alignment(steered, 35.0, 6.0)
-
-    # Array factor peak should be bounded in [0, 1]
-    angles = np.linspace(-90, 90, 181)
-    af = beamforming.array_factor(angles, np.array(preset_35, dtype=float))
-    assert len(af) == 181
-    assert 0.0 <= np.max(af) <= 1.0001
-    assert np.isfinite(af).all()
-
-    # Pattern points
-    points = beamforming.generate_beam_pattern(35.0, 73)
-    assert len(points) == 73
-    assert points[0]['angle'] == -90.0
-    assert points[-1]['angle'] == 90.0
-    assert any(p['intensity'] > 0.9 for p in points)
-
-
 def test_cooley_tukey_fft_roundtrip_and_parseval():
     N = 256
     n = np.arange(N)
@@ -420,18 +393,3 @@ def test_t9_scoring_metrics():
     cos_tone = np.cos(2 * np.pi * 4 * np.arange(N) / N).astype(np.float32)
     r_ortho = metrics.normalized_cross_correlation(sin_tone, cos_tone)
     assert abs(r_ortho) < 0.01
-
-
-def test_t10_beamforming_math():
-    """T10: Verify phase steering vector generates maximum constructive interference at target angle."""
-    from app.dsp import beamforming
-    target_deg = 35.0
-    preset = beamforming.get_preset_phases_for_angle(target_deg, 8)
-    spk = [{'id': i + 1, 'phase': p, 'is_active': True} for i, p in enumerate(preset)]
-    steered = beamforming.calculate_beam_angle(spk)
-    assert abs(steered - target_deg) < 5.0
-
-    phys_phases = beamforming.get_physical_steering_phases(target_deg, 8)
-    af_peak = beamforming.array_factor(np.array([target_deg]), np.array(phys_phases, dtype=float))
-    assert af_peak[0] > 0.99
-

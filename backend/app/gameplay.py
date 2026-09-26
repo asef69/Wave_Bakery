@@ -342,7 +342,10 @@ def judge(db: DbSession, session: GameSession) -> dict:
     correctly_cooked = pipeline.stage_cook(stages['chopped'], list(recipe.appliances or []))
     cooking_score = round(metrics.dish_metrics(correctly_cooked, stages['cooked'])['score'], 2)
 
-    raw = 0.72 * m['score'] + 0.28 * prep_avg
+    # Washing scales the dish instead of being added to it: clean prep can
+    # no longer carry a ruined dish (+28 points at any dish quality). With a
+    # perfect dish this equals the old 0.72·m + 0.28·prep.
+    raw = m['score'] * (0.72 + 0.28 * prep_avg / 100.0)
 
     gamma = 1.0 / max(0.3, recipe.tolerance or 1.0)
     score = float(np.clip(100.0 * (raw / 100.0) ** gamma, 0, 100))
@@ -364,23 +367,33 @@ def judge(db: DbSession, session: GameSession) -> dict:
     }
 
 
+# Seasoning / blend / marinate notes appear once a dial is this far off its
+# target (relative), or past its old absolute limit, whichever is smaller.
+NOTE_REL_TOL = 0.05
+
+
 def _diagnose(session: GameSession, recipe: Recipe, signals: list[dict]) -> list[str]:
     """Feedback that names the signal processing cause, not the symptom."""
     p = session.params or {}
     notes: list[str] = []
 
+    def off(value: float, target: float, abs_tol: float) -> bool:
+        # Relative to the target (a fixed 0.12 hid a 17 % blend error on a
+        # 0.6 target), and never less sensitive than the old absolute limit.
+        return abs(value - target) > min(abs_tol, NOTE_REL_TOL * abs(target))
+
     d = p.get('seasoning', 0) - recipe.seasoning
-    if abs(d) > 0.12:
+    if off(p.get('seasoning', 0), recipe.seasoning, 0.12):
         notes.append('Over-seasoned — amplitude scaling too high.' if d > 0
                      else 'Under-seasoned — amplitude scaling too low.')
 
     d = p.get('blend', 1.0) - recipe.blend
-    if abs(d) > 0.12:
+    if off(p.get('blend', 1.0), recipe.blend, 0.12):
         notes.append('Over-blended — the signal is compressed too far in time.' if d > 0
                      else 'Under-blended — the signal is still too stretched.')
 
     d = p.get('marinate', 0.0) - recipe.marinate
-    if abs(d) > 0.03:
+    if off(p.get('marinate', 0.0), recipe.marinate, 0.03):
         notes.append('Marinated too long — excess time shift.' if d > 0
                      else 'Not marinated enough — the time shift is too small.')
 
@@ -413,10 +426,25 @@ def _diagnose(session: GameSession, recipe: Recipe, signals: list[dict]) -> list
     return notes
 
 
-# Time limit (s) and score multiplier per difficulty — DIFFICULTY_CONFIGS in
-# frontend/src/lib/recipes.ts and DIFFICULTY_MULTIPLIERS in routes/score.tsx.
+# The scoring rules a run was judged under. Only runs of the current version
+# ("the season") count on the leaderboard, for personal bests, tier-unlock
+# progress and analytics, so nothing ranked mixes two scoring scales. Older
+# runs stay in the database; chef points and tiers they earned are kept.
+#   1 (or NULL): dB-spectrum with an absolute -80 dB floor; washing added
+#   2: dB-spectrum relative to the target (40 dB); washing scales the dish
+SCORING_VERSION = 2
+
+
+def in_season():
+    """SQL condition: the attempt was judged under the current scoring rules."""
+    from .models import Attempt
+    return Attempt.scoring_version == SCORING_VERSION
+
+
+# Time limit (s) and score multiplier per difficulty — DIFFICULTY_CONFIGS and
+# DIFFICULTY_MULTIPLIERS in frontend/src/lib/recipes.ts (keep them identical).
 DIFFICULTIES: dict[str, tuple[int, float]] = {
-    'easy': (300, 0.8), 'medium': (210, 1.0), 'hard': (120, 1.25), 'masterchef': (60, 1.5),
+    'easy': (420, 0.8), 'medium': (300, 1.0), 'hard': (190, 1.25), 'masterchef': (120, 1.5),
 }
 MAX_TIME_BONUS = 300    # before difficulty: 30 % of a perfect 1000-point base
 
@@ -461,9 +489,11 @@ def maybe_unlock(db: DbSession, player: Player) -> None:
         select(func.count(func.distinct(Attempt.recipe_id)))
         .where(Attempt.player_id == player.id,
                Attempt.recipe_id.in_(recipe_ids),
-               Attempt.score >= config.TIER_UNLOCK_SCORE)
+               Attempt.score >= config.TIER_UNLOCK_SCORE,
+               in_season())
     ).scalar_one()
     needed = min(config.TIER_UNLOCK_COUNT, len(recipe_ids))
     if cleared >= needed:
-        max_tier = db.query(func.max(Recipe.tier)).scalar() or tier
+        max_tier = (db.query(func.max(Recipe.tier))
+                    .filter(Recipe.is_active.is_(True)).scalar() or tier)
         player.unlocked_tier = min(int(max_tier), tier + 1)

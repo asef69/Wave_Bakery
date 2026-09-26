@@ -450,8 +450,8 @@ function PrecisionOvenScreen() {
               </h1>
               <p className="text-sm text-muted-foreground">
                 The cooking process was slightly too intense, leaving an unwanted burnt flavor
-                signature. Isolate the cooking-induced spectral component and notch it out to restore
-                balance!
+                signature. Isolate the cooking-induced spectral component and notch it out to
+                restore balance!
               </p>
             </div>
 
@@ -488,8 +488,8 @@ function PrecisionOvenScreen() {
         <div className="rounded-xl border border-primary/30 bg-primary/5 px-5 py-3.5 text-xs font-mono text-muted-foreground shadow-sm">
           <span className="font-bold text-primary uppercase mr-2">CSE220 Technical Context:</span>
           Cooking is modeled as convolution with the appliance&apos;s impulse response $(x ∗ h)(t)$.
-          The intense cooking process produces an unwanted cooking-induced spectral component.
-          The Precision Oven uses frequency-domain filtering $(H[k] \cdot X[k])$ and IFFT reconstruction
+          The intense cooking process produces an unwanted cooking-induced spectral component. The
+          Precision Oven uses frequency-domain filtering $(H[k] \cdot X[k])$ and IFFT reconstruction
           to suppress that component while preserving the rest of the dish.
         </div>
 
@@ -508,8 +508,8 @@ function PrecisionOvenScreen() {
                   Find the Safe Sampling Rate ($f_s$)
                 </h2>
                 <p className="text-sm text-muted-foreground">
-                  To isolate and remove the overcooking artifact, the oven sensor must sample the dish
-                  fast enough to avoid aliasing. Find the safe Nyquist rate!
+                  To isolate and remove the overcooking artifact, the oven sensor must sample the
+                  dish fast enough to avoid aliasing. Find the safe Nyquist rate!
                 </p>
               </div>
 
@@ -932,7 +932,9 @@ function PrecisionOvenScreen() {
                   Suppress the Burnt Flavor Signature
                 </h2>
                 <p className="text-sm text-muted-foreground">
-                  Compare your cooked dish spectrum against the ideal target. Notice the unwanted cooking artifact? Tune the notch filter to suppress it while keeping the dish&apos;s authentic flavors intact!
+                  Compare your cooked dish spectrum against the ideal target. Notice the unwanted
+                  cooking artifact? Tune the notch filter to suppress it while keeping the
+                  dish&apos;s authentic flavors intact!
                 </p>
               </div>
 

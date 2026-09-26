@@ -21,6 +21,7 @@ import {
   useRecipeProgress,
 } from "@/lib/recipes";
 import { invalidateDownstreamStages } from "@/lib/pipeline";
+import { nudgeCookingSfx, startCookingSfx, stopCookingSfx } from "@/lib/sfx";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/cooking")({
@@ -121,6 +122,26 @@ function CookingLab() {
 
   const currentMethod = method ?? requiredMethod;
   const currentPos = pos > 0 ? pos : alreadyCompleted ? 100 : 0;
+
+  // Sound effect only: the method's cooking sound plays while the convolution
+  // slider is held/dragged and stops on release (anywhere) or on leaving.
+  const sfxHeldRef = useRef(false);
+  useEffect(() => {
+    const release = () => {
+      if (!sfxHeldRef.current) return;
+      sfxHeldRef.current = false;
+      stopCookingSfx();
+    };
+    window.addEventListener("pointerup", release);
+    window.addEventListener("pointercancel", release);
+    window.addEventListener("blur", release);
+    return () => {
+      window.removeEventListener("pointerup", release);
+      window.removeEventListener("pointercancel", release);
+      window.removeEventListener("blur", release);
+      stopCookingSfx();
+    };
+  }, []);
 
   const convolvedSignal = useMemo(() => {
     return computeConvolvedSignal(
@@ -486,11 +507,14 @@ function CookingLab() {
               onPointerDown={() => {
                 userModifiedRef.current = true;
                 setShowDragCue(false);
+                sfxHeldRef.current = true;
+                startCookingSfx(currentMethod.id);
               }}
               onChange={(e) => {
                 userModifiedRef.current = true;
                 setShowDragCue(false);
                 setPos(Number(e.target.value));
+                if (!sfxHeldRef.current) nudgeCookingSfx(currentMethod.id);
               }}
               className="mt-3 w-full cursor-grab accent-[oklch(0.72_0.17_50)] active:cursor-grabbing"
               aria-label="Impulse response position"
@@ -549,6 +573,9 @@ function CookingLab() {
                 if (!method) setMethod(requiredMethod);
                 setPos(100);
                 setCooked(true);
+                // Sound effect only: this convolves in one step, so play the
+                // method's cooking sound briefly as it does.
+                nudgeCookingSfx((method ?? requiredMethod).id, 1500);
               }}
             >
               {isCookingComplete ? "✓ Dish Cooked" : "Cook Dish"}

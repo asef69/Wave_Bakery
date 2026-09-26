@@ -111,7 +111,7 @@ def me(player: Player = Depends(current_player), db: Session = Depends(get_db)):
     served = db.query(func.count(Attempt.id)).filter(
         Attempt.player_id == player.id).scalar() or 0
     rows = db.query(Attempt.recipe_id, func.max(Attempt.score)).filter(
-        Attempt.player_id == player.id).group_by(Attempt.recipe_id).all()
+        Attempt.player_id == player.id, gameplay.in_season()).group_by(Attempt.recipe_id).all()
 
     return schemas.PlayerProfile(
         **schemas.PlayerOut.model_validate(player).model_dump(),

@@ -381,7 +381,8 @@ export function SystemResponsePlotter({
                   ✓ Notch damping: 0.85 (fixed)
                 </p>
                 <p className="text-[11px] text-muted-foreground mt-0.5">
-                  Pre-calibrated safely inside the unit circle (|z| &lt; 1.0) so the cart won&apos;t resonate out of control.
+                  Pre-calibrated safely inside the unit circle (|z| &lt; 1.0) so the cart won&apos;t
+                  resonate out of control.
                 </p>
               </div>
             ) : preset === "resonator2" ? (
@@ -533,10 +534,12 @@ export function SystemResponsePlotter({
               </div>
               <div className="flex items-center gap-3 font-mono text-[10px] text-muted-foreground uppercase">
                 <span className="flex items-center gap-1 text-amber-400 font-bold">
-                  <span className="h-2 w-2 rounded-full bg-amber-400 inline-block animate-ping" /> Target Vibration
+                  <span className="h-2 w-2 rounded-full bg-amber-400 inline-block animate-ping" />{" "}
+                  Target Vibration
                 </span>
                 <span className="flex items-center gap-1 text-primary font-bold">
-                  <span className="h-2 w-2 rounded-full border border-primary inline-block" /> Your Filter
+                  <span className="h-2 w-2 rounded-full border border-primary inline-block" /> Your
+                  Filter
                 </span>
               </div>
             </div>
@@ -679,7 +682,11 @@ export function SystemResponsePlotter({
                       fill="oklch(0.2 0.03 250)"
                       stroke="#3b82f6"
                       strokeWidth="3.5"
-                      className={info.draggable === "zero" ? "cursor-grab active:cursor-grabbing hover:scale-125 transition-transform" : undefined}
+                      className={
+                        info.draggable === "zero"
+                          ? "cursor-grab active:cursor-grabbing hover:scale-125 transition-transform"
+                          : undefined
+                      }
                     />
                   );
                 })}
@@ -690,7 +697,11 @@ export function SystemResponsePlotter({
                   return (
                     <g
                       key={`pole-${idx}`}
-                      className={info.draggable === "pole" ? "cursor-grab active:cursor-grabbing hover:scale-125 transition-transform" : undefined}
+                      className={
+                        info.draggable === "pole"
+                          ? "cursor-grab active:cursor-grabbing hover:scale-125 transition-transform"
+                          : undefined
+                      }
                     >
                       <line
                         x1={pt.x - 6}
@@ -714,10 +725,22 @@ export function SystemResponsePlotter({
                   );
                 })}
 
-                <text x="175" y="95" fill="var(--muted-foreground)" fontSize="9" fontFamily="monospace">
+                <text
+                  x="175"
+                  y="95"
+                  fill="var(--muted-foreground)"
+                  fontSize="9"
+                  fontFamily="monospace"
+                >
                   Re
                 </text>
-                <text x="105" y="22" fill="var(--muted-foreground)" fontSize="9" fontFamily="monospace">
+                <text
+                  x="105"
+                  y="22"
+                  fill="var(--muted-foreground)"
+                  fontSize="9"
+                  fontFamily="monospace"
+                >
                   Im
                 </text>
               </svg>
@@ -764,14 +787,12 @@ export function SystemResponsePlotter({
                   <span className="font-mono text-[10px] font-extrabold uppercase text-amber-400 flex items-center gap-1">
                     <span>🚚</span> BEFORE
                   </span>
-                  <span className="font-mono text-[9px] text-muted-foreground">Vibrating Signal</span>
+                  <span className="font-mono text-[9px] text-muted-foreground">
+                    Vibrating Signal
+                  </span>
                 </div>
                 <div className="rounded-lg bg-black/40 p-1.5 border border-border/50">
-                  <MiniWave
-                    samples={dishSignal}
-                    height={55}
-                    color="#f59e0b"
-                  />
+                  <MiniWave samples={dishSignal} height={55} color="#f59e0b" />
                 </div>
               </div>
 
@@ -781,14 +802,12 @@ export function SystemResponsePlotter({
                   <span className="font-mono text-[10px] font-extrabold uppercase text-primary flex items-center gap-1">
                     <span>🚚</span> AFTER
                   </span>
-                  <span className="font-mono text-[9px] text-muted-foreground">Smoother Signal</span>
+                  <span className="font-mono text-[9px] text-muted-foreground">
+                    Smoother Signal
+                  </span>
                 </div>
                 <div className="rounded-lg bg-black/40 p-1.5 border border-border/50">
-                  <MiniWave
-                    samples={equalizedSignal}
-                    height={55}
-                    color="var(--signal)"
-                  />
+                  <MiniWave samples={equalizedSignal} height={55} color="var(--signal)" />
                 </div>
               </div>
             </div>
@@ -798,7 +817,12 @@ export function SystemResponsePlotter({
               {/* Animated Cart */}
               <div className="flex items-center gap-3">
                 <div className="h-10 w-14 flex items-center justify-center overflow-visible">
-                  <svg width="60" height="40" viewBox="0 0 140 100" className="overflow-visible select-none">
+                  <svg
+                    width="60"
+                    height="40"
+                    viewBox="0 0 140 100"
+                    className="overflow-visible select-none"
+                  >
                     <g
                       style={
                         isStable
@@ -814,15 +838,43 @@ export function SystemResponsePlotter({
                       }
                     >
                       {/* Dish */}
-                      <ellipse cx={70} cy={38} rx={22} ry={7} fill="oklch(0.9 0.02 90)" stroke="oklch(0.6 0.02 90)" />
+                      <ellipse
+                        cx={70}
+                        cy={38}
+                        rx={22}
+                        ry={7}
+                        fill="oklch(0.9 0.02 90)"
+                        stroke="oklch(0.6 0.02 90)"
+                      />
                       <circle cx={70} cy={36} r={9} fill="oklch(0.78 0.16 55)" />
                       {/* Tray */}
-                      <rect x={38} y={44} width={64} height={10} rx={3} fill="oklch(0.52 0.07 45)" />
+                      <rect
+                        x={38}
+                        y={44}
+                        width={64}
+                        height={10}
+                        rx={3}
+                        fill="oklch(0.52 0.07 45)"
+                      />
                       {/* Post */}
                       <rect x={66} y={54} width={8} height={16} fill="oklch(0.4 0.06 42)" />
                       {/* Wheels */}
-                      <circle cx={52} cy={76} r={8} fill="oklch(0.24 0.03 250)" stroke="oklch(0.78 0.02 80)" strokeWidth={2} />
-                      <circle cx={88} cy={76} r={8} fill="oklch(0.24 0.03 250)" stroke="oklch(0.78 0.02 80)" strokeWidth={2} />
+                      <circle
+                        cx={52}
+                        cy={76}
+                        r={8}
+                        fill="oklch(0.24 0.03 250)"
+                        stroke="oklch(0.78 0.02 80)"
+                        strokeWidth={2}
+                      />
+                      <circle
+                        cx={88}
+                        cy={76}
+                        r={8}
+                        fill="oklch(0.24 0.03 250)"
+                        stroke="oklch(0.78 0.02 80)"
+                        strokeWidth={2}
+                      />
                     </g>
                     {/* Floor line */}
                     <line x1={10} y1={86} x2={130} y2={86} stroke="var(--border)" strokeWidth={2} />
@@ -830,7 +882,11 @@ export function SystemResponsePlotter({
                 </div>
                 <div className="font-mono text-[11px] leading-tight">
                   <p className="font-bold text-foreground">
-                    {accuracy >= 90 ? "Smooth Roll" : isStable ? "Cart Rattling" : "Resonance Danger!"}
+                    {accuracy >= 90
+                      ? "Smooth Roll"
+                      : isStable
+                        ? "Cart Rattling"
+                        : "Resonance Danger!"}
                   </p>
                   <p className="text-muted-foreground text-[10px]">
                     {accuracy >= 90
@@ -864,7 +920,9 @@ export function SystemResponsePlotter({
                     className="flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-1.5 font-display text-xs font-black uppercase text-primary-foreground shadow-sm hover:bg-primary/90 transition-all cursor-pointer"
                   >
                     <Volume2 className="h-3.5 w-3.5" />
-                    <span>{isPlaying && audioMode === "after" ? "Pause" : "🔊 Listen to result"}</span>
+                    <span>
+                      {isPlaying && audioMode === "after" ? "Pause" : "🔊 Listen to result"}
+                    </span>
                   </button>
                 )}
               </div>
@@ -906,7 +964,8 @@ export function SystemResponsePlotter({
               </p>
               <p className="leading-relaxed">
                 For this causal cart, the ROC is |z| &gt; r. The system is Bounded-Input
-                Bounded-Output (BIBO) stable if and only if the ROC includes the unit circle (|z| = 1).
+                Bounded-Output (BIBO) stable if and only if the ROC includes the unit circle (|z| =
+                1).
               </p>
               <p className="font-bold text-foreground uppercase tracking-wide pt-2">
                 Impulse Response Divergence
@@ -923,11 +982,18 @@ export function SystemResponsePlotter({
             {/* Frequency Response |H| */}
             <div className="rounded-xl border border-border/70 bg-secondary/40 p-4 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-foreground uppercase">Frequency Response |H(e^jw)|</span>
+                <span className="font-bold text-foreground uppercase">
+                  Frequency Response |H(e^jw)|
+                </span>
                 <span className="text-[10px] text-primary">0 to {Math.round(nyquistHz)} Hz</span>
               </div>
               <div className="flex justify-center py-1">
-                <svg width="220" height="120" viewBox="0 0 200 120" className="overflow-visible select-none">
+                <svg
+                  width="220"
+                  height="120"
+                  viewBox="0 0 200 120"
+                  className="overflow-visible select-none"
+                >
                   <rect x="0" y="0" width="200" height="110" fill="oklch(0.2 0.03 250)" rx="6" />
                   {/* Magnitude curve */}
                   <path
@@ -961,7 +1027,9 @@ export function SystemResponsePlotter({
             {/* Radix-2 FFT Spectrum */}
             <div className="rounded-xl border border-border/70 bg-secondary/40 p-4 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-foreground uppercase">Radix-2 FFT Output Spectrum</span>
+                <span className="font-bold text-foreground uppercase">
+                  Radix-2 FFT Output Spectrum
+                </span>
                 <span className="text-[10px] text-muted-foreground">33 Bins</span>
               </div>
               <div className="h-24 flex items-end gap-1 border-b border-border/80 pb-1">

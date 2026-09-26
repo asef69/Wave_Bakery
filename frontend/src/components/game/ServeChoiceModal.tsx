@@ -61,7 +61,8 @@ export function ServeChoiceModal({ isOpen, onClose, recipeName }: ServeChoiceMod
                   Serve As-Is
                 </h4>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Plate the cooked dish as-is with its slight overcooking note, and proceed directly to tasting and scoring.
+                  Plate the cooked dish as-is with its slight overcooking note, and proceed directly
+                  to tasting and scoring.
                 </p>
               </div>
 
@@ -87,7 +88,9 @@ export function ServeChoiceModal({ isOpen, onClose, recipeName }: ServeChoiceMod
                   </span>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  The intense cooking heat left an unwanted burnt flavor signature. Use the Precision Oven's frequency-domain filtering to suppress the burnt component and restore flavor balance.
+                  The intense cooking heat left an unwanted burnt flavor signature. Use the
+                  Precision Oven's frequency-domain filtering to suppress the burnt component and
+                  restore flavor balance.
                 </p>
               </div>
 

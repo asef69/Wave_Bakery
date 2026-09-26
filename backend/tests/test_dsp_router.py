@@ -95,24 +95,6 @@ def test_convolve_signal():
     assert len(data['impulse_samples']) > 0
 
 
-def test_beamforming_calculation():
-    speakers = [
-        {'id': i, 'phase': (i - 3.5) * 20.0, 'amplitude': 1.0, 'is_active': True}
-        for i in range(8)
-    ]
-    res = client.post('/api/dsp/beamforming', json={
-        'speakers': speakers,
-        'target_angle': 30.0,
-        'window_type': 'hamming',
-    })
-    assert res.status_code == 200
-    data = res.json()
-    assert 'steered_angle' in data
-    assert 'window_weights' in data
-    assert len(data['beam_pattern']) == 73
-    assert len(data['window_weights']) == 8
-
-
 def test_critique_evaluation():
     res = client.post('/api/dsp/critique', json={
         'recipe_id': 'burger',

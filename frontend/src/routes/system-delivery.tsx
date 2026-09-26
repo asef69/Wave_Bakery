@@ -169,9 +169,8 @@ function SystemDeliveryLab() {
       audioPlayer.destroy();
       setAudioPlayer(null);
     }
-    const p = new CookedSignalAudioPlayer(
-      { ...cookedSignal, samples: targetSamples },
-      (state) => setPlaybackState(state),
+    const p = new CookedSignalAudioPlayer({ ...cookedSignal, samples: targetSamples }, (state) =>
+      setPlaybackState(state),
     );
     setAudioPlayer(p);
     p.play();
@@ -284,9 +283,12 @@ function SystemDeliveryLab() {
 
             {/* Compact Chef Fourier speech line */}
             <div className="flex items-center gap-3 rounded-2xl border border-primary/30 bg-primary/5 px-4 py-2.5 max-w-md">
-              <span className="text-2xl" aria-hidden>👨‍🍳</span>
+              <span className="text-2xl" aria-hidden>
+                👨‍🍳
+              </span>
               <p className="font-mono text-xs text-muted-foreground italic">
-                &ldquo;The cart is rattling! Find the vibration and cancel it before we serve.&rdquo;
+                &ldquo;The cart is rattling! Find the vibration and cancel it before we
+                serve.&rdquo;
               </p>
             </div>
           </div>

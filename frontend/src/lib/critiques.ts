@@ -1,6 +1,6 @@
 /**
  * Dynamic Culinary & DSP Diagnostic System (WaveBakery)
- * Evaluates dish parameters across filtering, mixing, transformation, convolution, and beamforming,
+ * Evaluates dish parameters across filtering, mixing, transformation, convolution and delivery,
  * generating authentic eater critiques and actionable signal-engineering guidance.
  */
 

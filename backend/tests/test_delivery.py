@@ -55,3 +55,17 @@ def test_finishing_notes_name_what_went_wrong():
     assert 'overtone left in' in ' '.join(D.finishing_notes('burger', dict(perfect, oven_notch_on=False)))
     aliased = dict(perfect, system_omega=D.sensed_road_omega('burger', 1200), system_sampling_hz=1200)
     assert 'aliased sensor reading' in ' '.join(D.finishing_notes('burger', aliased))
+
+
+def test_the_spectral_measure_tells_a_broken_dish_from_a_perfect_one():
+    # The old measure (absolute -80 dB floor) gave every dish 0.98-1.00.
+    recipe = next(r for r in RECIPES if r['id'] == 'sandwich')
+    ref = _reference(recipe)
+    scale = D.hz_per_game_hz('sandwich', ref, ref.size)
+    good = dict(oven_f0=9.0, oven_gains=[1.0, 1.0, 1.0], oven_cutoff=26.0,
+                oven_notch=D.profile('sandwich')['defect_hz'], oven_notch_on=True)
+    broken = dict(good, oven_notch=10.0, oven_gains=[2.5, 2.5, 0.8])    # a real run's settings
+    s = lambda p: metrics.spectral_similarity(ref, D.bake(ref, 'sandwich', scale, p))
+    assert s(good) > 0.98
+    assert s(broken) < 0.9
+    assert metrics.dish_metrics(ref, D.bake(ref, "sandwich", scale, broken), common_scale=True)["score"] < 60

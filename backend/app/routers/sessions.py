@@ -10,7 +10,6 @@ from __future__ import annotations
 import random
 from datetime import datetime
 
-import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -48,7 +47,8 @@ def _session_payload(db: Session, session: GameSession,
                      player: Player) -> schemas.SessionOut:
     r: Recipe = session.recipe
     best = (db.query(func.max(Attempt.score))
-            .filter(Attempt.player_id == player.id, Attempt.recipe_id == r.id)
+            .filter(Attempt.player_id == player.id, Attempt.recipe_id == r.id,
+                    gameplay.in_season())
             .scalar())
     card = schemas.RecipeCard(
         id=r.id, name=r.name, emoji=r.emoji,
@@ -281,9 +281,11 @@ def submit(session: GameSession = Depends(owned_session),
         verdict = gameplay.judge(db, session)
         recipe: Recipe = session.recipe
 
+        # Personal best this season (older runs were judged by other rules).
         previous_best = (db.query(func.max(Attempt.score))
                          .filter(Attempt.player_id == player.id,
-                                 Attempt.recipe_id == recipe.id).scalar())
+                                 Attempt.recipe_id == recipe.id,
+                                 gameplay.in_season()).scalar())
         # Runs on a tier the chef hasn't unlocked are ranked but earn nothing.
         tier_unlocked = recipe.tier <= player.unlocked_tier
         points = (gameplay.award(db, player, recipe, verdict['score'], previous_best)
@@ -301,6 +303,7 @@ def submit(session: GameSession = Depends(owned_session),
             correlation=m['correlation'], spectral_similarity=m['spectral_similarity'],
             points_awarded=points, difficulty=session.difficulty,
             total_score=total, time_bonus=bonus,
+            scoring_version=gameplay.SCORING_VERSION,
             notes=verdict['notes'], params=session.params or {})
         db.add(attempt)
 
@@ -342,42 +345,3 @@ def submit(session: GameSession = Depends(owned_session),
         player_dish=schemas.SignalPayload(**gameplay.signal_payload(player_final)),
         target_spectrum=schemas.SpectrumPayload(**gameplay.spectrum_payload(target_final)),
         player_spectrum=schemas.SpectrumPayload(**gameplay.spectrum_payload(player_final)))
-
-
-# --------------------------------------------------------------------------
-# phased array beam delivery
-# --------------------------------------------------------------------------
-@router.post('/{session_id}/beam-delivery', response_model=schemas.BeamDeliveryResponse)
-def beam_delivery(payload: schemas.BeamDeliveryRequest,
-                  session: GameSession = Depends(owned_session)):
-    """
-    Validate acoustic beam delivery via linear speaker array phase alignment.
-    Constructive interference steers the dish signal to the target table angle.
-    """
-    from ..dsp import beamforming
-
-    speakers_data = [s.model_dump() for s in payload.speakers]
-    steered = beamforming.calculate_beam_angle(speakers_data)
-    target = payload.target_angle
-    tolerance = 6.0
-    aligned = beamforming.check_beam_alignment(steered, target, tolerance)
-
-    diff = abs(steered - target)
-    accuracy = float(np.clip(100.0 - (diff / max(1.0, abs(target))) * 100.0 * 1.2, 0.0, 100.0))
-
-    pattern = beamforming.generate_beam_pattern(steered)
-    points = [schemas.BeamPointSchema(**p) for p in pattern]
-
-    if aligned:
-        msg = f'Bullseye! The {session.recipe.name} signal rode the acoustic beam directly to the table at {target:+.0f}°!'
-    else:
-        msg = f'Beam steered to {steered:+.0f}°, missing target at {target:+.0f}°. Adjust phase delays to focus interference.'
-
-    return schemas.BeamDeliveryResponse(
-        steered_angle=steered,
-        target_angle=target,
-        is_aligned=aligned,
-        tolerance_degrees=tolerance,
-        beam_pattern=points,
-        accuracy=round(accuracy, 1),
-        message=msg)

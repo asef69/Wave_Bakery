@@ -202,12 +202,12 @@ describe("Signal Continuity & Canonical Fingerprint Suite", () => {
 
   describe("Exact Numerical Signal Continuity & Stage Hand-offs", () => {
     it("Single ingredient mixing preserves EXACT numerical equality with source", () => {
-      const toastRecipe = recipes.find((r) => r.id === "toast")!;
-      const rawCheese = getRecipeIngredientSamples(toastRecipe.id, "Cheese", {
+      const burgerRecipe = recipes.find((r) => r.id === "burger")!;
+      const rawCheese = getRecipeIngredientSamples(burgerRecipe.id, "Cheese", {
         sampleCount: 401,
         seed: 0, // phase 0, as Generate/Filtering/Mixing display it
       });
-      const mixedOne = computeMixedSignal(toastRecipe.id, ["Cheese"], 401);
+      const mixedOne = computeMixedSignal(burgerRecipe.id, ["Cheese"], 401);
 
       expect(mixedOne.samples.length).toBe(rawCheese.length);
       for (let i = 0; i < 401; i++) {
@@ -273,8 +273,8 @@ describe("Signal Continuity & Canonical Fingerprint Suite", () => {
 
   describe("Intentional DSP Transformation Verification", () => {
     it("Seasoning applies linear amplitude scaling accurately", () => {
-      const toastRecipe = recipes.find((r) => r.id === "toast")!;
-      const mixed = computeMixedSignal(toastRecipe.id, ["Cheese"], 401);
+      const burgerRecipe = recipes.find((r) => r.id === "burger")!;
+      const mixed = computeMixedSignal(burgerRecipe.id, ["Cheese"], 401);
       const seasoned = computeSeasonedSignal(mixed, 0.5, 1.0, 401);
 
       expect(seasoned.samples.length).toBe(401);
@@ -284,8 +284,8 @@ describe("Signal Continuity & Canonical Fingerprint Suite", () => {
     });
 
     it("Marinating applies time delay with zero padding", () => {
-      const toastRecipe = recipes.find((r) => r.id === "toast")!;
-      const mixed = computeMixedSignal(toastRecipe.id, ["Cheese"], 401);
+      const burgerRecipe = recipes.find((r) => r.id === "burger")!;
+      const mixed = computeMixedSignal(burgerRecipe.id, ["Cheese"], 401);
       const marinated = computeMarinatedSignal(mixed, 0.2, 401);
 
       expect(marinated.samples.length).toBe(401);
@@ -296,7 +296,7 @@ describe("Signal Continuity & Canonical Fingerprint Suite", () => {
   });
 
   describe("End-to-End Pipeline Invariant (401 Samples & Non-Degeneracy)", () => {
-    it("Verifies all 10 recipes maintain 401 samples and 100% self-similarity match", () => {
+    it("Verifies every recipe maintains 401 samples and 100% self-similarity match", () => {
       for (const recipe of recipes) {
         const ideal = getIdealDishSignal(recipe.id, 401);
         expect(ideal.samples.length).toBe(401);

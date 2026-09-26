@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import case, desc, func, or_
+from sqlalchemy import and_, case, desc, func, or_
 from sqlalchemy.orm import Session
 
 from .. import gameplay, schemas
@@ -24,20 +24,24 @@ def _total_of(attempt: Attempt) -> int:
 @router.get('/leaderboard', response_model=list[schemas.LeaderboardRow])
 def leaderboard(recipe_id: str | None = Query(None),
                 difficulty: schemas.Difficulty | None = Query(None),
-                limit: int = Query(20, ge=1, le=100),
+                limit: int = Query(20, ge=1, le=500),
                 db: Session = Depends(get_db)):
     """Best single dish per player, globally or for one recipe (and difficulty)."""
     q = (db.query(Attempt, Player.handle, Recipe.name)
          .join(Player, Player.id == Attempt.player_id)
-         .join(Recipe, Recipe.id == Attempt.recipe_id))
+         .join(Recipe, Recipe.id == Attempt.recipe_id)
+         .filter(gameplay.in_season()))
     if recipe_id:
         if db.get(Recipe, recipe_id) is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, 'No such recipe.')
         q = q.filter(Attempt.recipe_id == recipe_id)
-    if difficulty:
-        # Runs from before difficulty was recorded (NULL) stay visible in
-        # every difficulty view rather than vanishing from the board.
-        q = q.filter(or_(Attempt.difficulty == difficulty, Attempt.difficulty.is_(None)))
+    if difficulty == 'easy':
+        # Runs from before difficulty was recorded (NULL) were played on the
+        # game's default, Easy, and are scored as Easy. They used to appear on
+        # every difficulty's board at once.
+        q = q.filter(or_(Attempt.difficulty == 'easy', Attempt.difficulty.is_(None)))
+    elif difficulty:
+        q = q.filter(Attempt.difficulty == difficulty)
 
     # No row cap before de-duplicating: `limit * 4` let one chef's many runs
     # fill the window and push other chefs off the board.
@@ -62,15 +66,17 @@ def leaderboard(recipe_id: str | None = Query(None),
 
 
 @router.get('/leaderboard/global', response_model=list[schemas.GlobalRankRow])
-def global_ranking(limit: int = Query(20, ge=1, le=100),
+def global_ranking(limit: int = Query(20, ge=1, le=500),
                    db: Session = Depends(get_db)):
     """Career table: cumulative points, chef rank, dishes served."""
     rows = (db.query(Player,
                      func.count(Attempt.id).label('served'),
-                     func.coalesce(func.max(_TOTAL), 0).label('best'))
-            .outerjoin(Attempt, Attempt.player_id == Player.id)
+                     # best dish this season (lifetime points and dishes served)
+                     func.coalesce(func.max(case((gameplay.in_season(), _TOTAL))), 0)
+                     .label('best'))
+            .join(Attempt, Attempt.player_id == Player.id)   # chefs who served a dish
             .group_by(Player.id)
-            .order_by(desc(Player.points), desc('best'))
+            .order_by(desc(Player.points), desc('best'), Player.handle)
             .limit(limit).all())
     out = []
     for i, (player, served, best) in enumerate(rows, start=1):
@@ -87,15 +93,17 @@ def stats(db: Session = Depends(get_db)):
     """Kitchen analytics — which dishes are actually hard, and how hard."""
     players = db.query(func.count(Player.id)).scalar() or 0
     started = db.query(func.count(GameSession.id)).scalar() or 0
-    served = db.query(func.count(Attempt.id)).scalar() or 0
-    avg = db.query(func.avg(Attempt.score)).scalar()
+    # This season's runs only (see gameplay.SCORING_VERSION).
+    served = db.query(func.count(Attempt.id)).filter(gameplay.in_season()).scalar() or 0
+    avg = db.query(func.avg(Attempt.score)).filter(gameplay.in_season()).scalar()
 
     rows = (db.query(Recipe.id, Recipe.name, Recipe.tier,
                      func.count(Attempt.id),
                      func.avg(Attempt.score),
                      func.max(Attempt.score),
                      func.sum(case((Attempt.stars == 5, 1), else_=0)))
-            .outerjoin(Attempt, Attempt.recipe_id == Recipe.id)
+            .outerjoin(Attempt, and_(Attempt.recipe_id == Recipe.id, gameplay.in_season()))
+            .filter(Recipe.is_active.is_(True))          # retired recipes are not analysed
             .group_by(Recipe.id)
             .order_by(Recipe.tier, Recipe.name).all())
 

@@ -78,10 +78,27 @@ def compute_signal_similarity(player: np.ndarray, target: np.ndarray) -> float:
     return round(float(np.clip(score * 100.0, 0.0, 100.0)), 2)
 
 
-def spectral_similarity(a: np.ndarray, b: np.ndarray) -> float:
-    n = C.next_pow2(max(a.size, b.size))
-    A = C.magnitude_db(C.magnitude(a, n), -80.0) + 80.0
-    B = C.magnitude_db(C.magnitude(b, n), -80.0) + 80.0
+# Dynamic range (dB below the target's strongest bin) the spectra are compared over.
+SPECTRAL_RANGE_DB = 40.0
+
+
+def spectral_similarity(target: np.ndarray, player: np.ndarray) -> float:
+    """
+    Cosine similarity of the two dB magnitude spectra, each measured relative
+    to the TARGET's strongest bin and floored SPECTRAL_RANGE_DB below it, so
+    the comparison covers the part of the spectrum that makes the dish.
+    (An absolute -80 dB floor let the near-silent bins dominate: every dish,
+    ruined or perfect, scored 0.98-1.00.)
+    """
+    n = C.next_pow2(max(target.size, player.size))
+    mt = C.magnitude(target, n).astype(np.float64)
+    mp = C.magnitude(player, n).astype(np.float64)
+    ref = float(mt.max()) if mt.size else 0.0
+    if ref < 1e-12:
+        return 0.0
+    fl = SPECTRAL_RANGE_DB
+    A = np.maximum(-fl, 20 * np.log10(mt / ref + 1e-12)) + fl
+    B = np.maximum(-fl, 20 * np.log10(mp / ref + 1e-12)) + fl
     na, nb = float(np.dot(A, A)), float(np.dot(B, B))
     if na < 1e-12 or nb < 1e-12:
         return 0.0
@@ -111,7 +128,8 @@ def dish_metrics(target: np.ndarray, player: np.ndarray, common_scale: bool = Fa
 
     snr_score = float(np.clip((snr + 5) / 30.0, 0, 1))     # -5 dB .. 25 dB
     corr_score = float(np.clip(corr, 0, 1))
-    spec_score = float(np.clip((spec - 0.75) / 0.25, 0, 1))
+    # Perfect dishes measure 0.984-0.996; broken ones 0.5-0.9.
+    spec_score = float(np.clip((spec - 0.60) / (0.98 - 0.60), 0, 1))
 
     score = 100.0 * (0.40 * spec_score + 0.35 * corr_score + 0.25 * snr_score)
     return {

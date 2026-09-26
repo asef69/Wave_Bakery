@@ -84,10 +84,6 @@ export type Recipe = {
   cookingMethod: CookingMethod;
   washableIngredients: string[];
   steps: RecipeStep[];
-  requiresChop?: boolean;
-  requiresCaramelize?: boolean;
-  chopTarget?: number;
-  caramelizeTarget?: { carrier: number; depth: number };
 };
 
 export const recipes: Recipe[] = [
@@ -545,338 +541,6 @@ export const recipes: Recipe[] = [
       },
     ],
   },
-  {
-    id: "toast",
-    name: "GOLDEN TOAST",
-    tagline: "Your first shift. One ingredient, one oven.",
-    pageNumber: 6,
-    prepTime: "2 mins",
-    servings: "1 slice",
-    tier: 1,
-    difficulty: "Easy",
-    ingredients: ["Cheese"],
-    ingredientDetails: [
-      {
-        name: "Cheese",
-        instrument: "Mathematical Signal",
-        // Same as the global ingredient list (what Generate shows); 4 here
-        // made Toast's cheese a different waveform in the pipeline.
-        freq: 6,
-        washable: false,
-        kind: "cheese",
-      },
-    ],
-    pipeline: ["GENERATE", "FILTER", "MIX", "AMPLITUDE", "TIME SCALE", "CONVOLUTION", "COMPARE"],
-    progress: "new",
-    bestScore: null,
-    stars: 0,
-    seasoningTarget: { amplitude: 1.0, frequency: 1.0 },
-    marinateTarget: { timeScale: 1.0 },
-    cookingMethod: { id: "bake", name: "BAKE", icon: "🍞", ir: "BAKE (gentle warm decay)" },
-    washableIngredients: [],
-    steps: [
-      {
-        stepNumber: "01",
-        icon: "🥣",
-        action: "MIX",
-        instruction: "Place golden cheese slices onto toast",
-        technicalLabel: "SUPERPOSITION",
-      },
-      {
-        stepNumber: "02",
-        icon: "🍞",
-        action: "COOK",
-        instruction: "Bake gently in the oven",
-        technicalLabel: "CONVOLUTION · BAKE",
-      },
-    ],
-  },
-  {
-    id: "soup",
-    name: "VELVET SOUP",
-    tagline: "Blend it smooth, then let it ring in the pot.",
-    pageNumber: 7,
-    prepTime: "6 mins",
-    servings: "1 bowl",
-    tier: 2,
-    difficulty: "Medium",
-    ingredients: ["Onion", "Salt", "Butter"],
-    ingredientDetails: [
-      {
-        name: "Onion",
-        instrument: "Parametric Signal",
-        freq: 6,
-        washable: true,
-        idealCutoff: 640,
-        kind: "onion",
-      },
-      { name: "Salt", instrument: "Mathematical Signal", freq: 12, washable: false, kind: "salt" },
-      {
-        name: "Butter",
-        instrument: "Mathematical Signal",
-        freq: 3,
-        washable: false,
-        kind: "butter",
-      },
-    ],
-    pipeline: ["GENERATE", "FILTER", "MIX", "AMPLITUDE", "TIME SCALE", "CONVOLUTION", "COMPARE"],
-    progress: "new",
-    bestScore: null,
-    stars: 0,
-    seasoningTarget: { amplitude: 0.65, frequency: 0.7 },
-    marinateTarget: { timeScale: 1.05 },
-    cookingMethod: { id: "boil", name: "BOIL", icon: "🍲", ir: "BOIL (resonant broth)" },
-    washableIngredients: ["Onion"],
-    steps: [
-      {
-        stepNumber: "01",
-        icon: "🧼",
-        action: "WASH / FILTER",
-        instruction: "Clean aromatic onions",
-        technicalLabel: "SPECTRAL FILTERING",
-      },
-      {
-        stepNumber: "02",
-        icon: "🥣",
-        action: "MIX",
-        instruction: "Combine in the simmering pot",
-        technicalLabel: "SUPERPOSITION",
-      },
-      {
-        stepNumber: "03",
-        icon: "♨️",
-        action: "COOK",
-        instruction: "Simmer and boil to resonance",
-        technicalLabel: "CONVOLUTION · BOIL",
-      },
-    ],
-  },
-  {
-    id: "salad",
-    name: "CRISP SALAD",
-    tagline: "No heat, all texture. Chop carefully.",
-    pageNumber: 8,
-    prepTime: "4 mins",
-    servings: "1 bowl",
-    tier: 2,
-    difficulty: "Medium",
-    requiresChop: true,
-    chopTarget: 3,
-    ingredients: ["Lettuce", "Tomato", "Cucumber"],
-    ingredientDetails: [
-      {
-        name: "Lettuce",
-        instrument: "Parametric Signal",
-        freq: 3,
-        washable: true,
-        idealCutoff: 380,
-        kind: "lettuce",
-      },
-      {
-        name: "Tomato",
-        instrument: "Parametric Signal",
-        freq: 5,
-        washable: true,
-        idealCutoff: 520,
-        kind: "tomato",
-      },
-      {
-        name: "Cucumber",
-        instrument: "Mathematical Signal",
-        freq: 7,
-        washable: true,
-        idealCutoff: 450,
-        kind: "cucumber",
-      },
-    ],
-    pipeline: ["GENERATE", "FILTER", "MIX", "AMPLITUDE", "TIME SCALE", "CONVOLUTION", "COMPARE"],
-    progress: "new",
-    bestScore: null,
-    stars: 0,
-    seasoningTarget: { amplitude: 0.9, frequency: 1.0 },
-    marinateTarget: { timeScale: 1.02 },
-    cookingMethod: { id: "grill", name: "SEAR", icon: "🥗", ir: "SEAR (light flash)" },
-    washableIngredients: ["Lettuce", "Tomato", "Cucumber"],
-    steps: [
-      {
-        stepNumber: "01",
-        icon: "🧼",
-        action: "WASH / FILTER",
-        instruction: "Wash fresh greens and tomatoes thoroughly",
-        technicalLabel: "FREQUENCY FILTERING",
-      },
-      {
-        stepNumber: "02",
-        icon: "🥣",
-        action: "MIX",
-        instruction: "Toss greens into the bowl",
-        technicalLabel: "SUPERPOSITION",
-      },
-      {
-        stepNumber: "03",
-        icon: "✂️",
-        action: "CHOP / DECIMATE",
-        instruction: "Chop with decimation factor M=3 and anti-aliasing",
-        technicalLabel: "NYQUIST DECIMATION",
-      },
-    ],
-  },
-  {
-    id: "creme",
-    name: "CRÈME BRÛLÉE",
-    tagline: "Steam the custard, then caramelise with AM.",
-    pageNumber: 10,
-    prepTime: "15 mins",
-    servings: "1 ramekin",
-    tier: 3,
-    difficulty: "Hard",
-    requiresCaramelize: true,
-    caramelizeTarget: { carrier: 180, depth: 0.55 },
-    ingredients: ["Egg", "Sugar", "Milk", "Butter"],
-    ingredientDetails: [
-      {
-        name: "Egg",
-        instrument: "Parametric Signal",
-        freq: 4,
-        washable: true,
-        idealCutoff: 460,
-        kind: "egg",
-      },
-      { name: "Sugar", instrument: "Mathematical Signal", freq: 5, washable: false, kind: "sugar" },
-      { name: "Milk", instrument: "Mathematical Signal", freq: 5, washable: false, kind: "milk" },
-      {
-        name: "Butter",
-        instrument: "Mathematical Signal",
-        freq: 3,
-        washable: false,
-        kind: "butter",
-      },
-    ],
-    pipeline: ["GENERATE", "FILTER", "MIX", "AMPLITUDE", "TIME SCALE", "CONVOLUTION", "COMPARE"],
-    progress: "new",
-    bestScore: null,
-    stars: 0,
-    seasoningTarget: { amplitude: 0.75, frequency: 0.85 },
-    marinateTarget: { timeScale: 1.16 },
-    cookingMethod: { id: "bake", name: "STEAM / BAKE", icon: "🍮", ir: "BAKE (dual resonance)" },
-    washableIngredients: ["Egg"],
-    steps: [
-      {
-        stepNumber: "01",
-        icon: "🥣",
-        action: "MIX",
-        instruction: "Whisk custard base in harmonic balance",
-        technicalLabel: "SUPERPOSITION",
-      },
-      {
-        stepNumber: "02",
-        icon: "🔥",
-        action: "CARAMELIZE",
-        instruction: "Apply torch amplitude modulation at 180 Hz",
-        technicalLabel: "AMPLITUDE MODULATION",
-      },
-      {
-        stepNumber: "03",
-        icon: "🧁",
-        action: "COOK",
-        instruction: "Steam bake to velvety perfection",
-        technicalLabel: "CONVOLUTION · BAKE",
-      },
-    ],
-  },
-  {
-    id: "feast",
-    name: "CHEF'S GRAND FEAST",
-    tagline: "Everything you know, at once.",
-    pageNumber: 11,
-    prepTime: "20 mins",
-    servings: "1 grand banquet",
-    tier: 4,
-    difficulty: "Hard",
-    requiresChop: true,
-    requiresCaramelize: true,
-    chopTarget: 2,
-    caramelizeTarget: { carrier: 240, depth: 0.4 },
-    ingredients: ["Beef Patty", "Cheese", "Tomato", "Lettuce", "Bun"],
-    ingredientDetails: [
-      {
-        name: "Beef Patty",
-        instrument: "Parametric Signal",
-        freq: 2,
-        washable: false,
-        kind: "patty",
-      },
-      {
-        name: "Cheese",
-        instrument: "Mathematical Signal",
-        freq: 6,
-        washable: false,
-        kind: "cheese",
-      },
-      {
-        name: "Tomato",
-        instrument: "Parametric Signal",
-        freq: 5,
-        washable: true,
-        idealCutoff: 520,
-        kind: "tomato",
-      },
-      {
-        name: "Lettuce",
-        instrument: "Parametric Signal",
-        freq: 3,
-        washable: true,
-        idealCutoff: 380,
-        kind: "lettuce",
-      },
-      { name: "Bun", instrument: "Mathematical Signal", freq: 3, washable: false, kind: "bun" },
-    ],
-    pipeline: ["GENERATE", "FILTER", "MIX", "AMPLITUDE", "TIME SCALE", "CONVOLUTION", "COMPARE"],
-    progress: "new",
-    bestScore: null,
-    stars: 0,
-    seasoningTarget: { amplitude: 0.95, frequency: 1.25 },
-    marinateTarget: { timeScale: 1.2 },
-    cookingMethod: { id: "grill", name: "GRILL", icon: "👑", ir: "GRILL (multi-cavity resonance)" },
-    washableIngredients: ["Lettuce", "Tomato"],
-    steps: [
-      {
-        stepNumber: "01",
-        icon: "🧼",
-        action: "WASH / FILTER",
-        instruction: "Clean fresh produce",
-        technicalLabel: "SPECTRAL FILTERING",
-      },
-      {
-        stepNumber: "02",
-        icon: "🥣",
-        action: "MIX",
-        instruction: "Combine feast layers",
-        technicalLabel: "SUPERPOSITION",
-      },
-      {
-        stepNumber: "03",
-        icon: "🔥",
-        action: "CARAMELIZE",
-        instruction: "Torch at 240 Hz AM carrier",
-        technicalLabel: "AMPLITUDE MODULATION",
-      },
-      {
-        stepNumber: "04",
-        icon: "✂️",
-        action: "CHOP",
-        instruction: "Decimate by factor M=2",
-        technicalLabel: "NYQUIST DECIMATION",
-      },
-      {
-        stepNumber: "05",
-        icon: "🔥",
-        action: "COOK",
-        instruction: "Convolve on the master grill",
-        technicalLabel: "CONVOLUTION · GRILL",
-      },
-    ],
-  },
 ];
 
 export const progressLabel: Record<Recipe["progress"], string> = {
@@ -1032,14 +696,6 @@ export function getRecipeStationFlow(
     { id: "season", label: "Seasoning Lab", path: "/transform" },
     { id: "marinate", label: "Marinating Lab", path: "/marinate" },
   ];
-
-  if (r.requiresCaramelize) {
-    steps.push({ id: "caramelize", label: "Caramelize Lab", path: "/caramelize" });
-  }
-
-  if (r.requiresChop) {
-    steps.push({ id: "chop", label: "Chop Lab", path: "/chop" });
-  }
 
   steps.push(
     { id: "cook", label: "Cooking Lab", path: "/cooking" },
@@ -1201,14 +857,8 @@ export interface RecipeRunSession {
   cookingAccuracy?: number;
   deliveryAccuracy?: number;
   systemAccuracy?: number;
-  chopAccuracy?: number;
-  caramelizeAccuracy?: number;
   // Settings the server needs to rebuild and score the dish.
   bowl?: string[];
-  chopFactor?: number;
-  antiAlias?: boolean;
-  caramelizeCarrier?: number;
-  caramelizeDepth?: number;
   countdownPending?: boolean;
   isPaused?: boolean;
   pausedRemaining?: number;
@@ -1310,7 +960,9 @@ export function resumeRecipeRun() {
         const session: RecipeRunSession = JSON.parse(stored);
         if (session.isPaused) {
           const remaining =
-            typeof session.pausedRemaining === "number" ? session.pausedRemaining : session.totalSeconds;
+            typeof session.pausedRemaining === "number"
+              ? session.pausedRemaining
+              : session.totalSeconds;
           session.isPaused = false;
           session.startTime = Date.now() - (session.totalSeconds - remaining) * 1000;
           delete session.pausedRemaining;
@@ -1385,7 +1037,9 @@ export function resetCurrentStage(recipeId?: string, currentPath?: string) {
         window.localStorage.removeItem(`wavebakery_pipeline_${activeId}_system`);
       }
 
-      window.dispatchEvent(new CustomEvent("wavebakery_stage_reset", { detail: { recipeId: activeId, path } }));
+      window.dispatchEvent(
+        new CustomEvent("wavebakery_stage_reset", { detail: { recipeId: activeId, path } }),
+      );
     } catch {
       // ignore
     }
@@ -1449,12 +1103,6 @@ export async function syncSessionParamsToBackend(recipeId?: string): Promise<voi
     marinate: session.marinateTime ?? activeRecipe.marinateTarget.timeScale,
     appliances: [appliance],
     ...(session.bowl ? { bowl: session.bowl } : {}),
-    ...(session.caramelizeCarrier != null && session.caramelizeDepth != null
-      ? { carrier: session.caramelizeCarrier, depth: session.caramelizeDepth }
-      : {}),
-    ...(session.chopFactor != null
-      ? { chop_factor: session.chopFactor, anti_alias: session.antiAlias ?? true }
-      : {}),
     // Finishing stations send their SETTINGS; the server applies the same
     // burnt overtone, oven filter, road vibration and cart H(z) to its own
     // dish and scores the result (backend/app/delivery.py).
@@ -1488,6 +1136,12 @@ export async function syncSessionParamsToBackend(recipeId?: string): Promise<voi
 // One in-flight submit per backend session, shared by every caller (score
 // screen re-renders, leaderboard retry), so a dish is never served twice.
 const inflightSubmits = new Map<string, Promise<SubmitResult | null>>();
+
+/** The current run's submit if it is still waiting for the server, else null. */
+export function inflightSubmit(): Promise<SubmitResult | null> | null {
+  const sid = getRecipeRunSession()?.backendSessionId;
+  return sid ? (inflightSubmits.get(sid) ?? null) : null;
+}
 
 /**
  * Serves the current run's dish to the backend and stores the result on the
@@ -1534,16 +1188,7 @@ export function submitRunToBackend(recipeId?: string): Promise<SubmitResult | nu
 }
 
 export function recordStageAccuracy(
-  stage:
-    | "filtering"
-    | "mixing"
-    | "seasoning"
-    | "marinating"
-    | "cooking"
-    | "delivery"
-    | "system"
-    | "chop"
-    | "caramelize",
+  stage: "filtering" | "mixing" | "seasoning" | "marinating" | "cooking" | "delivery" | "system",
   accuracy: number,
 ) {
   if (typeof window !== "undefined") {
@@ -1559,8 +1204,6 @@ export function recordStageAccuracy(
         else if (stage === "cooking") session.cookingAccuracy = clamped;
         else if (stage === "delivery") session.deliveryAccuracy = clamped;
         else if (stage === "system") session.systemAccuracy = clamped;
-        else if (stage === "chop") session.chopAccuracy = clamped;
-        else if (stage === "caramelize") session.caramelizeAccuracy = clamped;
 
         window.localStorage.setItem("wavebakery_recipe_session", JSON.stringify(session));
         window.dispatchEvent(new Event("wavebakery_session_changed"));
@@ -1674,7 +1317,9 @@ export function useRecipeTimer() {
 
   const isPaused = Boolean(session?.isPaused);
   const isCountdownPending = Boolean(session?.countdownPending);
-  const isExpired = session ? !session.isCompleted && !isCountdownPending && !isPaused && timeRemaining <= 0 : false;
+  const isExpired = session
+    ? !session.isCompleted && !isCountdownPending && !isPaused && timeRemaining <= 0
+    : false;
   const isLowTime = !isCountdownPending && !isPaused && timeRemaining <= 45 && timeRemaining > 15;
   const isCritical = !isCountdownPending && !isPaused && timeRemaining <= 15 && timeRemaining > 0;
 

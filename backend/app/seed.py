@@ -155,35 +155,6 @@ RECIPES = [
          teaches=['Multi-ingredient Coating', 'High Frequency Scaling', 'Brining Time Expansion', 'Dense Fry Convolution']),
 
     # 2. Tutorial & Advanced Progression Dishes
-    dict(id='toast', name='Golden Toast', emoji='🍞', tier=1, difficulty='Easy',
-         tagline='Your first shift. One ingredient, one oven.', page_number=6,
-         prep_time='2 mins', servings='1 slice',
-         story='Your first shift. One ingredient, one oven, one lesson: filtering.',
-         ingredients=['cheese'], washable_ingredients=[],
-         appliances=['bake'], cooking_method='bake',
-         seasoning=1.0, blend=1.0, marinate=1.0,
-         noise_difficulty=0.6, tolerance=1.25,
-         teaches=['FFT', 'Frequency-domain filtering', 'Inverse FFT', 'Convolution']),
-    dict(id='soup', name='Velvet Soup', emoji='🍲', tier=2, difficulty='Medium',
-         tagline='Blend it smooth, then let it ring in the pot.', page_number=7,
-         prep_time='6 mins', servings='1 bowl',
-         story='Blend it smooth, then let it ring in the pot.',
-         ingredients=['onion', 'salt', 'butter'], washable_ingredients=['onion'],
-         appliances=['boil'], cooking_method='boil',
-         seasoning=0.65, blend=0.7, marinate=1.05,
-         noise_difficulty=1.1, tolerance=1.0,
-         teaches=['Time scaling', 'Resonant systems', 'Moving-average smoothing']),
-    dict(id='salad', name='Crisp Salad', emoji='🥗', tier=2, difficulty='Medium',
-         tagline='No heat, all texture. Chop carefully.', page_number=8,
-         prep_time='4 mins', servings='1 bowl',
-         story='No heat, all texture. Chop carefully — the Nyquist inspector is watching.',
-         ingredients=['lettuce', 'tomato', 'cucumber'], washable_ingredients=['lettuce', 'tomato', 'cucumber'],
-         appliances=['grill'], cooking_method='grill',
-         seasoning=0.9, blend=1.0, marinate=1.02,
-         # Chop station target — must match frontend recipes.ts (chopTarget).
-         chop_factor=3,
-         noise_difficulty=1.2, tolerance=1.0,
-         teaches=['Sampling & decimation', 'Aliasing / Nyquist', 'High-pass differencing']),
     dict(id='stirfry', name='Sizzling Stir-Fry', emoji='🍜', tier=3, difficulty='Hard',
          tagline='Fast wok work: compress the signal.', page_number=9,
          prep_time='7 mins', servings='1 plate',
@@ -195,27 +166,6 @@ RECIPES = [
          teaches=['Time compression', 'Multi-ingredient superposition', 'Diffuse comb systems'],
          # Not in the frontend's recipe book, so it can't be played or ranked.
          is_active=False),
-    dict(id='creme', name='Crème Brûlée', emoji='🍮', tier=3, difficulty='Hard',
-         tagline='Steam the custard, then caramelise with AM.', page_number=10,
-         prep_time='15 mins', servings='1 ramekin',
-         story='Steam the custard, then caramelise the top with amplitude modulation.',
-         ingredients=['egg', 'sugar', 'milk', 'butter'], washable_ingredients=['egg'],
-         appliances=['bake'], cooking_method='bake',
-         seasoning=0.75, blend=0.85, marinate=1.16,
-         # Caramelize station target — must match frontend recipes.ts.
-         caramelize_carrier=180.0, caramelize_depth=0.55,
-         noise_difficulty=1.6, tolerance=0.85,
-         teaches=['Amplitude modulation', 'Sideband generation', 'Dual-resonance systems']),
-    dict(id='feast', name="Chef's Grand Feast", emoji='👑', tier=4, difficulty='Masterchef',
-         tagline='Everything you know, at once.', page_number=11,
-         prep_time='20 mins', servings='1 grand banquet',
-         story='Everything you know, at once. Five ingredients, three appliances, no hints.',
-         ingredients=['patty', 'cheese', 'tomato', 'lettuce', 'bun'], washable_ingredients=['lettuce', 'tomato'],
-         appliances=['grill'], cooking_method='grill',
-         seasoning=0.95, blend=1.25, marinate=1.2,
-         chop_factor=2, caramelize_carrier=240.0, caramelize_depth=0.4,
-         noise_difficulty=1.9, tolerance=0.75,
-         teaches=['Full pipeline', 'System cascading', 'Modulation + sampling combined']),
 ]
 
 
@@ -231,6 +181,10 @@ def seed(db: Session, force: bool = False) -> dict:
     for row in RECIPES:
         db.merge(Recipe(**row))
         counts['recipes'] += 1
+    # Recipes removed from the book stay in the database (runs reference
+    # them) but are retired: not listed, playable, ranked or counted.
+    (db.query(Recipe).filter(Recipe.id.notin_([r['id'] for r in RECIPES]))
+     .update({Recipe.is_active: False}, synchronize_session=False))
 
     db.commit()
     return counts

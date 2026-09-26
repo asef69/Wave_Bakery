@@ -58,8 +58,6 @@ Washing & Frequency-selective filtering (FFT $\rightarrow$ mask $\rightarrow$ IF
 Mixing bowl & Superposition $\sum_k x_k(t)$ (linearity) \\
 Seasoning & Amplitude scaling $A\,x(t)$ and time scaling $x(\alpha t)$ \\
 Marinating & Time shift (delay) $x(t-t_0)$ \\
-Caramelizing & Amplitude modulation $x(t)\,[1+m\cos(2\pi f_c t)]$ \\
-Chopping & Sampling / decimation and aliasing \\
 Cooking appliance & An LTI system with impulse response $h[n]$; cooking is convolution $y=x*h$ \\
 Precision Oven & Find and notch the burnt overtone: sampling theorem, DFT/FFT, IDFT reconstruction \\
 Delivery cart & Reject the road vibration with $H(z)$: poles, zeros, stability, aliased sensing \\
@@ -142,9 +140,7 @@ what you hear has the same shape as what you see.
 \node[st,left=of fil] (mix) {Mix\\\small step 3};
 \node[st,left=of mix] (sea) {Season\\\small step 4};
 \node[st,left=of sea] (mar) {Marinate\\\small step 5};
-\node[opt,below=of mar] (car) {Caramelize\\\small some recipes};
-\node[opt,right=of car] (chop) {Chop\\\small some recipes};
-\node[st,right=of chop] (cook) {Cook\\\small $\rightarrow$ step 7};
+\node[st,below=of mar] (cook) {Cook\\\small $\rightarrow$ step 7};
 \node[st,right=of cook] (chk) {Check dish};
 \node[opt,below=of chk] (oven) {Precision\\Oven $\rightarrow$ 8};
 \node[st,left=of oven] (sys) {System\\Delivery};
@@ -152,14 +148,13 @@ what you hear has the same shape as what you see.
 \node[gate,left=of score] (done) {Complete\\\small + leaderboard};
 \draw[arr] (menu)--(book); \draw[arr] (book)--(brief); \draw[arr] (brief)--(gen);
 \draw[arr] (gen)--(fil); \draw[arr] (fil)--(mix); \draw[arr] (mix)--(sea); \draw[arr] (sea)--(mar);
-\draw[arr] (mar)--(car); \draw[arr] (car)--(chop); \draw[arr] (chop)--(cook);
-\draw[arr] (mar.south east) to[bend left=10] (cook.north west);
+\draw[arr] (mar)--(cook);
 \draw[arr] (cook)--(chk); \draw[arr] (chk)--(oven); \draw[arr] (oven)--(sys); \draw[arr] (sys)--(score);
 \draw[arr,dashed] ([xshift=3mm]chk.south west) -- ++(0,-2mm) -| node[pos=0.25,below,font=\scriptsize]{serve now} (score.north);
 \draw[arr] (score)--(done);
 \end{tikzpicture}
 \end{center}
-Dashed orange boxes are optional or recipe-specific. Numbers are the progression
+The dashed orange box is optional (a dish can be served straight from Check Dish). Numbers are the progression
 levels stored in \texttt{localStorage} (\fn{wavebakery_progress_<recipe>}): a
 station stays locked (``Station Locked'' screen) until the previous level is
 reached.
@@ -172,7 +167,7 @@ Screen & File & What happens \\
 \endhead
 Landing / Menu & \file{routes/index.tsx}, \file{routes/menu.tsx} & Entry point; opens the chef sign-in (\file{components/game/ChefAuthModal.tsx}), leaderboard, settings, how-to-play and the Signal Playground. \\
 Chef sign-in & \file{components/game/ChefAuthModal.tsx} & Register or sign in with name + password; the backend returns a token that identifies the chef on every later request. \\
-Recipe book & \file{routes/recipe-book.tsx} & Choose one of 10 recipes; shows tier, difficulty and best score. \\
+Recipe book & \file{routes/recipe-book.tsx} & Choose one of 5 recipes; shows tier, difficulty and best score. \\
 Briefing & \file{routes/briefing.tsx} & Shows the recipe's ingredients, and lets the player choose difficulty (timer). Starting calls \fn{startRecipeRun}, which resets progress, creates the run session and (if signed in) a backend game session. \\
 Kitchen map / hub & \file{routes/kitchen.tsx}, \file{routes/kitchen-hub.tsx} & Station map and navigation hub. \\
 Pantry & \file{routes/pantry.tsx} & Browse every ingredient and inspect its equation, waveform and spectrum (\file{components/game/IngredientSignalModal.tsx}). \\
@@ -294,7 +289,7 @@ ingredient).
 \end{conceptbox}
 \begin{impactbox}
 It is the first place the player must reason in the frequency domain. The server's
-cleaning (``prep'') score is 28\,\% of the authoritative dish score and is reported
+cleaning (``prep'') score scales the authoritative dish score (it is worth up to 28\,\%) and is reported
 as the Filtering sub-score; the local filtering accuracy is one of the stage
 averages in the offline score. Over-filtering is detected and named in the feedback
 (``you cut real ingredient frequencies'').
@@ -377,46 +372,6 @@ Transformation score together with seasoning, and the server names mistakes
 \end{impactbox}
 
 % --------------------------------------------------------------------
-\subsection{Caramelize Lab --- amplitude modulation (Crème Brûlée, Feast)}
-\textbf{What the player does.} Sets a carrier frequency $f_c$ and modulation depth
-$m$ and listens to the ``caramelized'' signal.
-
-\begin{filesbox}
-\file{frontend/src/routes/caramelize.tsx}; backend \fn{stage_caramelize} /
-\fn{am_modulate} in \file{backend/app/dsp/pipeline.py} and \file{backend/app/dsp/core.py};
-targets in \file{backend/app/seed.py}.
-\end{filesbox}
-\begin{conceptbox}
-Amplitude modulation $y(t)=x(t)[1+m\cos(2\pi f_c t)]$: the spectrum gains
-sidebands at $f\pm f_c$; the depth $m$ sets their height.
-\end{conceptbox}
-\begin{impactbox}
-Carrier and depth are sent to the server, whose pipeline modulates the dish before
-cooking; the recipe's targets make the reference dish modulated too. The station
-also has its own accuracy, averaged into the local score for recipes that need it.
-\end{impactbox}
-
-% --------------------------------------------------------------------
-\subsection{Chop Lab --- sampling, decimation and aliasing (Salad, Feast)}
-\textbf{What the player does.} Chooses a decimation factor $M$ and whether to use
-an anti-aliasing filter.
-
-\begin{filesbox}
-\file{frontend/src/routes/chop.tsx}; backend \fn{stage_chop} / \fn{decimate} in
-\file{backend/app/dsp/pipeline.py} and \file{backend/app/dsp/core.py}.
-\end{filesbox}
-\begin{conceptbox}
-Down-sampling by $M$ (keep every $M$-th sample, zero-order hold back), the new
-Nyquist frequency $f_s/(2M)$, aliasing when content exceeds it, and the
-anti-aliasing low-pass filter that prevents it.
-\end{conceptbox}
-\begin{impactbox}
-Factor and filter choice are sent to the server, which decimates for real before
-cooking; skipping the anti-alias filter is diagnosed (``Aliasing! You decimated
-without the anti-alias filter'').
-\end{impactbox}
-
-% --------------------------------------------------------------------
 \subsection{Cooking Lab --- convolution with an appliance}
 \textbf{What the player does.} Picks a cooking method (grill, fry, bake, boil ---
 each is an impulse response) and slides the impulse across the signal to set the
@@ -449,7 +404,7 @@ right appliance scores 100 even if earlier stages were imperfect.
 kitchen}: the cooked dish plus the \textbf{burnt overtone} cooking left in it (a
 recipe-specific tone between two harmonics of the dish). Then either serves it now ---
 the overtone stays in the dish --- or takes it to the Precision Oven to remove it
-(\file{components/beamforming/ServeChoiceModal.tsx}).
+(\file{components/game/ServeChoiceModal.tsx}).
 \begin{filesbox}\file{frontend/src/routes/check-dish.tsx}, \fn{servedDish} in \file{frontend/src/lib/delivery.ts}.\end{filesbox}
 \begin{impactbox}
 The decision point for the finishing stations: serving now keeps the defect, which lowers
@@ -550,32 +505,34 @@ the \emph{Detailed Architecture} document.
 \end{impactbox}
 
 % --------------------------------------------------------------------
-\subsection{Signal Playground (Labs) --- a sandbox}
-\file{frontend/src/routes/labs.tsx} offers free-play sandboxes: generator, filter,
-mixer, seasoning, marinating, convolution and a \textbf{beamforming lab} (phased
-speaker array, steering and windowing, \file{frontend/src/lib/beamforming.ts} and
-\file{frontend/src/components/beamforming/*}). Nothing here affects a recipe run or
-the score; it exists for exploration and teaching.
+\subsection{Signal Playground (Labs) --- the whole game as a sandbox}
+\file{frontend/src/routes/labs.tsx} runs every station of the game on any ingredient or
+oscillator, with no timer and no locked stages, using the recipe stations' own functions
+(\file{frontend/src/lib/playground.ts}): generator, washing (low-pass), mixing
+(superposition), seasoning ($A\cdot x(\alpha t)$), marinating (time shift $x(t-t_0)$),
+cooking (convolution, with the cooking sound while the depth slider is held), the
+\textbf{Precision Oven} (burnt overtone, sampling at $f_s$ with Nyquist and aliasing, FFT,
+band gains, cutoff and notch, IFFT), \textbf{System Delivery} (road vibration, the station's
+z-plane plotter, $|H(e^{j\omega})|$, stability and the aliasing sensor), \textbf{Tasting}
+(the live match and the server's dish score, part by part) and \textbf{Full Chain} (a whole
+recipe station by station; at the recipe's own dials it reproduces the reference dish).
+The labs live in \file{frontend/src/components/playground/*}. Nothing here affects a
+recipe run or the score; it exists for exploration and teaching.
 
 % ====================================================================
 \section{The recipes}
 % ====================================================================
 {\small\setlength{\tabcolsep}{4pt}
-\begin{longtable}{@{}P{2.0cm}P{0.6cm}P{4.8cm}P{1.6cm}P{1.2cm}P{1.0cm}P{3.0cm}@{}}
+\begin{longtable}{@{}P{2.3cm}P{0.7cm}P{6.4cm}P{1.9cm}P{1.3cm}P{1.2cm}@{}}
 \toprule
-Recipe & Tier & Ingredients & Season $A,\alpha$ & Marin. & Cook & Extra \\
+Recipe & Tier & Ingredients & Season $A,\alpha$ & Marin. & Cook \\
 \midrule
 \endhead
-Burger & 1 & Bun, Beef Patty, Cheese, Lettuce, Tomato, Salt & 1.5, 0.8 & 1.25 & grill & --- \\
-Sandwich & 1 & Bread, Chicken, Cheese, Lettuce, Tomato, Salt, Sauce & 1.2, 1.1 & 0.85 & grill & --- \\
-Golden Toast & 1 & Cheese & 1.0, 1.0 & 1.0 & bake & --- \\
-Cake & 2 & Flour, Egg, Butter, Sugar, Milk & 1.8, 0.6 & 1.5 & bake & --- \\
-Noodles & 2 & Noodles, Egg, Chicken, Onion, Salt & 1.3, 1.2 & 1.75 & boil & --- \\
-Velvet Soup & 2 & Onion, Salt, Butter & 0.65, 0.7 & 1.05 & boil & --- \\
-Crisp Salad & 2 & Lettuce, Tomato, Cucumber & 0.9, 1.0 & 1.02 & grill & Chop $M=3$ \\
-Chicken Fry & 3 & Chicken, Flour, Egg, Salt, Butter & 2.0, 1.4 & 1.4 & fry & --- \\
-Crème Brûlée & 3 & Egg, Sugar, Milk, Butter & 0.75, 0.85 & 1.16 & bake & AM 180, 0.55 \\
-Grand Feast & 4 & Beef Patty, Cheese, Tomato, Lettuce, Bun & 0.95, 1.25 & 1.2 & grill & Chop $M=2$; AM 240, 0.4 \\
+Burger & 1 & Bun, Beef Patty, Cheese, Lettuce, Tomato, Salt & 1.5, 0.8 & 1.25 & grill \\
+Sandwich & 1 & Bread, Chicken, Cheese, Lettuce, Tomato, Salt, Sauce & 1.2, 1.1 & 0.85 & grill \\
+Cake & 2 & Flour, Egg, Butter, Sugar, Milk & 1.8, 0.6 & 1.5 & bake \\
+Noodles & 2 & Noodles, Egg, Chicken, Onion, Salt & 1.3, 1.2 & 1.75 & boil \\
+Chicken Fry & 3 & Chicken, Flour, Egg, Salt, Butter & 2.0, 1.4 & 1.4 & fry \\
 \bottomrule
 \end{longtable}}
 Targets live in \file{frontend/src/lib/recipes.ts} and, for the server,
@@ -601,13 +558,12 @@ Concept & Where & Why it was added & Impact on the game \\
 \midrule
 \endhead
 Signal classification, periodic signals, harmonics & Pantry, Generate & Ingredients must look and sound different for reasons the player can explain & Defines every input; wrong choice lowers Mixing \\
-Fourier transform / spectrum & Filtering, Oven, Delivery & Noise is easier to see and remove in frequency & Drives the cleaning score (28\,\% server weight) \\
+Fourier transform / spectrum & Filtering, Oven, Delivery & Noise is easier to see and remove in frequency & Drives the cleaning score (scales the server score, up to 28\,\%) \\
 Filtering ($H(f)X(f)$) & Filtering & Washing = removing the noise band without cutting the ingredient & Prep score, over/under-filter feedback \\
 Linearity / superposition & Mixing & A bowl is literally a sum & Mixing accuracy and server mix \\
 Amplitude and time scaling & Seasoning & Two dials that change height and rate & Transformation score, server params \\
 Time shift & Marinating & Delay is the simplest system & Transformation score, server params \\
-Amplitude modulation & Caramelize & Sidebands as ``browning'' & Server pipeline (2 recipes) \\
-Sampling, decimation, aliasing & Chop, Oven & Coarse chopping loses detail; Nyquist & Server pipeline (2 recipes); oven score \\
+Sampling and aliasing & Oven, Delivery & Nyquist: sample fast enough, or the dish (and the vibration sensor) alias & Oven score; cart aimed at the aliased reading misses \\
 LTI systems, impulse response, convolution & Cooking & Each appliance is a system $h$ & Central to the dish; Cooking score \\
 DFT/FFT, notch filtering, IDFT, reconstruction & Precision Oven & Cooking leaves a burnt overtone to find and remove & The oven's output is the served dish (about +30 similarity) \\
 z-transform, poles/zeros, stability, aliasing & System Delivery & The road shakes the dish; the cart must reject it & The cart's output is the served dish; unstable ruins it \\
@@ -623,16 +579,8 @@ Signals \& Systems content or to have no effect on the game's result.
 
 \begin{flagbox}
 \begin{enumerate}[leftmargin=*]
-\item \textbf{Beamforming (Signal Playground only).} \file{frontend/src/lib/beamforming.ts},
-  \file{frontend/src/components/beamforming/BeamformingVisualizer.tsx},
-  \file{BeamPatternGraph.tsx}, \file{PhaseControls.tsx}, \file{SpeakerArray.tsx} are only
-  used by the sandbox in \file{routes/labs.tsx}. \file{BeamTarget.tsx} is not used anywhere.
-  Array processing is outside the core Signals \& Linear Systems syllabus and has no
-  effect on any score.
-\item \textbf{Backend phased-array endpoint} \fn{POST /api/sessions/\{id\}/beam-delivery}
-  and \file{backend/app/dsp/beamforming.py}: never called by the frontend.
 \item \textbf{Backend ``direct DSP'' endpoints} (\fn{/api/dsp/generate}, \fn{filter},
-  \fn{mix}, \fn{transform}, \fn{convolve}, \fn{beamforming}, \fn{critique}) and their
+  \fn{mix}, \fn{transform}, \fn{convolve}, \fn{critique}) and their
   client methods in \file{lib/api.ts}: never called by the game.
 \item \textbf{Unused client methods} in \file{lib/api.ts}: \fn{getConvolution},
   \fn{getHealth}, \fn{getPlayerHistory}, \fn{getRecipes}, \fn{getRecipe},
@@ -642,21 +590,11 @@ Signals \& Systems content or to have no effect on the game's result.
 \item \textbf{WAV impulse-response loader} \fn{loadCookingImpulseAudio} in
   \file{frontend/src/lib/cooking-audio.ts}: never called; cooking always uses the static
   kernels.
-\item \textbf{Chop Lab aliasing is simulated in the browser}: when anti-aliasing is off it
-  adds a synthetic tone rather than genuinely folding frequencies (the server's
-  \fn{decimate} does real aliasing).
-\item \textbf{Hardcoded station targets}: the Caramelize and Chop pages score the player
-  against fixed targets (180\,Hz / 0.55 and factor 3) instead of the recipe's own
-  (\emph{Grand Feast} uses 240\,Hz / 0.4 and factor 2), so on the Feast the on-screen
-  accuracy disagrees with the server.
 \item \textbf{Two different ingredient models}: the server synthesises ingredients as
   instrument-like audio (\file{backend/app/dsp/instruments.py}) at 22\,050\,Hz, while the
   browser uses the mathematical models above. The server score is therefore computed on
   a different (but parameter-equivalent) dish than the one drawn on screen; only the
   Filtering Lab shows the server's own signals.
-\item \textbf{Chop and Caramelize outputs are not drawn into later stations}: their
-  signals are sent to the server and scored, but the Cooking Lab still draws the
-  marinated signal as its input.
 \end{enumerate}
 \end{flagbox}
 
