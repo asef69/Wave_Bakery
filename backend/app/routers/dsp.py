@@ -1,5 +1,5 @@
 """
-Dedicated DSP Router for WaveKitchen (Server-Authoritative DSP Engine).
+Dedicated DSP Router for WaveBakery (Server-Authoritative DSP Engine).
 Performs pure signal synthesis, filtering, mixing, transformation, convolution
 and customer taste diagnostics.
 """

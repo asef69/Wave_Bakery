@@ -1,16 +1,16 @@
-# WaveKitchen — presentation speech (about 4 minutes)
+# WaveBakery — presentation speech (about 4 minutes)
 
 Two speakers. Each block is said while the named slide is on screen; it names what that phase does and which signal-processing algorithm it uses. The same text is in the speaker notes of the web deck and the PowerPoint.
 
 ## Kazi Asef Kabir
 
-**Slide 1 · WaveKitchen**
+**Slide 1 · WaveBakery**
 
-Assalamu alaikum. I am Kazi Asef Kabir, and with Tajrian Shams Sneha I built WaveKitchen: a cooking game in which every kitchen action is a real signal-processing operation that you can see, hear and get scored on.
+Assalamu alaikum. I am Kazi Asef Kabir, and with Tajrian Shams Sneha I built WaveBakery: a cooking game in which every kitchen action is a real signal-processing operation that you can see, hear and get scored on.
 
 **Slide 2 · Equations you can see, hear and score**
 
-In WaveKitchen every ingredient is a discrete-time signal, every station is a system that transforms it, and the finished dish is the output of the whole chain. The player's goal is to make that output match a hidden reference signal.
+In WaveBakery every ingredient is a discrete-time signal, every station is a system that transforms it, and the finished dish is the output of the whole chain. The player's goal is to make that output match a hidden reference signal.
 
 **Slide 3 · One dish, one signal chain**
 

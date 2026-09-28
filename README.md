@@ -1,4 +1,4 @@
-# WaveKitchen (WaveBakery)
+# WaveBakery
 
 An educational cooking game for **CSE 220 — Signals and Linear Systems**. Every
 ingredient is a signal, and every kitchen station is a signal-processing operation.
@@ -147,7 +147,7 @@ The live **match %** shown inside each station is a quicker measure:
 the final dish score.
 
 The full formulas are in
-[`docs/WaveKitchen_Detailed_Architecture.pdf`](docs/WaveKitchen_Detailed_Architecture.pdf).
+[`docs/WaveBakery_Detailed_Architecture.pdf`](docs/WaveBakery_Detailed_Architecture.pdf).
 
 ---
 
@@ -196,11 +196,11 @@ npm run lint        # ESLint + Prettier
 
 ## Documentation
 
-- [`docs/WaveKitchen_Gameplay_Overview.pdf`](docs/WaveKitchen_Gameplay_Overview.pdf):
+- [`docs/WaveBakery_Gameplay_Overview.pdf`](docs/WaveBakery_Gameplay_Overview.pdf):
   each station, what the player does, and the concept behind it.
-- [`docs/WaveKitchen_Detailed_Architecture.pdf`](docs/WaveKitchen_Detailed_Architecture.pdf):
+- [`docs/WaveBakery_Detailed_Architecture.pdf`](docs/WaveBakery_Detailed_Architecture.pdf):
   system design, the signal pipeline, and the scoring formulas.
-- [`docs/WaveKitchen_Presentation.pdf`](docs/WaveKitchen_Presentation.pdf):
+- [`docs/WaveBakery_Presentation.pdf`](docs/WaveBakery_Presentation.pdf):
   the project presentation.
 
 ---

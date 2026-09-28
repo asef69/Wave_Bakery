@@ -1,5 +1,5 @@
 """
-WaveKitchen / WaveBakery Unified Runner
+WaveBakery Unified Runner
 Starts both FastAPI backend and Vite frontend with a single command.
 Handles clean shutdown on Ctrl+C.
 
@@ -82,7 +82,7 @@ def main():
             raise FileNotFoundError(f"Project directory not found: {directory}")
 
     print("=" * 65)
-    print("  WAVEKITCHEN / WAVEBAKERY SIMULATION RUNNER")
+    print("  WAVEBAKERY SIMULATION RUNNER")
     print("=" * 65)
     print(f"  Root:     {ROOT_DIR}")
     print(f"  Python:   {py_exec}")
@@ -154,7 +154,7 @@ def main():
                 print("\n[!] Frontend process exited unexpectedly.")
                 break
     except KeyboardInterrupt:
-        print("\nStopping WaveKitchen servers...")
+        print("\nStopping WaveBakery servers...")
     finally:
         # Terminate frontend
         if frontend_proc.poll() is None:
@@ -176,7 +176,7 @@ def main():
             except Exception:
                 pass
 
-        print("WaveKitchen stopped cleanly. Goodbye Chef!\n")
+        print("WaveBakery stopped cleanly. Goodbye Chef!\n")
 
 if __name__ == "__main__":
     main()

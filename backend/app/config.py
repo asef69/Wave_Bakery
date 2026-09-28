@@ -22,7 +22,7 @@ CORS_ORIGINS = [o.strip() for o in os.getenv(
 ).split(',') if o.strip() and o.strip() != '*']
 
 API_PREFIX = '/api'
-APP_NAME = 'WaveKitchen API'
+APP_NAME = 'WaveBakery API'
 APP_VERSION = '1.0.0'
 
 # gameplay tuning that lives on the server, not in the client

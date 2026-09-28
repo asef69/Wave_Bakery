@@ -1,7 +1,7 @@
 @echo off
-title WaveKitchen Runner
+title WaveBakery Runner
 echo ========================================================
-echo   Launching WaveKitchen (Backend + Frontend)
+echo   Launching WaveBakery (Backend + Frontend)
 echo ========================================================
 
 set "SCRIPT_DIR=%~dp0"

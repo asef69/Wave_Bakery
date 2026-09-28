@@ -1,5 +1,5 @@
 """
-WaveKitchen — server-side signal processing core.
+WaveBakery — server-side signal processing core.
 
 All signals are 1-D float32 numpy arrays sampled at SR. This module is the
 authoritative implementation: the browser runs a lightweight mirror of it for

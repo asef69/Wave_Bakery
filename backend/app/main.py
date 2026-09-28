@@ -1,4 +1,4 @@
-"""WaveKitchen API — application entry point."""
+"""WaveBakery API — application entry point."""
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -28,7 +28,7 @@ app = FastAPI(
     title=config.APP_NAME,
     version=config.APP_VERSION,
     description=(
-        'Backend for WaveKitchen, a signal processing cooking game. '
+        'Backend for WaveBakery, a signal processing cooking game. '
         'The server owns the DSP: it generates and contaminates ingredients, '
         'rebuilds the player\'s filter chain from its specification, re-runs the '
         'full pipeline and computes every score, so results cannot be forged '

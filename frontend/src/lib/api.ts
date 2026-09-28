@@ -1,5 +1,5 @@
 /**
- * WaveKitchen Backend API Client
+ * WaveBakery Backend API Client
  *
  * Connects the frontend with the FastAPI backend running on port 8000.
  * Server owns DSP calculations, state, spectrograms, convolutions,

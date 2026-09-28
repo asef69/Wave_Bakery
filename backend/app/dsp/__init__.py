@@ -1,4 +1,4 @@
-"""WaveKitchen server-side signal processing package."""
+"""WaveBakery server-side signal processing package."""
 from . import core, contamination, instruments, metrics, pipeline, systems  # noqa: F401
 
 SR = core.SR

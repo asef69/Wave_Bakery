@@ -1,4 +1,4 @@
-# WaveKitchen PowerShell One-Click Runner
+# WaveBakery PowerShell One-Click Runner
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $scriptDir
 
