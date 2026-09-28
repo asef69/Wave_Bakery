@@ -151,7 +151,10 @@ describe("Pause System & Timer Integrity Suite", () => {
     });
 
     it("clears stage transient pipeline storage on stage reset", () => {
-      mockLocalStorage.setItem("wavebakery_pipeline_burger_seasoned", JSON.stringify({ samples: [1, 2, 3] }));
+      mockLocalStorage.setItem(
+        "wavebakery_pipeline_burger_seasoned",
+        JSON.stringify({ samples: [1, 2, 3] }),
+      );
       expect(mockLocalStorage.getItem("wavebakery_pipeline_burger_seasoned")).not.toBeNull();
 
       resetCurrentStage("burger", "/transform");

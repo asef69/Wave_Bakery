@@ -71,7 +71,9 @@ export function LabShell({
           aria-hidden
         />
 
-        <div key={stageKey} className="mt-8">{children}</div>
+        <div key={stageKey} className="mt-8">
+          {children}
+        </div>
 
         <div className="mt-10 flex flex-wrap items-end justify-between gap-6">
           <ChefFourier size="sm" float={false} message={chefLine} />

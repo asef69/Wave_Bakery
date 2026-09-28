@@ -22,6 +22,7 @@ import { ChefFourier } from "@/components/game/ChefFourier";
 import { DishGlyph } from "@/components/game/DishGlyph";
 import { GameButton } from "@/components/game/GameButton";
 import { GlobalRankRow, GlobalStats, LeaderboardRow, api } from "@/lib/api";
+import { cachedBoard, saveBoard } from "@/lib/board-cache";
 import { formatChefDisplayName, isChefMatch, useLeaderboard } from "@/lib/leaderboard";
 import {
   DIFFICULTY_CONFIGS,
@@ -174,24 +175,33 @@ function LeaderboardScreen() {
     const requestId = ++requestIdRef.current;
     const isLatest = () => requestId === requestIdRef.current;
     setIsLoading(true);
-    // Drop the previous recipe's rows at once; a failed request used to leave
-    // them on screen under the newly selected recipe's name.
-    if (viewMode === "recipe") setBackendRows(null);
+    // Show this view's last-loaded rows at once (never the previous recipe's:
+    // a failed request used to leave those under the new recipe's name), then
+    // replace them with the fresh copy.
+    const boardKey = `recipe:${selectedRecipeId}:${selectedDifficulty}`;
+    if (viewMode === "recipe") setBackendRows(cachedBoard<LeaderboardRow[]>(boardKey));
+    if (viewMode === "global")
+      setGlobalRows((rows) => rows ?? cachedBoard<GlobalRankRow[]>("global"));
+    if (viewMode === "analytics")
+      setAnalytics((stats) => stats ?? cachedBoard<GlobalStats>("analytics"));
     try {
       if (viewMode === "recipe") {
         const rows = await api.getLeaderboard(selectedRecipeId, ALL_LIMIT, selectedDifficulty);
         if (!isLatest()) return;
         setBackendRows(rows);
+        saveBoard(boardKey, rows);
         setBackendConnected(true);
       } else if (viewMode === "global") {
         const rows = await api.getGlobalRanking(ALL_LIMIT);
         if (!isLatest()) return;
         setGlobalRows(rows);
+        saveBoard("global", rows);
         setBackendConnected(true);
       } else if (viewMode === "analytics") {
         const stats = await api.getStats();
         if (!isLatest()) return;
         setAnalytics(stats);
+        saveBoard("analytics", stats);
         setBackendConnected(true);
       }
     } catch {

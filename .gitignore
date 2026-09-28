@@ -39,3 +39,6 @@ docs/build/
 .env.*
 !.env.example
 .vercel/
+
+# Office lock files (a document is open in Word/PowerPoint)
+~$*

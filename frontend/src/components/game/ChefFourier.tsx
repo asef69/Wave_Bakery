@@ -1,4 +1,4 @@
-import chefFourier from "@/assets/chef-fourier.png";
+import chefFourier from "@/assets/chef-fourier.webp";
 import { cn } from "@/lib/utils";
 
 type ChefFourierProps = {

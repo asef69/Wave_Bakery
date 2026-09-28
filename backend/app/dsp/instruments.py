@@ -36,7 +36,6 @@ def _additive(n: int, f0: float, partials, inharm: float = 0.0) -> np.ndarray:
 
 
 def drum(n: int, f0: float = 90.0) -> np.ndarray:
-    t = np.arange(n) / SR
     k = np.arange(n) / n
     f = f0 * (1 + 2.2 * np.exp(-np.arange(n) / (n * 0.05)))
     phase = 2 * np.pi * np.cumsum(f) / SR

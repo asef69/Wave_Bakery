@@ -37,11 +37,7 @@ export function RecipeTimerBadge({
 
   if (!session) return null;
 
-  const canShowPause =
-    showPause &&
-    !session.isCompleted &&
-    !isCountdownPending &&
-    !isExpired;
+  const canShowPause = showPause && !session.isCompleted && !isCountdownPending && !isExpired;
 
   return (
     <div className="inline-flex items-center gap-2">

@@ -15,7 +15,9 @@ same on both sides.
 from __future__ import annotations
 
 import numpy as np
-from scipy import signal as sps
+from .lazy import LazyModule
+
+sps = LazyModule('scipy.signal')  # loaded on first use
 
 from .dsp import core as C
 

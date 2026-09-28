@@ -11,6 +11,7 @@ import { useEffect, type ReactNode } from "react";
 
 import { useTheme } from "@/lib/theme";
 import { loadChickenAudio } from "@/lib/chicken-audio";
+import { api } from "@/lib/api";
 import { installButtonClickSfx } from "@/lib/sfx";
 import appCss from "../styles.css?url";
 
@@ -158,8 +159,23 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   useTheme();
 
+  // The chicken recording (372 KB) is only played by chicken recipes: fetch it
+  // once the page is idle, not alongside the first page's data.
   useEffect(() => {
-    loadChickenAudio("/sounds/chicken.wav").catch(() => {});
+    const load = () => loadChickenAudio("/sounds/chicken.wav").catch(() => {});
+    if (typeof window.requestIdleCallback === "function") {
+      const id = window.requestIdleCallback(load, { timeout: 4000 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const t = window.setTimeout(load, 1500);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  // Wake the API as soon as the site opens: a serverless backend that has
+  // been idle starts cold, and this way it is warm before the first page
+  // (leaderboard, sign-in) needs it.
+  useEffect(() => {
+    api.getHealth().catch(() => {});
   }, []);
 
   // Sound effect only: a short click on every activated button.

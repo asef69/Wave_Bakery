@@ -6,11 +6,12 @@ and customer taste diagnostics.
 from __future__ import annotations
 
 import numpy as np
-from scipy import signal as sp_signal
 from fastapi import APIRouter, HTTPException, status
 
 from .. import schemas
-from ..dsp import core as C
+from ..lazy import LazyModule
+
+sp_signal = LazyModule('scipy.signal')  # loaded on first use
 
 router = APIRouter(prefix='/dsp', tags=['dsp-engine'])
 
@@ -114,8 +115,7 @@ def filter_signal(payload: schemas.FilterSignalRequest):
         filtered = sp_signal.lfilter(b, a, samples)
 
     # Frequency response curve
-    w, h = sp_signal.freqz(b, a, worN=128)
-    response_freqs = (w * nyq / np.pi).tolist()
+    _, h = sp_signal.freqz(b, a, worN=128)
     response_curve = (np.abs(h)).tolist()
 
     # FFT comparison

@@ -38,7 +38,8 @@ export function getSoundSettings(): SoundSettings {
 export function setSoundSettings(partial: Partial<SoundSettings>): SoundSettings {
   const current = getSoundSettings();
   const updated: SoundSettings = {
-    soundEnabled: partial.soundEnabled !== undefined ? Boolean(partial.soundEnabled) : current.soundEnabled,
+    soundEnabled:
+      partial.soundEnabled !== undefined ? Boolean(partial.soundEnabled) : current.soundEnabled,
     volume:
       partial.volume !== undefined && !isNaN(partial.volume)
         ? Math.max(0, Math.min(100, Math.round(partial.volume)))

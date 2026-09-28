@@ -11,7 +11,9 @@ import base64
 from typing import Callable, Iterable, Sequence
 
 import numpy as np
-from scipy import signal as sps
+from ..lazy import LazyModule
+
+sps = LazyModule('scipy.signal')  # loaded on first use
 
 SR: int = 22050          # sample rate for every signal in the game
 FRAME: int = 4096        # canonical ingredient length (~186 ms), a power of two

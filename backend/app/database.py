@@ -3,17 +3,17 @@ from __future__ import annotations
 
 from sqlalchemy import create_engine # type: ignore
 from sqlalchemy.orm import DeclarativeBase, sessionmaker # type: ignore
-from sqlalchemy.pool import NullPool # type: ignore
 
 from .config import DATABASE_URL
 
 if DATABASE_URL.startswith('sqlite'):
     engine = create_engine(DATABASE_URL, connect_args={'check_same_thread': False}, future=True)
 else:
-    # Postgres (Supabase) through its connection pooler: the pooler already
-    # shares connections, and a serverless function may be frozen between
-    # requests, so the app keeps none open itself (NullPool).
-    engine = create_engine(DATABASE_URL, poolclass=NullPool, future=True)
+    # Postgres (Supabase) through its connection pooler. Opening a connection
+    # (TLS + pooler auth) costs far more than a query, so a warm instance keeps
+    # a few open; pre-ping replaces one the pooler closed while it was idle.
+    engine = create_engine(DATABASE_URL, pool_size=1, max_overflow=4, pool_pre_ping=True,
+                           pool_recycle=300, future=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
 

@@ -17,7 +17,6 @@ from sqlalchemy.orm import Session
 from .. import config, gameplay, schemas
 from ..database import get_db
 from ..deps import current_player, owned_session
-from ..dsp import core as C
 from ..dsp import pipeline
 from ..models import Attempt, GameSession, Ingredient, Player, Recipe, SessionIngredient
 

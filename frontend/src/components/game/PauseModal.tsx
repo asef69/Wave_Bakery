@@ -46,7 +46,9 @@ export function PauseModal({ onClose }: PauseModalProps) {
   const [isDifficultyModalOpen, setIsDifficultyModalOpen] = useState(false);
 
   // Countdown state: 0 = none, 1 = resume countdown, 2 = restart countdown, 3 = change difficulty countdown
-  const [countdownMode, setCountdownMode] = useState<"none" | "resume" | "restart" | "difficulty">("none");
+  const [countdownMode, setCountdownMode] = useState<"none" | "resume" | "restart" | "difficulty">(
+    "none",
+  );
   const [pendingDifficulty, setPendingDifficulty] = useState<RecipeDifficulty | null>(null);
 
   // Keyboard shortcut to toggle pause/resume with Escape
@@ -54,7 +56,10 @@ export function PauseModal({ onClose }: PauseModalProps) {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't intercept typing in input elements
       const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+      if (
+        target &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+      ) {
         return;
       }
 
@@ -381,7 +386,11 @@ export function PauseModal({ onClose }: PauseModalProps) {
 
             {/* Footer keyboard hint */}
             <p className="mt-5 font-mono text-[10px] tracking-wider text-muted-foreground/70 uppercase">
-              Press <kbd className="rounded border border-border px-1 py-0.5 text-[9px] font-bold">ESC</kbd> to resume
+              Press{" "}
+              <kbd className="rounded border border-border px-1 py-0.5 text-[9px] font-bold">
+                ESC
+              </kbd>{" "}
+              to resume
             </p>
           </div>
         )}
