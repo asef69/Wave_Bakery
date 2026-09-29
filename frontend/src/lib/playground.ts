@@ -351,7 +351,11 @@ export function runFullChain(recipe: Recipe, d: FullChainDials) {
   const marinated = computeMarinatedSignal(seasoned, d.marinate, PLAYGROUND_SAMPLES);
   const cooked = computeConvolvedSignal(marinated, d.method, d.depth, PLAYGROUND_SAMPLES);
   const burnt = servedDish(recipe.id, cooked.samples);
-  const ovenFs = Math.min(64, 2 * findMaxSignalFrequency(burnt));
+  // As in the oven station: fast enough to see the burnt overtone too.
+  const ovenFs = Math.min(
+    64,
+    2 * Math.max(findMaxSignalFrequency(burnt), Math.ceil(ovenDefectHz(recipe.id))),
+  );
   const baked = d.oven
     ? applyOvenToDish(burnt, ovenFs, {
         lowGain: 1,

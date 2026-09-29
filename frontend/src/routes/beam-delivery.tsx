@@ -51,7 +51,7 @@ import {
   type SpectrumData,
 } from "@/lib/precision-oven-dsp";
 import { computeSignalSimilarity } from "@/lib/dsp";
-import { dishFundamental, servedDish } from "@/lib/delivery";
+import { dishFundamental, ovenDefectHz, servedDish } from "@/lib/delivery";
 import {
   recordStageAccuracy,
   syncSessionParamsToBackend,
@@ -130,7 +130,14 @@ function PrecisionOvenScreen() {
   // -------------------------------------------------------------
   // STAGE 1: SAMPLING & ALIASING
   // -------------------------------------------------------------
-  const trueFmax = useMemo(() => findMaxSignalFrequency(dishSamples), [dishSamples]);
+  // f_max holds 95 % of the energy, which can stop just below the burnt
+  // overtone; the oven only edits up to fs/2, so a rate that misses the
+  // overtone leaves the notch nothing to act on. Never go below it.
+  const defectHz = useMemo(() => Math.ceil(ovenDefectHz(recipe.id)), [recipe.id]);
+  const trueFmax = useMemo(
+    () => Math.max(findMaxSignalFrequency(dishSamples), defectHz),
+    [dishSamples, defectHz],
+  );
   const minSafeSamplingRate = useMemo(() => 2 * trueFmax, [trueFmax]);
 
   // Player sampling frequency slider (starts at an aliased low rate for discovery)
@@ -548,7 +555,7 @@ function PrecisionOvenScreen() {
                     Sampling Frequency (<span className="font-mono normal-case">fₛ</span>):
                   </label>
                   <p className="text-xs text-muted-foreground">
-                    Discrete samples per second across normalized 1-second interval (Nyquist limit =
+                    Discrete samples per second across normalized 1-second interval (Nyquist limit ={" "}
                     <span className="font-mono normal-case">fₛ / 2</span>)
                   </p>
                 </div>
@@ -1985,6 +1992,12 @@ function PrecisionOvenScreen() {
                       {notchHz} Hz
                     </span>
                   </div>
+                )}
+                {notchActive && notchHz > activeRate / 2 && (
+                  <p className="w-full font-mono text-[11px] font-bold text-amber-500">
+                    ⚠ The notch is above the oven&apos;s Nyquist limit (fₛ / 2 ={" "}
+                    {(activeRate / 2).toFixed(1)} Hz), so it cannot touch anything. Sample faster.
+                  </p>
                 )}
               </div>
             </div>

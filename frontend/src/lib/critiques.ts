@@ -144,22 +144,22 @@ export function generateCustomerCritique(metrics: DishMetrics): CustomerCritique
     });
   }
 
-  // 5. Beam Delivery Precision Diagnostic (if attempted)
+  // 5. Precision Oven diagnostic (if attempted)
   if (metrics.deliveryAccuracy !== null) {
     if (metrics.deliveryAccuracy >= 85) {
       diagnostics.push({
-        station: "Beam Delivery",
+        station: "Precision Oven",
         status: "pass",
-        culinaryNote: "Dish arrived piping hot directly at the center of the table!",
-        dspDiagnosis: `Phased array main lobe steered directly to target angle (${metrics.deliveryAccuracy}% directivity focus).`,
+        culinaryNote: "No trace of burning: the crust tastes exactly as intended!",
+        dspDiagnosis: `Sampled above Nyquist and notched the burnt overtone out (${metrics.deliveryAccuracy}% finish).`,
       });
     } else {
       diagnostics.push({
-        station: "Beam Delivery",
+        station: "Precision Oven",
         status: "warn",
-        culinaryNote: "Dish was slightly lukewarm due to acoustic dispersion.",
+        culinaryNote: "A faint burnt aftertaste came through.",
         dspDiagnosis:
-          "Array factor main lobe deviated from table angle; secondary sidelobes caused power dissipation.",
+          "Part of the burnt overtone survived: aim the notch on it, sample at fs ≥ 2·fmax, and keep the band sliders at 1.0.",
       });
     }
   }
