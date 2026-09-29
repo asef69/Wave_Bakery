@@ -1,2 +1,18 @@
+[project]
+name = "wavekitchen-api"
+version = "1.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "sqlalchemy>=2.0",
+    "pydantic>=2.6",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "httpx>=0.27",
+    "pytest>=8.0",
+    "psycopg2-binary>=2.9",
+]
+
 [tool.vercel]
 entrypoint = "app.main:app"
