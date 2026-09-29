@@ -4,7 +4,7 @@ import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 
 const gameButtonVariants = cva(
-  "inline-flex items-center justify-center gap-2 rounded-full font-display font-bold tracking-wide transition-all duration-200 outline-none focus-visible:ring-4 focus-visible:ring-ring/40 disabled:pointer-events-none disabled:opacity-50 active:translate-y-[2px]",
+  "inline-flex max-w-full items-center justify-center gap-2 rounded-full text-center leading-tight font-display font-bold tracking-wide transition-all duration-200 outline-none focus-visible:ring-4 focus-visible:ring-ring/40 disabled:pointer-events-none disabled:opacity-50 active:translate-y-[2px]",
   {
     variants: {
       variant: {
@@ -16,9 +16,9 @@ const gameButtonVariants = cva(
         ghost: "text-muted-foreground hover:text-foreground hover:bg-secondary",
       },
       size: {
-        sm: "h-10 px-5 text-sm",
-        md: "h-12 px-7 text-base",
-        lg: "h-16 px-12 text-xl",
+        sm: "min-h-10 px-5 py-1.5 text-sm",
+        md: "min-h-12 px-5 py-2 text-base sm:px-7",
+        lg: "min-h-14 px-7 py-2 text-lg sm:min-h-16 sm:px-12 sm:text-xl",
       },
     },
     defaultVariants: { variant: "primary", size: "md" },

@@ -224,7 +224,7 @@ export function WaveformDisplay({
       <div className="lab-grid absolute inset-0 opacity-40" aria-hidden />
       {label ? (
         <div className="relative z-10 flex items-center justify-between mb-2">
-          <span className="font-mono text-[10px] tracking-[0.2em] text-signal/70 uppercase truncate">
+          <span className="min-w-0 font-mono text-[10px] leading-relaxed tracking-[0.2em] text-signal/70 uppercase">
             {label}
           </span>
           {isCursorActive && (

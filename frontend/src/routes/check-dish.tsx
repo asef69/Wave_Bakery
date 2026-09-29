@@ -95,7 +95,7 @@ function CheckDishScreen() {
       <main className="relative min-h-screen bg-background">
         <TimeExpiredModal />
         <div className="lab-grid pointer-events-none absolute inset-0 opacity-[0.08]" aria-hidden />
-        <div className="relative z-10 mx-auto max-w-4xl px-8 py-16 text-center">
+        <div className="relative z-10 mx-auto max-w-4xl px-4 sm:px-8 py-16 text-center">
           <div className="kitchen-card p-10">
             <span className="text-4xl" aria-hidden>
               🔒
@@ -144,7 +144,7 @@ function CheckDishScreen() {
 
       <div className="lab-grid pointer-events-none absolute inset-0 opacity-[0.08]" aria-hidden />
 
-      <div className="relative z-10 mx-auto max-w-6xl px-8 py-10">
+      <div className="relative z-10 mx-auto max-w-6xl px-4 sm:px-8 py-10">
         {/* Navigation & Header */}
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border/60 pb-6">
           <div>

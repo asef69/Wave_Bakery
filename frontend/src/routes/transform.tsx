@@ -242,7 +242,7 @@ function SeasoningLab() {
     return (
       <main className="relative min-h-screen bg-background">
         <div className="lab-grid pointer-events-none absolute inset-0 opacity-[0.08]" aria-hidden />
-        <div className="relative z-10 mx-auto max-w-4xl px-8 py-16 text-center">
+        <div className="relative z-10 mx-auto max-w-4xl px-4 sm:px-8 py-16 text-center">
           <div className="kitchen-card p-10">
             <span className="text-4xl" aria-hidden>
               🔒
@@ -329,7 +329,7 @@ function SeasoningLab() {
           <div className="relative z-10 mt-5 rounded-2xl border border-signal/25 bg-[oklch(0.19_0.03_250)]/60 p-4 overflow-visible">
             <svg
               viewBox={`0 0 ${width} ${height}`}
-              className="relative z-10 h-[24rem] w-full overflow-visible"
+              className="relative z-10 h-auto w-full overflow-visible sm:h-[24rem]"
             >
               {/* grid */}
               {Array.from({ length: 11 }).map((_, i) => (
@@ -429,7 +429,7 @@ function SeasoningLab() {
                 />
               )}
             </svg>
-            <div className="mt-2 flex justify-between font-mono text-[9px] tracking-[0.2em] text-signal/50 uppercase">
+            <div className="mt-2 flex flex-wrap justify-between gap-x-4 gap-y-1 font-mono text-[9px] tracking-[0.2em] text-signal/50 uppercase">
               <span>amplitude ↕</span>
               <span>time → (unchanged · 0.00 s — 1.00 s)</span>
             </div>

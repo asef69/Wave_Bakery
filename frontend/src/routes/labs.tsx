@@ -1262,7 +1262,7 @@ function MixerSandbox({
                   <GameButton
                     size="sm"
                     variant="ghost"
-                    className="font-mono text-[9px] uppercase px-2 py-0.5 h-6"
+                    className="font-mono text-[9px] uppercase px-2 py-0.5 h-6 min-h-0"
                     onClick={() =>
                       onPlayAudio(`track-${idx}-${t.id}`, getTrackSamples(t), byId(t.id).freq)
                     }

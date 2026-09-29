@@ -50,7 +50,7 @@ function LoadingScreen() {
   const step = steps[Math.min(steps.length - 1, Math.floor(progress / (100 / steps.length)))];
 
   return (
-    <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-[image:var(--gradient-lab)] px-8">
+    <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-[image:var(--gradient-lab)] px-4 sm:px-8">
       <div className="lab-grid absolute inset-0 opacity-25" aria-hidden />
       <div
         className="absolute -top-40 left-1/2 h-[36rem] w-[36rem] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,var(--primary-glow),transparent_65%)] opacity-25 blur-2xl"
@@ -59,7 +59,7 @@ function LoadingScreen() {
 
       <div className="relative z-10 flex w-full max-w-3xl flex-col items-center gap-8 text-center">
         <div>
-          <h1 className="font-display text-6xl font-extrabold tracking-tight text-signal drop-shadow-[0_0_28px_rgba(80,220,240,0.4)]">
+          <h1 className="font-display text-5xl font-extrabold tracking-tight text-signal sm:text-6xl drop-shadow-[0_0_28px_rgba(80,220,240,0.4)]">
             WAVE<span className="text-gradient-warm">BAKERY</span>
           </h1>
           <p className="mt-2 font-mono text-xs tracking-[0.42em] text-lab-foreground/70 uppercase">

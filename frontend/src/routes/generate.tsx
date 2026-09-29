@@ -637,7 +637,7 @@ function GenerateScreen() {
             </div>
           ) : (
             <div className="lab-panel border border-signal/30 bg-card/60 p-5">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <p className="font-mono text-[10px] tracking-[0.24em] text-signal-alt uppercase">
                     Signal Delivery Status

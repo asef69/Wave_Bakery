@@ -174,7 +174,7 @@ function KitchenHub() {
         aria-hidden
       />
 
-      <div className="relative z-10 mx-auto max-w-7xl px-8 pt-6 pb-12">
+      <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-8 pt-6 pb-12">
         {/* ---------- HUD ---------- */}
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-2.5">

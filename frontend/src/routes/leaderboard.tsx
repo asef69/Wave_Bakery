@@ -311,12 +311,12 @@ function LeaderboardScreen() {
 
         {/* TOP TAB SWITCHER: RECIPE / GLOBAL / ANALYTICS */}
         <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex rounded-2xl border border-border bg-card/80 p-1.5 shadow-xs">
+          <div className="flex w-full rounded-2xl border border-border bg-card/80 p-1.5 shadow-xs sm:w-auto">
             <button
               type="button"
               onClick={() => setViewMode("recipe")}
               className={cn(
-                "flex items-center gap-2 rounded-xl px-4 py-2 font-display text-xs font-extrabold uppercase transition-all cursor-pointer",
+                "flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-center font-display text-[11px] font-extrabold uppercase leading-tight transition-all cursor-pointer sm:flex-none sm:gap-2 sm:px-4 sm:text-xs",
                 viewMode === "recipe"
                   ? "bg-primary text-primary-foreground shadow-xs"
                   : "text-muted-foreground hover:bg-secondary hover:text-foreground",
@@ -329,7 +329,7 @@ function LeaderboardScreen() {
               type="button"
               onClick={() => setViewMode("global")}
               className={cn(
-                "flex items-center gap-2 rounded-xl px-4 py-2 font-display text-xs font-extrabold uppercase transition-all cursor-pointer",
+                "flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-center font-display text-[11px] font-extrabold uppercase leading-tight transition-all cursor-pointer sm:flex-none sm:gap-2 sm:px-4 sm:text-xs",
                 viewMode === "global"
                   ? "bg-primary text-primary-foreground shadow-xs"
                   : "text-muted-foreground hover:bg-secondary hover:text-foreground",
@@ -342,7 +342,7 @@ function LeaderboardScreen() {
               type="button"
               onClick={() => setViewMode("analytics")}
               className={cn(
-                "flex items-center gap-2 rounded-xl px-4 py-2 font-display text-xs font-extrabold uppercase transition-all cursor-pointer",
+                "flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-center font-display text-[11px] font-extrabold uppercase leading-tight transition-all cursor-pointer sm:flex-none sm:gap-2 sm:px-4 sm:text-xs",
                 viewMode === "analytics"
                   ? "bg-primary text-primary-foreground shadow-xs"
                   : "text-muted-foreground hover:bg-secondary hover:text-foreground",
@@ -853,7 +853,7 @@ function LeaderboardScreen() {
         )}
 
         {/* BOTTOM NAVIGATION */}
-        <footer className="mt-8 flex items-center justify-between border-t border-border/80 pt-6">
+        <footer className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-border/80 pt-6">
           <Link to="/menu">
             <GameButton variant="secondary" size="lg" className="uppercase">
               ← Back to Main Menu

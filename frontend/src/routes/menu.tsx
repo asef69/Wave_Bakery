@@ -121,7 +121,7 @@ function MainMenu() {
         />
         <div className="lab-grid absolute inset-0 opacity-15" aria-hidden />
 
-        <div className="relative z-10 mx-auto grid min-h-screen max-w-7xl grid-cols-1 items-center gap-10 px-12 py-14 lg:grid-cols-[1.05fr_0.95fr]">
+        <div className="relative z-10 mx-auto grid min-h-screen max-w-7xl grid-cols-1 items-center gap-10 px-6 pt-24 pb-14 sm:px-12 sm:py-14 lg:grid-cols-[1.05fr_0.95fr]">
           <section>
             <div className="flex flex-wrap items-center gap-2.5">
               <span className="inline-flex items-center gap-2 rounded-full border border-signal/40 bg-lab/70 px-4 py-1.5 font-mono text-[11px] tracking-[0.28em] text-signal uppercase">
@@ -143,7 +143,7 @@ function MainMenu() {
               )}
             </div>
 
-            <h1 className="mt-6 font-display text-7xl leading-[0.95] font-extrabold tracking-tight text-signal drop-shadow-[0_0_36px_rgba(80,220,240,0.35)] xl:text-8xl">
+            <h1 className="mt-6 font-display text-[clamp(2.6rem,13.5vw,4.5rem)] sm:text-7xl leading-[0.95] font-extrabold tracking-tight text-signal drop-shadow-[0_0_36px_rgba(80,220,240,0.35)] xl:text-8xl">
               WAVE
               <span className="text-gradient-warm">BAKERY</span>
             </h1>

@@ -81,7 +81,7 @@ export function MiniWave({
     <div className={cn("lab-panel relative overflow-hidden px-3 py-2", className)}>
       <div className="lab-grid absolute inset-0 opacity-30" aria-hidden />
       {label ? (
-        <span className="relative z-10 font-mono text-[9px] tracking-[0.2em] text-signal/70 uppercase">
+        <span className="relative z-10 inline-block pl-1.5 font-mono text-[9px] tracking-[0.2em] text-signal/70 uppercase">
           {label}
         </span>
       ) : null}

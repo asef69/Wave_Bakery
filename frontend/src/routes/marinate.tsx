@@ -218,7 +218,7 @@ function MarinatingLab() {
     return (
       <main className="relative min-h-screen bg-background">
         <div className="lab-grid pointer-events-none absolute inset-0 opacity-[0.08]" aria-hidden />
-        <div className="relative z-10 mx-auto max-w-4xl px-8 py-16 text-center">
+        <div className="relative z-10 mx-auto max-w-4xl px-4 sm:px-8 py-16 text-center">
           <div className="kitchen-card p-10">
             <span className="text-4xl" aria-hidden>
               🔒
@@ -306,7 +306,7 @@ function MarinatingLab() {
           <div className="relative z-10 mt-5 rounded-2xl border border-signal/25 bg-[oklch(0.19_0.03_250)]/60 p-4">
             <svg
               viewBox={`0 0 ${width} ${height}`}
-              className="h-[300px] w-full"
+              className="h-[200px] w-full sm:h-[300px]"
               preserveAspectRatio="none"
             >
               {/* grid lines */}

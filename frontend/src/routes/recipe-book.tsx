@@ -59,7 +59,7 @@ function RecipeBook() {
     <main className="relative min-h-screen bg-background">
       <div className="lab-grid pointer-events-none absolute inset-0 opacity-[0.08]" aria-hidden />
 
-      <div className="relative z-10 mx-auto max-w-7xl px-8 py-8">
+      <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-8 py-8">
         <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border/60 pb-6">
           <div>
             <Link to="/kitchen-hub">

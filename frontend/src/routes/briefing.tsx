@@ -226,7 +226,7 @@ function RecipeMissionBriefing() {
             {/* Left Column: Target Waveform & Audio Profile */}
             <div className="space-y-6">
               <div className="kitchen-card p-6">
-                <div className="flex items-center justify-between border-b border-border/60 pb-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-3">
                   <div className="flex items-center gap-2">
                     <Target className="h-4 w-4 text-primary" />
                     <span className="font-display text-sm font-extrabold uppercase text-foreground">
@@ -276,7 +276,7 @@ function RecipeMissionBriefing() {
 
               {/* Required Ingredient Signals */}
               <div className="kitchen-card p-6">
-                <div className="flex items-center justify-between border-b border-border/60 pb-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-3">
                   <span className="font-display text-sm font-extrabold uppercase text-foreground">
                     Required Ingredient Spectra
                   </span>
@@ -322,7 +322,7 @@ function RecipeMissionBriefing() {
             <div className="space-y-6">
               {/* Pipeline Roadmap */}
               <div className="kitchen-card p-6">
-                <div className="flex items-center justify-between border-b border-border/60 pb-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-3">
                   <span className="font-display text-sm font-extrabold uppercase text-foreground">
                     Signal Assembly Line
                   </span>

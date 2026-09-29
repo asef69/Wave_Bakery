@@ -487,10 +487,11 @@ function PrecisionOvenScreen() {
         {/* CSE220 Technical Context Box */}
         <div className="rounded-xl border border-primary/30 bg-primary/5 px-5 py-3.5 text-xs font-mono text-muted-foreground shadow-sm">
           <span className="font-bold text-primary uppercase mr-2">CSE220 Technical Context:</span>
-          Cooking is modeled as convolution with the appliance&apos;s impulse response $(x ∗ h)(t)$.
-          The intense cooking process produces an unwanted cooking-induced spectral component. The
-          Precision Oven uses frequency-domain filtering $(H[k] \cdot X[k])$ and IFFT reconstruction
-          to suppress that component while preserving the rest of the dish.
+          Cooking is modeled as convolution with the appliance&apos;s impulse response{" "}
+          <span className="font-mono normal-case">(x ∗ h)(t)</span>. The intense cooking process
+          produces an unwanted cooking-induced spectral component. The Precision Oven uses
+          frequency-domain filtering <span className="font-mono normal-case">H[k] · X[k]</span> and
+          IFFT reconstruction to suppress that component while preserving the rest of the dish.
         </div>
 
         {/* ========================================================================= */}
@@ -505,7 +506,7 @@ function PrecisionOvenScreen() {
                   Stage 01 • Interactive Challenge
                 </p>
                 <h2 className="font-display text-2xl font-bold uppercase text-foreground">
-                  Find the Safe Sampling Rate ($f_s$)
+                  Find the Safe Sampling Rate (<span className="font-mono normal-case">fₛ</span>)
                 </h2>
                 <p className="text-sm text-muted-foreground">
                   To isolate and remove the overcooking artifact, the oven sensor must sample the
@@ -544,11 +545,11 @@ function PrecisionOvenScreen() {
                     htmlFor="sampling-rate-slider"
                     className="font-mono text-xs font-bold text-foreground uppercase"
                   >
-                    Sampling Frequency ($f_s$):
+                    Sampling Frequency (<span className="font-mono normal-case">fₛ</span>):
                   </label>
                   <p className="text-xs text-muted-foreground">
                     Discrete samples per second across normalized 1-second interval (Nyquist limit =
-                    $f_s / 2$)
+                    <span className="font-mono normal-case">fₛ / 2</span>)
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -582,7 +583,7 @@ function PrecisionOvenScreen() {
             <div className="grid gap-6 lg:grid-cols-2">
               {/* VIEW A: Time-Domain Sampling View */}
               <div className="kitchen-card border-2 border-border bg-card p-5">
-                <div className="flex items-center justify-between border-b border-border pb-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
                   <div className="flex items-center gap-2">
                     <Activity className="h-4 w-4 text-primary" />
                     <h3 className="font-display text-base font-bold uppercase text-foreground">
@@ -683,7 +684,7 @@ function PrecisionOvenScreen() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="h-2.5 w-2.5 rounded-full bg-sky-400 border border-sky-600" />
-                    <span>Sample Points ($N={aliasingData.samplePoints.length}$)</span>
+                    <span>Sample Points (N = {aliasingData.samplePoints.length})</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span
@@ -703,7 +704,7 @@ function PrecisionOvenScreen() {
 
               {/* VIEW B: Frequency-Domain FFT Aliasing View */}
               <div className="kitchen-card border-2 border-border bg-card p-5">
-                <div className="flex items-center justify-between border-b border-border pb-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
                   <div className="flex items-center gap-2">
                     <Sliders className="h-4 w-4 text-primary" />
                     <h3 className="font-display text-base font-bold uppercase text-foreground">
@@ -715,7 +716,7 @@ function PrecisionOvenScreen() {
                     <span className="font-bold text-primary">
                       {aliasingData.nyquistLimit.toFixed(1)} Hz
                     </span>{" "}
-                    ($f_s / 2$)
+                    (<span className="font-mono normal-case">fₛ / 2</span>)
                   </span>
                 </div>
 
@@ -768,12 +769,12 @@ function PrecisionOvenScreen() {
                   <p className="font-mono text-[11px] font-bold text-muted-foreground uppercase">
                     Dominant Harmonics & Spectral Folding:
                   </p>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
                     {aliasingData.foldedFrequencies.map((f, i) => (
                       <div
                         key={i}
                         className={cn(
-                          "flex items-center justify-between rounded-lg border p-1.5 font-mono text-[10px]",
+                          "flex flex-wrap items-center justify-between gap-x-2 rounded-lg border p-1.5 font-mono text-[10px]",
                           f.isFolded
                             ? "border-rose-500/40 bg-rose-500/10 text-rose-300"
                             : "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
@@ -830,7 +831,8 @@ function PrecisionOvenScreen() {
                 Unlock the Frequency Domain
               </h2>
               <p className="text-sm text-muted-foreground">
-                Enter the minimum safe sampling frequency ($f_s$) that you discovered avoids
+                Enter the minimum safe sampling frequency (
+                <span className="font-mono normal-case">fₛ</span>) that you discovered avoids
                 aliasing.
               </p>
             </div>
@@ -957,7 +959,7 @@ function PrecisionOvenScreen() {
             <div className="grid gap-6 lg:grid-cols-2">
               {/* TARGET SPECTRUM */}
               <div className="kitchen-card border-2 border-amber-500/40 bg-card p-5">
-                <div className="flex items-center justify-between border-b border-border pb-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
                   <div className="flex items-center gap-2">
                     <span className="h-3 w-3 rounded-full bg-amber-400" />
                     <h3 className="font-display text-base font-bold uppercase text-foreground">
@@ -1216,11 +1218,12 @@ function PrecisionOvenScreen() {
 
               {/* YOUR TUNED SPECTRUM */}
               <div className="kitchen-card border-2 border-cyan-500/40 bg-card p-5">
-                <div className="flex items-center justify-between border-b border-border pb-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
                   <div className="flex items-center gap-2">
                     <span className="h-3 w-3 rounded-full bg-cyan-400" />
                     <h3 className="font-display text-base font-bold uppercase text-foreground">
-                      Your Signal Spectrum ($X'[k] = H[k] \cdot X[k]$)
+                      Your Signal Spectrum (
+                      <span className="font-mono normal-case">X′[k] = H[k] · X[k]</span>)
                     </h3>
                   </div>
                   <span className="font-mono text-[11px] text-cyan-400 font-bold">
@@ -1650,7 +1653,8 @@ function PrecisionOvenScreen() {
                   <Sliders className="h-5 w-5 text-primary" />
                   <div>
                     <h3 className="font-display text-lg font-bold uppercase text-foreground">
-                      Thermal Frequency Equalizer ($H[k]$)
+                      Thermal Frequency Equalizer (
+                      <span className="font-mono normal-case">H[k]</span>)
                     </h3>
                     <p className="text-xs text-muted-foreground">
                       Each slider applies gain strictly within its frequency bounds.
@@ -2028,7 +2032,7 @@ function PrecisionOvenScreen() {
 
             {/* Reconstruction Oscilloscope with Live Playhead */}
             <div className="kitchen-card border-2 border-border bg-card p-5">
-              <div className="flex items-center justify-between border-b border-border pb-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
                 <div className="flex items-center gap-2">
                   <Activity className="h-4 w-4 text-primary" />
                   <h3 className="font-display text-base font-bold uppercase text-foreground">

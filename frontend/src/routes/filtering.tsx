@@ -895,7 +895,7 @@ function FilteringLab() {
     return (
       <main className="relative min-h-screen bg-background">
         <div className="lab-grid pointer-events-none absolute inset-0 opacity-[0.08]" aria-hidden />
-        <div className="relative z-10 mx-auto max-w-4xl px-8 py-16 text-center">
+        <div className="relative z-10 mx-auto max-w-4xl px-4 sm:px-8 py-16 text-center">
           <div className="kitchen-card p-10">
             <span className="text-4xl" aria-hidden>
               🔒
@@ -941,10 +941,10 @@ function FilteringLab() {
       />
 
       <TimeExpiredModal />
-      <div className="relative z-10 mx-auto max-w-[110rem] px-8 py-6">
+      <div className="relative z-10 mx-auto max-w-[110rem] px-4 sm:px-8 py-6">
         {/* TOP HUD */}
-        <header className="lab-panel flex flex-wrap items-center justify-between gap-6 px-6 py-4">
-          <div className="flex items-center gap-6">
+        <header className="lab-panel flex flex-wrap items-center justify-between gap-6 px-4 py-4 sm:px-6">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
             <Link to="/kitchen">
               <GameButton variant="secondary" size="sm">
                 ← Back to Kitchen

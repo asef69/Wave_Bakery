@@ -102,11 +102,11 @@ function CompleteScreen() {
   };
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center bg-background px-8 py-12">
+    <main className="relative flex min-h-screen items-center justify-center bg-background px-4 py-12 sm:px-8">
       <div className="lab-grid pointer-events-none absolute inset-0 opacity-[0.06]" aria-hidden />
-      <div className="kitchen-card relative z-10 w-full max-w-4xl p-10 text-center">
+      <div className="kitchen-card relative z-10 w-full max-w-4xl p-5 text-center sm:p-10">
         <p className="font-mono text-[10px] tracking-[0.3em] text-primary uppercase">Reward</p>
-        <h1 className="mt-2 font-display text-5xl font-extrabold tracking-tight text-gradient-warm uppercase">
+        <h1 className="mt-2 font-display text-3xl font-extrabold sm:text-5xl tracking-tight text-gradient-warm uppercase">
           RECIPE COMPLETE!
         </h1>
 
@@ -116,7 +116,7 @@ function CompleteScreen() {
             <p className="font-mono text-[10px] tracking-[0.22em] text-muted-foreground uppercase">
               Dish served
             </p>
-            <p className="font-display text-4xl font-extrabold text-foreground uppercase">
+            <p className="font-display text-3xl font-extrabold text-foreground uppercase sm:text-4xl">
               {recipe.name}
             </p>
             <p className="mt-3 font-display text-2xl font-extrabold text-foreground">
